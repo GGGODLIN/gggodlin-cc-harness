@@ -23,14 +23,12 @@ It is a reference, not a product. You can install single pieces, but nothing gua
 
 ## 從哪裡開始
 
-不打算整套裝的話，先看這幾樣：
-
-- `skills/gate-authoring/SKILL.md`：寫 hook 或 gate 之前要先回答的問題，例如要防的是健忘還是刻意繞過、判斷失敗時該放行還是擋下、怎麼測。
-- `rules/common/dispatch-and-verify.md`：主 session 什麼時候該派 subagent，以及宣稱「做完了」時要附什麼證據。
-- `friction/PROTOCOL.md` 與 `examples/trials/`：新機制先進觀察期，到期用真實紀錄決定留或撤；卡住或繞路的事件先記下，累積到門檻再處理。
-- `compact-guard/`：有完整程式、可以單獨安裝的工具，先讀 `compact-guard/README.md`。
-
-要裝單一元件，看 `install/` 裡對應的說明：第一行寫它解決什麼問題，接著是安裝、註冊、必要檔案與測試。
+| 你想做的事 | 先看 |
+|---|---|
+| 已經有自己的 Claude Code 設定，想讓 agent 守紀律 | `skills/gate-authoring/SKILL.md`、`rules/common/dispatch-and-verify.md`、`friction/PROTOCOL.md` 與 `examples/trials/` |
+| 想挑一個完整的工具來試 | `compact-guard/README.md`：有完整程式與測試，可以單獨安裝 |
+| 想研究 agent 治理、人工授權與出錯後怎麼恢復 | 下面的「設計原則」「已知風險」，以及 `rules/common/git-workflow.md` |
+| 想幾分鐘內裝好整套 | 目前做不到：路徑寫死、接線要自己補。單一元件看 `install/` |
 
 ## 設計原則
 
