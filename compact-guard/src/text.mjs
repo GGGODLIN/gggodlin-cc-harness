@@ -60,12 +60,17 @@ const CATEGORY_PATTERNS = {
 
 const sha256 = (text) => createHash("sha256").update(text).digest("hex");
 
+// 頭尾都留：assistant 長回覆常把結論放開頭、待拍板選項放結尾，只留開頭會讓「a」失去指涉。
+// 4:5 是起點，不是量測出的最佳比例；記號放中間並算進上限，避免兩段被讀成連續原文。
 const truncate = (text, limit) => {
   if (text.length <= limit) {
     return text;
   }
-  const contentLimit = Math.max(0, limit - TRUNCATION_MARKER.length);
-  return `${text.slice(0, contentLimit).trimEnd()}${TRUNCATION_MARKER}`;
+  const contentLimit = Math.max(0, limit - TRUNCATION_MARKER.length - 1);
+  const headLength = Math.floor(contentLimit * 4 / 9);
+  const head = text.slice(0, headLength).trimEnd();
+  const tail = text.slice(text.length - (contentLimit - headLength)).trimStart();
+  return `${head}${TRUNCATION_MARKER}\n${tail}`;
 };
 
 const categorize = (text) =>
@@ -90,7 +95,7 @@ const resolvePacketLimit = (options) =>
   Math.min(options?.packetLimit ?? options?.maxCharacters ?? MAX_PACKET_CHARACTERS, MAX_PACKET_CHARACTERS);
 
 const resolveExcerptLimit = (options) => Math.max(
-  TRUNCATION_MARKER.length,
+  TRUNCATION_MARKER.length + 1,
   options?.maxExcerptCharacters ?? options?.maxExcerptChars ?? DEFAULT_EXCERPT_CHARACTERS
 );
 
@@ -151,6 +156,20 @@ const renderEvidenceBlock = (entry) => [
   quote(entry.text)
 ].join("\n");
 
+// 「可以」「a」這類短答單獨留下時讀不出在回答什麼；把它緊接著回應的那則 assistant 一起優先保留。
+const SHORT_REPLY_CHARACTERS = 20;
+
+const questionAnsweredBy = (entries, reply) => {
+  if (!reply || reply.text.trim().length > SHORT_REPLY_CHARACTERS) {
+    return null;
+  }
+  const previous = highestBy(
+    entries.filter((entry) => entry.index < reply.index),
+    (entry) => entry.index
+  );
+  return previous?.role === "assistant" ? previous : null;
+};
+
 const prioritizeEvidence = (entries) => {
   const candidates = [];
   for (const role of ["user", "assistant"]) {
@@ -161,6 +180,10 @@ const prioritizeEvidence = (entries) => {
     if (latest) {
       candidates.push(latest);
     }
+  }
+  const question = questionAnsweredBy(entries, candidates.find((entry) => entry.role === "user"));
+  if (question) {
+    candidates.push(question);
   }
   candidates.push(...entries.toSorted((left, right) => score(right) - score(left)));
   return candidates;

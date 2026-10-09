@@ -82,11 +82,6 @@ const OBSERVABILITY = Object.freeze({
 //            PreToolUse 寫入 gate（GPT-6 Pro 審查：先偵測、抓到真回流再談攔截）；baseline 不整檔豁免。
 //            順帶對帳：meta.description 的「30 channel」與 OBSERVABILITY Scan maximum 29 在 codex-violation
 //            2026-09-15 退役後就少一個沒改，本次加回一個剛好各自對上實數，兩處維持原值不動。
-// 2026-10-09 加 publish-candidate weekly shell channel（公開 harness 每週發布候選，openspec publish-harness-governance 第 09 票）：
-//            匯出一律 --dry-run、與公開 repo HEAD 比對、第 3 關由模型審查；有差異時把候選放進報告 🔴 段並標「需要你決策，agent 不得代做」。
-//            wrapper 在 social-info 的 scripts/local-analysis/，heading 與 hooks/daily-local-analysis-trigger.sh 逐字依賴。
-//            可隨時手動提早跑 wrapper（同日重跑不會把候選蓋成無候選）。meta.description 的 channel 數與 Scan maximum 本次不動
-//            （CHANNELS 實際已 36 條，兩處早已與實數脫節，不在這張票範圍）。
 
 function coerceArgs(value) {
   let parsed = value
@@ -149,7 +144,6 @@ const CHANNELS = [
   { key: 'tool-reliability', freq: 'weekly-tue', kind: 'shell', src: `${W}/tool-reliability-weekly.sh`, outfile: `${OUT_DIR}/${DATE}-tool-reliability.md` },
   { key: 'skill-evidence', freq: 'weekly-tue', kind: 'shell', src: `${W}/skill-evidence-weekly.sh`, outfile: `${OUT_DIR}/${DATE}-skill-evidence.md` },
   { key: 'rules-size', freq: 'weekly-tue', kind: 'shell', src: `${W}/rules-size-weekly.sh`, outfile: `${OUT_DIR}/${DATE}-rules-size.md` },
-  { key: 'publish-candidate', freq: 'weekly-tue', kind: 'shell', src: `${W}/publish-candidate-weekly.sh`, outfile: `${OUT_DIR}/${DATE}-publish-candidate.md` },
   { key: 'skill-collision', freq: 'daily', kind: 'shell', src: `${W}/skill-collision-daily.sh`, outfile: `${OUT_DIR}/${DATE}-skill-collision.md` },
   { key: 'agnix', freq: 'daily', kind: 'shell', src: `${W}/agnix-daily.sh`, outfile: `${OUT_DIR}/${DATE}-agnix.md` },
   { key: 'skill-trigger', freq: 'weekly-tue', kind: 'shell', src: `${W}/skill-trigger-health-daily.sh`, outfile: `${OUT_DIR}/${DATE}-skill-trigger-health.md` },

@@ -53,7 +53,7 @@ It is a reference, not a product. You can install single pieces, but nothing gua
 - [`commands/`](commands/) — 58 個檔案；內含 `advisor.md`、`aside.md`、`aside.md.LICENSE`、`daily-local.md`、`docs.md`、`docs.md.LICENSE`、`git-closeout.md`、`goal-gen.md`…（共 33 項）
 - [`compact-guard/`](compact-guard/) — 23 個檔案；內含 `README.md`、`bin/`、`docs/`、`package.json`、`src/`、`test/`
 - [`config/`](config/) — 1 個檔案；內含 `gpt-models.env`
-- [`examples/`](examples/) — 7 個檔案；內含 `friction/`、`memory/`、`trials/`、`wiki/`
+- [`examples/`](examples/) — 8 個檔案；內含 `friction/`、`memory/`、`tool-upgrade-notes/`、`trials/`、`wiki/`
 - [`folder-level/`](folder-level/) — 15 個檔案；內含 `.claude/`、`CLAUDE.md`
 - [`friction/`](friction/) — 1 個檔案；內含 `PROTOCOL.md`
 - [`hooks/`](hooks/) — 113 個檔案；內含 `T1-claim-detect-local-first.llm.test.sh`、`T1-claim-detect-local-first.sh`、`T1-claim-detect-local-first.test.sh`、`T1-evidence-level-detect.sh`、`T1-evidence-level-detect.test.sh`、`T1-evidence-level-fixtures/`、`T1-evidence-level-prompt-v2.txt`、`T1-system-prompt-v5d.txt`…（共 109 項）
@@ -67,7 +67,7 @@ It is a reference, not a product. You can install single pieces, but nothing gua
 - [`settings.json`](settings.json)
 - [`skills/`](skills/) — 198 個檔案；內含 `INVENTORY.md`、`absorb-pack/`、`agent-authoring/`、`agent-dispatch/`、`align-intent/`、`auto-choice/`、`brainstorm/`、`caveman/`…（共 42 項）
 - [`social-info/`](social-info/) — 76 個檔案；內含 `scripts/`、`tests/`
-- [`workflows/`](workflows/) — 8 個檔案；內含 `best-of-n-implement.js`、`failure-mode-daily.sh`、`local-analysis.js`、`skill-changes-daily.sh`、`skillevaluator-weekly.sh`、`tests/`
+- [`workflows/`](workflows/) — 7 個檔案；內含 `best-of-n-implement.js`、`failure-mode-daily.sh`、`local-analysis.js`、`skill-changes-daily.sh`、`skillevaluator-weekly.sh`、`tests/`
 
 兩種記號：
 
@@ -116,6 +116,7 @@ It is a reference, not a product. You can install single pieces, but nothing gua
 - `social-info/scripts/local-analysis/recap-daily.sh`：內嵌的分析提示要 agent 用 `xargs -I{} sh -c 'cd {} && pwd -P'` 掃描各個 repo 目錄。目錄名稱會被直接拼進 shell 指令；掃描範圍內如果有名稱含 `$()` 或反引號的資料夾，就會執行其中的指令。只在你信任的目錄樹上跑。
 - `social-info/scripts/local-analysis/agnix-daily.sh`：以 `npm_config_ignore_scripts=false npx -y "agnix@$AGNIX_VERSION"` 執行，會蓋掉你自己設定的 `ignore-scripts`，讓該套件的安裝腳本照跑。如果你刻意關掉 npm 的安裝腳本，這支排程會繞過那個保護。
 - `social-info/scripts/local-analysis/skill-trigger-health.py`：讀登記檔失敗（檔案讀不到或 JSON 壞掉）時當成空登記檔處理，接著把結果寫回原路徑。你手動標過 `decided: true` 的項目會因此被重設。跑之前先備份登記檔。
+- `social-info/scripts/local-analysis/rules-size-weekly.sh`：「零使用規則候選」那一段要呼叫同目錄的 `session-audit.py`，這支沒有公開。少了它，週報只會多一行「零使用清單產生失敗」，其他段落照常產生；要這段功能就得自己接一支輸出同樣格式的程式。
 
 ## 姿態
 

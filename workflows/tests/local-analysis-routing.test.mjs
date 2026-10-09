@@ -45,7 +45,6 @@ const WEEKLY_CHANNELS = [
   'tool-reliability',
   'skill-evidence',
   'rules-size',
-  'publish-candidate',
   'skill-trigger',
   'skillevaluator',
   'beads-aging',

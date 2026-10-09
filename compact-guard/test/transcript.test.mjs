@@ -172,6 +172,45 @@ test("Claude excludes a whole user array when it contains a tool result", async 
   ]);
 });
 
+test("Claude excludes system-originated user records such as background task notifications", async () => {
+  const transcriptPath = await temporaryTranscript("claude-system-origin", [
+    {
+      type: "user",
+      uuid: "claude-typed-user",
+      timestamp: "2026-07-16T02:13:00.000Z",
+      promptSource: "typed",
+      turnOrigin: "human",
+      message: { role: "user", content: "Why does <task-notification> keep appearing?" }
+    },
+    {
+      type: "user",
+      uuid: "claude-task-notification",
+      timestamp: "2026-07-16T02:14:00.000Z",
+      promptSource: "system",
+      turnOrigin: "task_notification",
+      message: { role: "user", content: "<task-notification>\n<status>completed</status>\n</task-notification>" }
+    },
+    {
+      type: "user",
+      uuid: "claude-system-source-only",
+      timestamp: "2026-07-16T02:15:00.000Z",
+      promptSource: "system",
+      message: { role: "user", content: "<task-notification>\n<status>failed</status>\n</task-notification>" }
+    },
+    {
+      type: "user",
+      uuid: "claude-notification-origin-only",
+      timestamp: "2026-07-16T02:16:00.000Z",
+      turnOrigin: "task_notification",
+      message: { role: "user", content: "This session is being continued from a previous conversation." }
+    }
+  ]);
+
+  const result = await extractMessages({ vendor: "claude", transcriptPath });
+
+  assert.deepEqual(result.messages.map(({ id }) => id), ["claude-typed-user"]);
+});
+
 test("malformed records are counted and a transcript without messages rejects", async () => {
   const transcriptPath = join(tmpdir(), `compact-guard-empty-${process.pid}.jsonl`);
   await writeFile(

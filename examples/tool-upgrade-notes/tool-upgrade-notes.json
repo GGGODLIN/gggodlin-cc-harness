@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "tools": {
+    "example-cli": {
+      "aliases": ["example-cli"],
+      "mode": "nudge",
+      "report_note": "Read the changelog before upgrading; the config format changed in the last major release."
+    }
+  }
+}

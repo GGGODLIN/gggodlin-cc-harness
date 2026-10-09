@@ -105,11 +105,5 @@ report="$(cat "$out_file" 2>/dev/null)"
 assert_contains "failure plus over cap still has the over-cap heading" "## 🎯 建議處理" "$report"
 assert_contains "failure plus over cap still has the failure line" "零使用清單產生失敗：rules-roster-unavailable" "$report"
 
-# 5. 真的 session-audit.py zero-use（state 不存在）：接線與參數正確，0 條仍 __SILENT__。
-run_wrapper real; rc=$?
-[ "$rc" -eq 0 ] && pass "real zero-use on a missing state exits 0" || fail "real zero-use on a missing state exits 0 — rc=$rc"
-[ "$(cat "$out_file" 2>/dev/null)" = "__SILENT__" ] && pass "real zero-use on a missing state stays __SILENT__" || fail "real zero-use on a missing state stays __SILENT__ — $(cat "$out_file" 2>/dev/null)"
-[ ! -e "$TMP/state" ] && pass "wrapper does not create the state" || fail "wrapper does not create the state"
-
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

@@ -1,6 +1,7 @@
 模型在有未處理錯誤時仍宣稱「完成了」；這支 hook 在回合結束時偵測這種宣稱並提醒補證據。
 
 **安裝**：把 `hooks/T1-claim-detect-local-first.sh` 複製到 `~/.claude/hooks/T1-claim-detect-local-first.sh`，保留執行權限。
+同時把 `hooks/T1-system-prompt-v7.txt` 複製到同一個資料夾；少了它，模型判斷那一層會直接跳過（原因寫在 hook 的 warn log），只剩不呼叫模型的提醒還在運作。
 
 **註冊**：在 `~/.claude/settings.json` 的 `hooks` 加入下列項目（與公開版 `settings.json` 相同）：
 - `Stop`：`~/.claude/hooks/fable-gate.sh ~/.claude/hooks/T1-claim-detect-local-first.sh`

@@ -76,10 +76,14 @@ const textBlocks = (content, type) =>
         .map((block) => block.text)
     : [];
 
+// 背景任務完成通知以 user role 寫進 transcript；不排除會被當成使用者發言放進恢復內容。
+// 只認來源欄位、不看文字開頭，使用者自己打出標籤字樣時才不會被誤刪。
 const claudeRecordIsExcluded = (record) =>
   record.isSidechain === true ||
   record.isMeta === true ||
   record.isCompactSummary === true ||
+  (record.type === "user" &&
+    (record.promptSource === "system" || record.turnOrigin === "task_notification")) ||
   record.sourceToolUseID != null ||
   record.sourceToolAssistantUUID != null ||
   record.toolUseResult != null;
