@@ -21,6 +21,17 @@ It is a reference, not a product. You can install single pieces, but nothing gua
 
 不包含：個人客製化（statusline、個人工具串接、部落格產線、帳號與瀏覽器的具體接法）、公司相關的治理、能力型 skill（畫圖、簡報之類），以及 memory、wiki、trial、摩擦紀錄的實際內容。
 
+## 從哪裡開始
+
+不打算整套裝的話，先看這幾樣：
+
+- `skills/gate-authoring/SKILL.md`：寫 hook 或 gate 之前要先回答的問題，例如要防的是健忘還是刻意繞過、判斷失敗時該放行還是擋下、怎麼測。
+- `rules/common/dispatch-and-verify.md`：主 session 什麼時候該派 subagent，以及宣稱「做完了」時要附什麼證據。
+- `friction/PROTOCOL.md` 與 `examples/trials/`：新機制先進觀察期，到期用真實紀錄決定留或撤；卡住或繞路的事件先記下，累積到門檻再處理。
+- `compact-guard/`：有完整程式、可以單獨安裝的工具，先讀 `compact-guard/README.md`。
+
+要裝單一元件，看 `install/` 裡對應的說明：第一行寫它解決什麼問題，接著是安裝、註冊、必要檔案與測試。
+
 ## 設計原則
 
 - **決策歸使用者，觸發歸機制。** 該不該做由人拍板；什麼時候提醒、什麼時候擋下，交給 hook 與排程，不靠模型記得。
@@ -31,48 +42,43 @@ It is a reference, not a product. You can install single pieces, but nothing gua
 
 這些原則是大部分規則的「為什麼」，所以規則本身不逐條補理由。
 
-## 怎麼讀
+## 採用前要知道的
+
+- 不保證整套能跑：裡面的路徑、工具與排程是照原作者的機器寫的，被拿掉的接線要自己接。
+- issue 歡迎開，但不保證回應或修正。
+- 不收 pull request。公開版每次發布都由私人版整份重建，直接改這裡的檔案會在下次匯出時被蓋掉；想貢獻改法，請開 issue 描述。
+- 授權：自寫內容用 MIT（見 `LICENSE`）；來自上游的檔案保留原授權與署名，列在 `THIRD_PARTY_NOTICES.md`。`skills/mutation-testing` 含 Business Source License 1.1 的內容，不屬 MIT。
+
+## 已知風險：照抄前先讀
+
+下面幾個檔案在原作者的環境裡這樣運作，換到別人的機器上可能出事。照用之前先讀過原檔。
+
+- `commands/pr-review.md`：審查時暫時改 `~/.codex/config.toml`，用固定名稱的 `.pr-review-bak` 備份，結束時整份還原。中途被打斷，或之後又跑一次，這段期間你自己加進該設定檔的內容會被舊備份蓋掉。
+- `commands/pr-review.md`：用 `git worktree remove --force` 移除審查用的 worktree，建立新的之前也會先移除。那個 worktree 裡尚未 commit 或未追蹤的檔案會一併刪掉。
+- `commands/pr-review.md`：變更含 JSX／TSX 時，在審查席位確認之前就先跑 `npx -y react-doctor@latest`。就算你沒選那個角度，也會下載並執行第三方套件。
+- `skills/model-onboard/references/regress-gate.md`：用前後各一次 `ls -A ~` 的差異判斷「家目錄多出的新檔」並清掉。這段期間別人（或別的程式）在家目錄建立的檔案，可能被一起刪掉。
+- `commands/self-closeout.md`：靠資料夾位置判斷是公司 repo 還是個人 repo，位置規則是照原作者的目錄配置寫的；個人 repo 會自動 commit 並 push，push 被拒時還會合併後重試。目錄配置不同的人，可能把公司 repo 推出去。
+- `commands/session-monitor.md`：用 `pkill -f session-limit-watch.sh` 停掉監看程序，同一台機器上其他 session 的監看程序也會一起被殺。
+- `commands/workflow-monitor.md`：同一個 runId 暫停兩次時，journal 與 transcript 的 GOLDEN 備份可能來自不同次暫停；失敗還原時會把較新的 journal 配上較舊的 transcript。
+- `skills/check-my-stack/SKILL.md`：把「有安裝指令、也有本機輸入」的工具判成 `Runnable now`，並照指示直接安裝、執行（先做安裝前快照），沒有另外徵求同意。評估一個工具的過程可能因此執行第三方程式。
+- `social-info/scripts/local-analysis/recap-daily.sh`：內嵌的分析提示要 agent 用 `xargs -I{} sh -c 'cd {} && pwd -P'` 掃描各個 repo 目錄。目錄名稱會被直接拼進 shell 指令；掃描範圍內如果有名稱含 `$()` 或反引號的資料夾，就會執行其中的指令。只在你信任的目錄樹上跑。
+- `social-info/scripts/local-analysis/agnix-daily.sh`：以 `npm_config_ignore_scripts=false npx -y "agnix@$AGNIX_VERSION"` 執行，會蓋掉你自己設定的 `ignore-scripts`，讓該套件的安裝腳本照跑。如果你刻意關掉 npm 的安裝腳本，這支排程會繞過那個保護。
+- `social-info/scripts/local-analysis/skill-trigger-health.py`：讀登記檔失敗（檔案讀不到或 JSON 壞掉）時當成空登記檔處理，接著把結果寫回原路徑。你手動標過 `decided: true` 的項目會因此被重設。跑之前先備份登記檔。
+- `social-info/scripts/local-analysis/rules-size-weekly.sh`：「零使用規則候選」那一段要呼叫同目錄的 `session-audit.py`，這支沒有公開。少了它，週報只會多一行「零使用清單產生失敗」，其他段落照常產生；要這段功能就得自己接一支輸出同樣格式的程式。
+
+## 目錄怎麼對應
 
 目錄的排法對應原作者的 `~/.claude`：`hooks/`、`rules/`、`skills/` 等目錄放進 `~/.claude` 底下就是原本的位置，`settings.json` 裡的 hook 指令也照這個位置寫。例外：
 
 - `folder-level/` 是放在「專案資料夾根目錄」那一層的設定（原作者的是 `~/Desktop/projects/`），trial 帳本與摩擦機制的 hook 在這裡。
 - `social-info/` 與 `cc-skill-doctor/` 是 daily-local 的程式；原作者把它們放在 `~/code/social-info` 與 `~/Desktop/projects/cc-skill-doctor`，程式裡的路徑照那樣寫，換位置時要一起改。
 - `compact-guard/` 照 `~/.claude/compact-guard` 的位置寫進 hook 註冊。
-- `install/` 是各機制的安裝說明，第一行寫它解決什麼問題。
+- `install/` 是各機制的安裝說明。
 - `examples/` 是 memory、wiki、trial 帳本、摩擦紀錄的虛構範例，只示範格式。
 
-目錄導覽：
+## 被拿掉的接線（🔌）
 
-- [`CLAUDE.md`](CLAUDE.md)
-- [`LICENSE`](LICENSE)
-- [`README.md`](README.md)
-- [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)
-- [`WIRING.md`](WIRING.md)
-- [`agents/`](agents/) — 33 個檔案；內含 `advisor-seat.md`、`architecture-critic.md`、`architecture-critic.md.LICENSE`、`code-reviewer.md`、`code-reviewer.md.LICENSE`、`deep-explore.md`、`docs-lookup.md`、`docs-lookup.md.LICENSE`…（共 30 項）
-- [`cc-skill-doctor/`](cc-skill-doctor/) — 2 個檔案；內含 `scripts/`
-- [`commands/`](commands/) — 58 個檔案；內含 `advisor.md`、`aside.md`、`aside.md.LICENSE`、`daily-local.md`、`docs.md`、`docs.md.LICENSE`、`git-closeout.md`、`goal-gen.md`…（共 33 項）
-- [`compact-guard/`](compact-guard/) — 23 個檔案；內含 `README.md`、`bin/`、`docs/`、`package.json`、`src/`、`test/`
-- [`config/`](config/) — 1 個檔案；內含 `gpt-models.env`
-- [`examples/`](examples/) — 8 個檔案；內含 `friction/`、`memory/`、`tool-upgrade-notes/`、`trials/`、`wiki/`
-- [`folder-level/`](folder-level/) — 15 個檔案；內含 `.claude/`、`CLAUDE.md`
-- [`friction/`](friction/) — 1 個檔案；內含 `PROTOCOL.md`
-- [`hooks/`](hooks/) — 113 個檔案；內含 `T1-claim-detect-local-first.llm.test.sh`、`T1-claim-detect-local-first.sh`、`T1-claim-detect-local-first.test.sh`、`T1-evidence-level-detect.sh`、`T1-evidence-level-detect.test.sh`、`T1-evidence-level-fixtures/`、`T1-evidence-level-prompt-v2.txt`、`T1-system-prompt-v5d.txt`…（共 109 項）
-- [`install/`](install/) — 45 個檔案；內含 `compact-guard/`、`folder-level/`、`hooks/`、`output-styles/`、`workflows/`
-- [`model-routing.env`](model-routing.env)
-- [`openspec/`](openspec/) — 3 個檔案；內含 `specs/`
-- [`output-styles/`](output-styles/) — 1 個檔案；內含 `Explanatory.md`
-- [`references/`](references/) — 14 個檔案；內含 `claim-evidence-examples.md`、`dispatch-and-verify-examples.md`、`effort-controls.md`、`harness-model-sensitivity.md`、`ledger-lifecycle.md`、`perspective-sub-scout.md`、`perspective-sub-scout.md.LICENSE`、`severity-calibration.md`…（共 14 項）
-- [`rules/`](rules/) — 14 個檔案；內含 `common/`、`typescript/`
-- [`scripts/`](scripts/) — 100 個檔案；內含 `advisor-extract-context.py`、`agent-contract-command/`、`agent-contract-validator.definition.test.sh`、`agent-contract-validator.diagnostics.test.sh`、`agent-contract-validator.frontmatter.test.sh`、`agent-contract-validator.mcp-tools.test.sh`、`agent-contract-validator.mjs`、`agent-contract-validator.name.test.sh`…（共 86 項）
-- [`settings.json`](settings.json)
-- [`skills/`](skills/) — 198 個檔案；內含 `INVENTORY.md`、`absorb-pack/`、`agent-authoring/`、`agent-dispatch/`、`align-intent/`、`auto-choice/`、`brainstorm/`、`caveman/`…（共 42 項）
-- [`social-info/`](social-info/) — 76 個檔案；內含 `scripts/`、`tests/`
-- [`workflows/`](workflows/) — 7 個檔案；內含 `best-of-n-implement.js`、`failure-mode-daily.sh`、`local-analysis.js`、`skill-changes-daily.sh`、`skillevaluator-weekly.sh`、`tests/`
-
-兩種記號：
-
-- 🔧：規則在原環境另有 hook 機械補強，只抄文字時模型比較容易忽略。公開版沒有逐條加這個記號；對應的 hook 直接放在 `hooks/`，註冊在 `settings.json`。
-- 🔌：原作者的私人接線在這裡被拿掉了。文件裡會留一整行以「🔌 接線點」開頭、指向 WIRING.md 的記號；程式裡被拿掉的呼叫換成替身，一執行就在 stderr 報出接線點名稱並以非零狀態結束，不會默默略過。要用那個功能，請照 `WIRING.md` 自己接。
+原作者的私人接線在這些地方被拿掉了。文件裡會留一整行以「🔌 接線點」開頭、指向 WIRING.md 的記號；程式裡被拿掉的呼叫換成替身，一執行就在 stderr 報出接線點名稱並以非零狀態結束，不會默默略過。要用那個功能，請照 `WIRING.md` 自己接。
 
 `WIRING.md` 列出每個接線點用到的元件、需要你提供的介面，以及原作者用的工具。標「僅定義介面」的是灰色路徑（要靠登入 cookie、網頁版內部介面、非官方鏡像或第三方轉接才拿得到的端點），只寫介面，不推薦工具。這次的接線點：
 
@@ -101,27 +107,30 @@ It is a reference, not a product. You can install single pieces, but nothing gua
 - 讀「目前帳號」的程式要先看 `CLAUDE_CONFIG_DIR` 底下的 `.claude.json`，再退回 `$HOME`，否則會讀到別的帳號（見 `WIRING.md` 的多帳號與帳號判定）。
 - 用 symlink 共用 `.git` 時，git 收尾要用 canonical 路徑判斷 repo，避免同一個 repo 被當成好幾個。
 
-## 已知風險：照抄前先讀
+## 完整目錄
 
-下面幾個檔案在原作者的環境裡這樣運作，換到別人的機器上可能出事。照用之前先讀過原檔。
-
-- `commands/pr-review.md`：審查時暫時改 `~/.codex/config.toml`，用固定名稱的 `.pr-review-bak` 備份，結束時整份還原。中途被打斷，或之後又跑一次，這段期間你自己加進該設定檔的內容會被舊備份蓋掉。
-- `commands/pr-review.md`：用 `git worktree remove --force` 移除審查用的 worktree，建立新的之前也會先移除。那個 worktree 裡尚未 commit 或未追蹤的檔案會一併刪掉。
-- `commands/pr-review.md`：變更含 JSX／TSX 時，在審查席位確認之前就先跑 `npx -y react-doctor@latest`。就算你沒選那個角度，也會下載並執行第三方套件。
-- `skills/model-onboard/references/regress-gate.md`：用前後各一次 `ls -A ~` 的差異判斷「家目錄多出的新檔」並清掉。這段期間別人（或別的程式）在家目錄建立的檔案，可能被一起刪掉。
-- `commands/self-closeout.md`：靠資料夾位置判斷是公司 repo 還是個人 repo，位置規則是照原作者的目錄配置寫的；個人 repo 會自動 commit 並 push，push 被拒時還會合併後重試。目錄配置不同的人，可能把公司 repo 推出去。
-- `commands/session-monitor.md`：用 `pkill -f session-limit-watch.sh` 停掉監看程序，同一台機器上其他 session 的監看程序也會一起被殺。
-- `commands/workflow-monitor.md`：同一個 runId 暫停兩次時，journal 與 transcript 的 GOLDEN 備份可能來自不同次暫停；失敗還原時會把較新的 journal 配上較舊的 transcript。
-- `skills/check-my-stack/SKILL.md`：把「有安裝指令、也有本機輸入」的工具判成 `Runnable now`，並照指示直接安裝、執行（先做安裝前快照），沒有另外徵求同意。評估一個工具的過程可能因此執行第三方程式。
-- `social-info/scripts/local-analysis/recap-daily.sh`：內嵌的分析提示要 agent 用 `xargs -I{} sh -c 'cd {} && pwd -P'` 掃描各個 repo 目錄。目錄名稱會被直接拼進 shell 指令；掃描範圍內如果有名稱含 `$()` 或反引號的資料夾，就會執行其中的指令。只在你信任的目錄樹上跑。
-- `social-info/scripts/local-analysis/agnix-daily.sh`：以 `npm_config_ignore_scripts=false npx -y "agnix@$AGNIX_VERSION"` 執行，會蓋掉你自己設定的 `ignore-scripts`，讓該套件的安裝腳本照跑。如果你刻意關掉 npm 的安裝腳本，這支排程會繞過那個保護。
-- `social-info/scripts/local-analysis/skill-trigger-health.py`：讀登記檔失敗（檔案讀不到或 JSON 壞掉）時當成空登記檔處理，接著把結果寫回原路徑。你手動標過 `decided: true` 的項目會因此被重設。跑之前先備份登記檔。
-- `social-info/scripts/local-analysis/rules-size-weekly.sh`：「零使用規則候選」那一段要呼叫同目錄的 `session-audit.py`，這支沒有公開。少了它，週報只會多一行「零使用清單產生失敗」，其他段落照常產生；要這段功能就得自己接一支輸出同樣格式的程式。
-
-## 姿態
-
-- 以參考為主。可以只挑一個 hook 或 skill 裝，照 `install/` 的說明做。
-- 不保證整套能跑：裡面的路徑、工具與排程是照原作者的機器寫的，被拿掉的接線要自己接。
-- issue 歡迎開，但不保證回應或修正。
-- 不收 pull request。公開版每次發布都由私人版整份重建，直接改這裡的檔案會在下次匯出時被蓋掉；想貢獻改法，請開 issue 描述。
-- 授權：自寫內容用 MIT（見 `LICENSE`）；來自上游的檔案保留原授權與署名，列在 `THIRD_PARTY_NOTICES.md`。`skills/mutation-testing` 含 Business Source License 1.1 的內容，不屬 MIT。
+- [`CLAUDE.md`](CLAUDE.md)
+- [`LICENSE`](LICENSE)
+- [`README.md`](README.md)
+- [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)
+- [`WIRING.md`](WIRING.md)
+- [`agents/`](agents/) — 33 個檔案；內含 `advisor-seat.md`、`architecture-critic.md`、`architecture-critic.md.LICENSE`、`code-reviewer.md`、`code-reviewer.md.LICENSE`、`deep-explore.md`、`docs-lookup.md`、`docs-lookup.md.LICENSE`…（共 30 項）
+- [`cc-skill-doctor/`](cc-skill-doctor/) — 2 個檔案；內含 `scripts/`
+- [`commands/`](commands/) — 58 個檔案；內含 `advisor.md`、`aside.md`、`aside.md.LICENSE`、`daily-local.md`、`docs.md`、`docs.md.LICENSE`、`git-closeout.md`、`goal-gen.md`…（共 33 項）
+- [`compact-guard/`](compact-guard/) — 23 個檔案；內含 `README.md`、`bin/`、`docs/`、`package.json`、`src/`、`test/`
+- [`config/`](config/) — 1 個檔案；內含 `gpt-models.env`
+- [`examples/`](examples/) — 8 個檔案；內含 `friction/`、`memory/`、`tool-upgrade-notes/`、`trials/`、`wiki/`
+- [`folder-level/`](folder-level/) — 15 個檔案；內含 `.claude/`、`CLAUDE.md`
+- [`friction/`](friction/) — 1 個檔案；內含 `PROTOCOL.md`
+- [`hooks/`](hooks/) — 113 個檔案；內含 `T1-claim-detect-local-first.llm.test.sh`、`T1-claim-detect-local-first.sh`、`T1-claim-detect-local-first.test.sh`、`T1-evidence-level-detect.sh`、`T1-evidence-level-detect.test.sh`、`T1-evidence-level-fixtures/`、`T1-evidence-level-prompt-v2.txt`、`T1-system-prompt-v5d.txt`…（共 109 項）
+- [`install/`](install/) — 45 個檔案；內含 `compact-guard/`、`folder-level/`、`hooks/`、`output-styles/`、`workflows/`
+- [`model-routing.env`](model-routing.env)
+- [`openspec/`](openspec/) — 3 個檔案；內含 `specs/`
+- [`output-styles/`](output-styles/) — 1 個檔案；內含 `Explanatory.md`
+- [`references/`](references/) — 14 個檔案；內含 `claim-evidence-examples.md`、`dispatch-and-verify-examples.md`、`effort-controls.md`、`harness-model-sensitivity.md`、`ledger-lifecycle.md`、`perspective-sub-scout.md`、`perspective-sub-scout.md.LICENSE`、`severity-calibration.md`…（共 14 項）
+- [`rules/`](rules/) — 14 個檔案；內含 `common/`、`typescript/`
+- [`scripts/`](scripts/) — 100 個檔案；內含 `advisor-extract-context.py`、`agent-contract-command/`、`agent-contract-validator.definition.test.sh`、`agent-contract-validator.diagnostics.test.sh`、`agent-contract-validator.frontmatter.test.sh`、`agent-contract-validator.mcp-tools.test.sh`、`agent-contract-validator.mjs`、`agent-contract-validator.name.test.sh`…（共 86 項）
+- [`settings.json`](settings.json)
+- [`skills/`](skills/) — 198 個檔案；內含 `INVENTORY.md`、`absorb-pack/`、`agent-authoring/`、`agent-dispatch/`、`align-intent/`、`auto-choice/`、`brainstorm/`、`caveman/`…（共 42 項）
+- [`social-info/`](social-info/) — 76 個檔案；內含 `scripts/`、`tests/`
+- [`workflows/`](workflows/) — 7 個檔案；內含 `best-of-n-implement.js`、`failure-mode-daily.sh`、`local-analysis.js`、`skill-changes-daily.sh`、`skillevaluator-weekly.sh`、`tests/`
