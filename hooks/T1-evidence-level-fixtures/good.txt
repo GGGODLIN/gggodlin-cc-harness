@@ -1,0 +1,18 @@
+## 驗證 trace
+
+| 宣告 | 證據 | 結果 |
+|---|---|---|
+| digest 落地 | `ls -la digest-2026-06-27.html` | 71886 bytes ✅ |
+| 10 sections | `grep -c "^<section"` | **10** ✅ |
+| 6 主軸 section.theme | `grep -c 'section class="theme"'` | **6**（8 主軸 - Anthropic 拆獨立段 - OSS 拆 repo 表）✅ |
+| h2 標題實列 | `grep -oE '<h2>[^<]+'` | 10 段全列出（Anthropic / 6 主軸 / weekly / repo / system）✅ |
+| JSON 來源 8 主軸 | `jq '.result.themes\|length'` | **8** ✅ |
+| PROBES baseline 寫回 v2.1.195 | `grep` PROBES.md | `v2.1.195 (2026-06-26T21:29:42Z)` ✅ |
+| workflow 135 agents / 6.14M tokens / 401 tool calls | `jq '.agentCount, .totalTokens, .totalToolCalls'` | **135 / 6140241 / 401** ✅ |
+| watch 已收 | `pgrep workflow-limit-watch` | 無 match ✅ |
+| state file 已清 | `ls workflow-monitor-state-*.json` | no matches ✅ |
+
+**未驗證部分（誠實標出）**：
+- **「5 強訊號 / 8 主軸熱度」是 JSON 主軸 title + summary 的個人化重述**，未獨立 cross-check 各 URL 內文是否準確（fact_check 由 workflow 內 verify phase 跑、parallel_b_misaligned=0、但 main session 寫 digest 時的「個人化評論 / [[wiki]] 對位」未再 verify）
+- **wiki [[bracket]] reference** 是憑記憶寫入、未對 `~/.claude/memory/` 跟 `~/.claude/wiki/` cross-check 對應 entity 是否仍存在 — 如要嚴格驗證需 grep 每個 [[name]] 對應檔
+- **某篇產業新聞報導** 我未實際讀全文、只引用 raw md + theme summary 內文，使用者可直接從原文校準

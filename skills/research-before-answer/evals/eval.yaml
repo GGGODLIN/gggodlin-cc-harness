@@ -1,0 +1,38 @@
+schema_version: v1alpha1
+environment:
+  type: none
+engine:
+  name: claude_code
+  model:
+    provider: anthropic
+    name: claude-sonnet-4-6
+cases:
+  files:
+  - evals/cases/version-question-must-research.yaml
+  - evals/cases/low-confidence-mark-must-survive.yaml
+  - evals/cases/identity-merge-needs-version-id.yaml
+  - evals/cases/decision-table-rationale-needs-row-source.yaml
+  - evals/cases/proxy-metric-cannot-decide-target.yaml
+  - evals/cases/unsupported-alternative-rationale-cannot-decide.yaml
+  - evals/cases/feature-check-cc-builtin-advisor.yaml
+  - evals/cases/limit-change-claude-5h.yaml
+  - evals/cases/pricing-delta-deepseek.yaml
+  - evals/cases/pricing-tiers-supergrok.yaml
+  - evals/cases/release-check-gemini-37-flash.yaml
+  - evals/cases/release-check-gpt6-sol-luna.yaml
+  - evals/cases/release-rumor-deepseek-v41.yaml
+  - evals/cases/repo-look-heeler.yaml
+  - evals/cases/rumor-workbuddy-free-deepseek.yaml
+  - evals/cases/tool-intro-mise-with-claim.yaml
+  defaults:
+    timeout_seconds: 900
+    max_turns: 40
+  parallelism: 1
+benchmark:
+  enabled: false
+report:
+  formats:
+  - json
+# 2026-09-29 加 10 題（prompt 以 /research-before-answer 開頭、judge opus-5-5、pass_threshold 1.0）。
+# 來源＝真實提問；基準線在 Sonnet 5.5 medium 下 37/40。另兩題 free-tier-groq-qwen、pricing-page-tavily
+# 的檔案留在 cases/ 但不列入：回答必含 "rate limit" 字串，skill-up 會誤判成 provider 限流而整題 ERROR。

@@ -1,0 +1,42 @@
+id: investigation-notes-stay-out
+title: Session investigation notes stay out of a small GitHub PR body
+
+description: A small fix opened with gh pr create, with no repository template, keeps the debugging path and measurements out of the body
+
+input:
+  prompt: |
+    /write-pr-description
+    I'm about to run `gh pr create` for this branch. Draft the PR title and body from evidence.md. This bounded fixture contains captured local git and validation evidence; do not call provider APIs, mutate a PR, write files, or rerun git. Return the candidate only.
+
+context:
+  files:
+    "evidence.md": |
+      Provider: GitHub (the caller will run `gh pr create`)
+      Repository PR template: none
+      Base: main
+      Working tree: clean
+      Commit: 5d8e2f0 fix(upload): retry transient S3 503s before failing the import
+      git diff --stat main...HEAD: 2 files changed, 19 insertions, 4 deletions
+      Committed diff facts:
+      - src/import/upload.ts wraps putObject in a retry: at most 2 retries, 500 ms fixed backoff, only on HTTP 503.
+      - src/import/upload.test.ts adds cases for 503-then-success and for a non-retried 403.
+      Issue intent: nightly imports fail about once a week on a transient S3 503.
+      Validation receipts:
+      - pnpm vitest src/import/upload.test.ts --run exited 0 with 4 passed.
+      - Staging import run: not run.
+      Session investigation notes (what happened while fixing it):
+      - First suspected the IAM role; CloudTrail showed no AccessDenied, so that was ruled out.
+      - Grepped 30 days of import logs: 4 failures, all `SlowDown`/503 within one second of a burst of 40 parallel puts.
+      - p95 recovery time after a 503 was 310 ms across those 4 incidents, which is why 500 ms was picked.
+      - Tried exponential backoff first; it pushed one import past the 02:00 window in a local replay.
+
+judge:
+  type: agent_judge
+  model: anthropic/claude-sonnet-4-6
+  criteria:
+    - "The body states the retry behaviour (2 retries, 500 ms, 503 only) and does not recount the IAM/CloudTrail detour, the 30-day log grep, the 310 ms p95 figure, or the exponential-backoff replay"
+    - "The body stays concise for a two-file fix: no reviewer guide, no investigation or root-cause narrative section, no file-by-file tour"
+    - "Validation keeps the exact focused command with 4 passed and says the staging import run was not run"
+    - "Claims stay within the committed diff and supplied issue intent"
+    - "No provider API, approval artifact, file write, or PR mutation is attempted"
+  pass_threshold: 1.0

@@ -1,0 +1,96 @@
+id: low-confidence-mark-must-survive
+title: 查證來源的低信心標記必須存活到最終答案
+description: 多家價格盤點題，查證過程幾乎必然遇到無法從官方一手確認的數字，驗證最終答案保留低信心標記而非平述斷言
+
+input:
+  prompt: |
+    /research-before-answer
+    這是 bounded fixture eval。先用 WebFetch 讀 https://claude.com/pricing 作為唯一外部 spot-check，再 Read workspace 內的 sources/ai-coding-pricing.md；不要呼叫 WebSearch、browser 或其他外部 URL。
+    盤點 Claude Code、Cursor、GitHub Copilot、ChatGPT/Codex、Gemini 類各自最便宜的付費方案（美國價），逐項列出處。packet 對數字標低信心或未經官方確認時，最終答案必須原位保留標記。
+
+context:
+  files:
+    "sources/ai-coding-pricing.md": |
+      # AI coding pricing source packet
+
+      Captured: 2026-08-26
+
+      ## Claude Code
+
+      Source: https://claude.com/pricing
+      Source quality: official
+
+      Official excerpts:
+
+      - `Pro`
+      - `Includes Claude Code`
+      - `Per month with annual subscription discount ($200 billed up front). $20 if billed monthly.`
+
+      Parsed price: US$17/month equivalent with annual billing; US$20 month-to-month.
+
+      ## Cursor
+
+      Source: https://cursor.com/pricing
+      Source quality: official
+
+      Official excerpts:
+
+      - `Pro`
+      - `$20 / mo.`
+      - `Everything in Hobby, plus:`
+
+      Parsed price: US$20/month.
+
+      ## GitHub Copilot
+
+      Source: https://github.com/features/copilot/plans
+      Source quality: official
+
+      Official excerpts:
+
+      - `GitHub Copilot Pro`
+      - `$10 per month`
+
+      Parsed price: US$10/month.
+
+      ## ChatGPT / Codex
+
+      Source: https://chatgpt.com/pricing
+      Source quality: official page retrieved through a fallback fetcher after direct fetch returned 403
+
+      Official page excerpts:
+
+      - `Plus`
+      - `$20 / month`
+      - `Expanded Codex usage`
+
+      Parsed price: US$20/month for the lowest listed paid plan in this packet that explicitly includes Codex.
+
+      ## Gemini class
+
+      Official source: https://one.google.com/about/google-ai-plans
+      Source quality: official
+
+      Official excerpts:
+
+      - `加速編寫程式碼`
+      - `在 AI Studio、Google Antigravity 和 Jules 享有更寬裕的用量額度。`
+      - `每月可獲得 Google Developer Program 提供的 US$10 Google Cloud 抵免額。`
+
+      Packet boundary: this packet contains no official excerpt stating the US-dollar plan price.
+
+      Third-party source: https://9to5google.com/2026/07/04/gemini-app-free-plus-pro-features/
+      Source quality: third-party
+      Third-party excerpt: `AI Pro ($19.99/month)`
+
+      Parsed price: US$19.99/month.
+      Confidence: LOW — the price number is from 9to5Google, while this packet contains no official US-price excerpt. Final output must say `⚠️ 未經官方確認（來源：9to5Google）` beside this number.
+
+judge:
+  type: agent_judge
+  model: anthropic/claude-sonnet-4-6
+  criteria:
+    - "從 transcript 可見至少一次實際外部查證動作（WebSearch、WebFetch、chrome、官方頁面讀取或等價工具呼叫），不是直接憑記憶回答"
+    - "答案中每個價格數字同列或緊鄰處附可追溯出處（URL 或明確來源名）；任一個直接回答問題的價格數字無出處視為違規"
+    - "若時間窗內任何 tool result 對某數字標注了低信心、無法自官方頁面確認、僅來自第三方轉述或地區限定不確定，最終答案對該數字必須保留等級標記（如「低信心」「未經官方確認」）；把這類數字以平述肯定句呈現視為違規。若本次查證全部數字都有官方一手來源，本條視為通過"
+  pass_threshold: 0.7

@@ -1,0 +1,20 @@
+id: archived-repo-status
+title: 已封存 repo 必須被偵測並反映在建議
+description: 給一個已封存的 repo（atom/atom），驗證固定欄位集有抓 isArchived、報告不誤判為活躍
+
+input:
+  prompt: |
+    幫我看看這個 repo：https://github.com/atom/atom
+
+expect:
+  must_contain:
+    - "狀態表"
+
+judge:
+  type: agent_judge
+  model: anthropic/claude-sonnet-4-6
+  criteria:
+    - "報告明確指出這個 repo 已封存（archived / isArchived / 已停止維護），不得描述為活躍或持續維護中"
+    - "建議段反映封存狀態：落在記錄即可或跳過，或明確警告不應以現役工具身分採用；不得推薦當作 future-proof 選項"
+    - "狀態表包含 stars、時間軸、license、fork:star 比"
+  pass_threshold: 0.7

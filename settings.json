@@ -1,0 +1,531 @@
+{
+  "hooks": {
+    "PostCompact": [
+      {
+        "matcher": "manual|auto",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ~/.claude/compact-guard/bin/compact-guard.mjs --vendor claude --managed-id compact-guard/v1/claude/postcompact",
+            "timeout": 10,
+            "statusMessage": "Compact Guard: auditing compaction"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Skill",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/figma-context-budget-gate.sh",
+            "timeout": 10,
+            "statusMessage": "記錄 Figma context budget sentinel..."
+          }
+        ]
+      },
+      {
+        "matcher": "WebSearch|WebFetch|mcp__claude-in-chrome__navigate|mcp__chrome-devtools__navigate_page",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/python3 ~/.claude/hooks/dispatch-obligation-nudge.py tool",
+            "timeout": 5,
+            "statusMessage": "搜尋次數派工提醒（dispatch-obligation）..."
+          }
+        ]
+      },
+      {
+        "matcher": "Bash|Edit|Write|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/repeat-verify-reminder.sh",
+            "timeout": 10,
+            "statusMessage": "repeat-verify 重跑檢查..."
+          }
+        ]
+      },
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/skill-install-scan.sh",
+            "timeout": 10,
+            "statusMessage": "檢查 skill 軟注入 / 危險內容..."
+          },
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/skill-description-gate.sh",
+            "timeout": 10,
+            "statusMessage": "檢查 SKILL.md description 品質..."
+          },
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/review-spec-tier1-nudge.sh",
+            "timeout": 10,
+            "statusMessage": "檢查 spec 落檔 → Tier 1 自審提醒..."
+          },
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/sem-plan-blast-radius.sh",
+            "timeout": 10,
+            "statusMessage": "sem blast radius（plan 落檔）..."
+          }
+        ]
+      },
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/memory-ripple.sh",
+            "timeout": 20
+          },
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/gate-authoring-nudge.sh",
+            "timeout": 10,
+            "statusMessage": "gate-authoring：hook 檔編輯提醒..."
+          }
+        ]
+      },
+      {
+        "matcher": "Workflow",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/workflow-monitor-nudge.sh",
+            "timeout": 10,
+            "statusMessage": "workflow-monitor：提醒掛 limit-watch 守護"
+          }
+        ]
+      },
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/session-limit-nudge.sh",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/ticket-yagni.py register",
+            "timeout": 660,
+            "statusMessage": "登記 implement worker（ticket-yagni）...",
+            "async": true,
+            "asyncRewake": true
+          },
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/skill-verify-once-gate.py post-agent",
+            "timeout": 660,
+            "statusMessage": "登記 Self-Verify auditor 身分...",
+            "async": true,
+            "asyncRewake": true
+          }
+        ]
+      },
+      {
+        "matcher": "TaskOutput",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/taskoutput-dedup-hook.py",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "matcher": "manual",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/checkpoint-judge.sh",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "auto",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/checkpoint-judge.sh",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "manual|auto",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ~/.claude/compact-guard/bin/compact-guard.mjs --vendor claude --managed-id compact-guard/v1/claude/precompact",
+            "timeout": 10,
+            "statusMessage": "Compact Guard: saving checkpoint"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "mcp__semble__search|mcp__semble__find_related",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/python3 -I ~/.claude/hooks/semble-root-block.py",
+            "timeout": 10,
+            "statusMessage": "檢查 semble MCP 是否指向聚合根目錄..."
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__figma*|mcp__claude_ai_Figma__*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/figma-context-budget-gate.sh",
+            "timeout": 10,
+            "statusMessage": "檢查 Figma context budget..."
+          }
+        ]
+      },
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/pr-review-report-write-gate.py",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/pipestatus-zsh-gate.py",
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/tool-upgrade-guard.py",
+            "timeout": 10,
+            "statusMessage": "檢查工具升級注意事項與釘版 SHA..."
+          }
+        ]
+      },
+      {
+        "matcher": "Skill",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/matt-tdd-gate.sh",
+            "timeout": 15
+          }
+        ]
+      },
+      {
+        "matcher": "WebSearch",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/websearch-parallel-enforce.sh",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/fable-gate.sh ~/.claude/hooks/cd-cwd-persistence-nudge.sh",
+            "timeout": 10,
+            "statusMessage": "檢查 cd 持久化..."
+          }
+        ]
+      },
+      {
+        "matcher": "Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/pr-review-c4-dispatch-gate.py || exit 2",
+            "timeout": 10,
+            "statusMessage": "驗證 C4 正式規格審查派工..."
+          },
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/skill-verify-once-gate.py pre-agent || exit 2",
+            "timeout": 10,
+            "statusMessage": "檢查 Self-Verify 稽查額度..."
+          },
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/fable-gate.sh ~/.claude/hooks/T2-routing-gate.sh",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "SendMessage",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/skill-verify-once-gate.py pre-sendmessage || exit 2",
+            "timeout": 10,
+            "statusMessage": "檢查是否續問 Self-Verify auditor..."
+          }
+        ]
+      },
+      {
+        "matcher": "Workflow",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/workflow-routing-gate.py",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/ticket-yagni.py gate",
+            "timeout": 15,
+            "statusMessage": "檢查票關閉前的 YAGNI verdict..."
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/bin/sh ~/.claude/hooks/better-rm-env.sh",
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/session-start-state.sh",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/ledger-bootstrap.sh",
+            "timeout": 10,
+            "statusMessage": "檢查新 repo ledger bootstrap..."
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/fable-gate.sh ~/.claude/hooks/T1-warning-check.sh",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ~/.claude/compact-guard/bin/compact-guard.mjs --vendor claude --managed-id compact-guard/v1/claude/sessionstart",
+            "timeout": 10,
+            "statusMessage": "Compact Guard: restoring checkpoint"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/taskoutput-dedup-hook.py",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/checkpoint-judge.sh",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/auto-memory-jev.py stop",
+            "timeout": 10,
+            "async": true
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/verify-audit-silent-log.sh",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/fable-gate.sh ~/.claude/hooks/T1-claim-detect-local-first.sh",
+            "timeout": 30
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/T1-evidence-level-detect.sh",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/matt-tdd-gate.sh",
+            "timeout": 15
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/opus-chinese-stop.py",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/api-error-auto-continue.py stop",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/auto-memory-jev.py deliver",
+            "timeout": 3
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/daily-local-analysis-trigger.sh",
+            "timeout": 10,
+            "statusMessage": "偵測每日本機分析觸發..."
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/recall-before-answer.sh",
+            "timeout": 10,
+            "statusMessage": "提醒翻紀錄／訪談模式..."
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/model-drift-watch.sh",
+            "timeout": 10,
+            "statusMessage": "偵測模型換代..."
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/ticket-yagni.py deliver",
+            "timeout": 660,
+            "statusMessage": "worker 交件 YAGNI 審查（ticket-yagni）...",
+            "async": true,
+            "asyncRewake": true
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/python3 ~/.claude/hooks/dispatch-obligation-nudge.py prompt",
+            "timeout": 5,
+            "statusMessage": "派工義務判斷（dispatch-obligation）..."
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/subagent-text-toolcall-nudge.py",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "StopFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/api-error-auto-continue.py",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  },
+  "outputStyle": "Explanatory",
+  "language": "繁體中文"
+}

@@ -1,0 +1,157 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import re
+import sys
+from pathlib import Path
+
+import yaml
+from yaml.nodes import MappingNode, ScalarNode, SequenceNode
+
+
+NUMBERED_FILENAME = re.compile(r'^(?P<identifier>\d+)-.+\.md$')
+NUMBERED_IDENTIFIER = re.compile(r'^\d+$')
+STATUS_RELATION = re.compile(
+  r'\bsuperseded by (?P<target>[^\s,.;:()]+)',
+)
+STATUS_IDENTIFIER = re.compile(r'^ADR-(?P<identifier>\d+)$')
+NULL_TAG = 'tag:yaml.org,2002:null'
+
+
+def build_parser() -> argparse.ArgumentParser:
+  parser = argparse.ArgumentParser(prog='check-decisions')
+  parser.add_argument('decision_directory')
+  parser.add_argument('source_files', nargs='*')
+  return parser
+
+
+def numbered_files(directory: Path) -> list[Path]:
+  return sorted(
+    path
+    for path in directory.iterdir()
+    if path.is_file()
+    and not path.is_symlink()
+    and NUMBERED_FILENAME.fullmatch(path.name)
+  )
+
+
+def selected_sources(directory: Path, values: list[str]) -> list[Path]:
+  if not values:
+    return numbered_files(directory)
+  directory_root = directory.resolve()
+  sources = set()
+  for value in values:
+    path = Path(value).resolve(strict=True)
+    if path.parent != directory_root:
+      raise ValueError(f'source file is not a direct child: {value}')
+    if not path.is_file():
+      raise ValueError(f'source file not found: {value}')
+    if NUMBERED_FILENAME.fullmatch(path.name):
+      sources.add(path)
+  return sorted(sources)
+
+
+def frontmatter(path: Path) -> MappingNode | None:
+  text = path.read_text(encoding='utf-8')
+  lines = text.splitlines()
+  if not lines or lines[0] != '---':
+    return None
+  try:
+    closing = lines.index('---', 1)
+  except ValueError as error:
+    raise ValueError(f'{path.name}: malformed frontmatter') from error
+  node = yaml.compose('\n'.join(lines[1:closing]))
+  if node is None:
+    return MappingNode('tag:yaml.org,2002:map', [])
+  if not isinstance(node, MappingNode):
+    raise ValueError(f'{path.name}: malformed frontmatter')
+  return node
+
+
+def mapping_value(node: MappingNode, name: str):
+  values = [
+    value
+    for key, value in node.value
+    if isinstance(key, ScalarNode) and key.value == name
+  ]
+  if len(values) > 1:
+    raise ValueError(f'duplicate lifecycle key: {name}')
+  return values[0] if values else None
+
+
+def relation_targets(
+  node: MappingNode | None,
+) -> list[tuple[str, str, str | None]]:
+  if node is None:
+    return []
+  relations = []
+  supersedes = mapping_value(node, 'supersedes')
+  if supersedes is not None:
+    if not isinstance(supersedes, SequenceNode):
+      raise ValueError('supersedes must be a sequence')
+    for item in supersedes.value:
+      if not isinstance(item, ScalarNode):
+        raise ValueError('supersedes entries must be scalar identifiers')
+      identifier = item.value if NUMBERED_IDENTIFIER.fullmatch(item.value) else None
+      relations.append(('supersedes', item.value, identifier))
+  superseded_by = mapping_value(node, 'superseded_by')
+  if superseded_by is not None and superseded_by.tag != NULL_TAG:
+    if not isinstance(superseded_by, ScalarNode):
+      raise ValueError('superseded_by must be one identifier or null')
+    identifier = (
+      superseded_by.value
+      if NUMBERED_IDENTIFIER.fullmatch(superseded_by.value)
+      else None
+    )
+    relations.append(('superseded_by', superseded_by.value, identifier))
+  status = mapping_value(node, 'status')
+  if status is not None:
+    if not isinstance(status, ScalarNode):
+      raise ValueError('status must be scalar text')
+    match = STATUS_RELATION.search(status.value)
+    if match:
+      target = match.group('target')
+      identifier_match = STATUS_IDENTIFIER.fullmatch(target)
+      identifier = (
+        identifier_match.group('identifier')
+        if identifier_match
+        else None
+      )
+      relations.append(('status', target, identifier))
+  return relations
+
+
+def run(directory: Path, source_files: list[str]) -> list[str]:
+  targets = {
+    NUMBERED_FILENAME.fullmatch(path.name).group('identifier')
+    for path in numbered_files(directory)
+  }
+  diagnostics = []
+  for source in selected_sources(directory, source_files):
+    for relation, target, identifier in relation_targets(frontmatter(source)):
+      if identifier is None or identifier not in targets:
+        diagnostics.append(
+          f'{source.name}:{relation}:{target}: missing numbered ADR',
+        )
+  return sorted(diagnostics)
+
+
+def main() -> int:
+  args = build_parser().parse_args()
+  directory = Path(args.decision_directory)
+  try:
+    if not directory.is_dir():
+      raise ValueError(f'decision directory not found: {directory}')
+    diagnostics = run(directory, args.source_files)
+  except (OSError, RecursionError, UnicodeError, ValueError, yaml.YAMLError) as error:
+    print(f'check-decisions: {error}', file=sys.stderr)
+    return 2
+  if diagnostics:
+    print('\n'.join(diagnostics))
+    return 1
+  return 0
+
+
+if __name__ == '__main__':
+  raise SystemExit(main())

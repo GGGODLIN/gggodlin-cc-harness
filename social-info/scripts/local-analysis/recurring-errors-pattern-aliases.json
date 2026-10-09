@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "patterns": [
+    {
+      "source_key": "recurring-errors:shell-eval-syntax",
+      "report_titles": [
+        "Node eval / bash 測試語法混淆",
+        "shell eval 語法混淆"
+      ],
+      "signature_aliases": [
+        "(eval):: == not found",
+        "(eval):: no matches found: ---",
+        "(eval):: read-only variable: status",
+        "(eval):: no matches found:"
+      ],
+      "legacy_ledger_titles": []
+    },
+    {
+      "source_key": "recurring-errors:python-traceback-json",
+      "report_titles": [
+        "Python 腳本 traceback / JSON decode 錯誤鏈"
+      ],
+      "signature_aliases": [
+        "traceback (most recent call last):",
+        "traceback (most recent call last): file \"<stdin>\"...json.load(sys.stdin)...decode(s)"
+      ],
+      "legacy_ledger_titles": []
+    },
+    {
+      "source_key": "recurring-errors:read-path-cwd",
+      "report_titles": [
+        "讀檔路徑錯誤（cwd 相關 file does not exist）"
+      ],
+      "signature_aliases": [
+        "file does not exist. note: your current working directory is"
+      ],
+      "legacy_ledger_titles": []
+    },
+    {
+      "source_key": "recurring-errors:chrome-tab-session",
+      "report_titles": [
+        "claude-in-chrome MCP tab/session 管理失效"
+      ],
+      "signature_aliases": [
+        "tab no longer exists. call tabs_context_mcp to get current tabs."
+      ],
+      "legacy_ledger_titles": []
+    },
+    {
+      "source_key": "recurring-errors:git-operations",
+      "report_titles": [
+        "git 操作失敗集群"
+      ],
+      "signature_aliases": [
+        "致命錯誤: 無法建立...這個版本庫似乎有另一個 git 處理程序在執行"
+      ],
+      "legacy_ledger_titles": []
+    },
+    {
+      "source_key": "recurring-errors:edit-replace-all",
+      "report_titles": [
+        "Edit replace_all 未設定導致多重匹配失敗"
+      ],
+      "signature_aliases": [
+        "found matches of the string to replace, but replace_all is false"
+      ],
+      "legacy_ledger_titles": []
+    }
+  ]
+}

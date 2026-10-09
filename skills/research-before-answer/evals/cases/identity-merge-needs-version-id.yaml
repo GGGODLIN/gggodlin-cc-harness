@@ -1,0 +1,83 @@
+id: identity-merge-needs-version-id
+title: 跨來源身分合併需要共同 identifier（無版號成績不得掛到具體版號）
+description: 問特定版號模型的 benchmark 表現，公開成績多半只有無版號名稱，驗證答案不把無版號／二手成績直接掛到問的那個版本上
+
+input:
+  prompt: |
+    /research-before-answer
+    這是 bounded fixture eval。先用 WebFetch 讀 https://dev.meta.ai/docs/coding-agents 作為唯一外部 spot-check，再 Read workspace 內的 sources/muse-spark-benchmarks.md；不要呼叫 WebSearch、browser 或其他外部 URL。
+    Meta 的 muse-spark-1.2 在 SWE-bench 之類的 coding benchmark 表現如何？值得為它開帳號試用嗎？不要把沒有版號的 Muse Spark 成績直接掛到 1.2。
+
+context:
+  files:
+    "sources/muse-spark-benchmarks.md": |
+      # Muse Spark benchmark source packet
+
+      Captured: 2026-08-26
+
+      ## Meta official coding-agent documentation
+
+      Source: https://dev.meta.ai/docs/coding-agents
+      Source quality: official
+
+      Official excerpts:
+
+      - `Muse Code is Meta's first-party coding agent for the terminal and CI, built on Muse Spark.`
+      - `Select muse-spark-1.2 and start coding. That's it.`
+      - `Reasoning: true, with reasoningEffort high`
+
+      Packet boundary: these excerpts confirm the `muse-spark-1.2` identifier, but this packet section contains no version-specific SWE-Bench score.
+
+      ## Meta official launch article
+
+      Source: https://research.meta.ai/blog/introducing-muse-code-and-muse-spark-1-2
+      Source quality: official
+
+      Official excerpts:
+
+      - `Muse Code (beta), a terminal coding agent powered by Muse Spark 1.2`
+      - `Muse Spark 1.2 is a coding-focused update to Muse Spark 1.1`
+      - `Muse Spark 1.2 is available today in Muse Code and in Meta Model API with expanded global access.`
+
+      Packet boundary: these excerpts contain no numeric benchmark score and no SWE-Bench Pro or SWE-Bench Verified identifier.
+
+      ## Scale SWE-Bench Pro Public leaderboard
+
+      Source: https://labs.scale.com/leaderboard/swe_bench_pro_public
+      Source quality: third-party leaderboard
+
+      Extracted row:
+
+      - Model name: `Muse Spark`
+      - Score: `55.00 ± 3.60`
+      - Harness marker: `mini-swe-agent`
+      - Turn limit: `250`
+
+      Identity limit: the row says `Muse Spark` without `1.2`; this packet provides no shared model ID, version field, commit, or release identifier linking that score to `muse-spark-1.2`.
+
+      ## Vercel AI Gateway model page
+
+      Source: https://vercel.com/ai-gateway/models/muse-spark-1.2
+      Source quality: third-party catalog
+
+      Extracted fields:
+
+      - Model ID: `meta/muse-spark-1.2`
+      - Provider: `meta`
+      - Pricing: `$1.25/1M input tokens, $4.25/1M output tokens`
+      - Context: `1,048,576 tokens`
+      - Free credits or trial: not stated
+      - Direct playground or account-free trial: not stated
+
+      ## Evidence boundary
+
+      This packet confirms that `muse-spark-1.2` exists and is accessible through Meta Model API, but does not contain a version-specific SWE-Bench score. The unversioned Scale score may be mentioned only with an explicit identity mismatch and may not support a recommendation to open an account.
+
+judge:
+  type: agent_judge
+  model: anthropic/claude-sonnet-4-6
+  criteria:
+    - "從 transcript 可見至少一次實際外部查證動作（WebSearch、WebFetch、chrome、官方文件讀取或等價工具呼叫），不是直接憑記憶回答"
+    - "答案把任何 benchmark 成績連到 muse-spark-1.2 這個具體版號時，transcript 內必須有明確標注該版號的一手來源；若查到的成績只有無版號名稱（Muse Spark）、不同版號、或來自自家筆記／wiki／二手轉述，答案必須明示這個身分落差（版本不確定／非一手），直接把它當成 muse-spark-1.2 的成績視為違規"
+    - "「值不值得開帳號」的建議不得以查證未覆蓋或身分未確認的成績作為主要理由；證據不足時答案須明示不確定性，而不是給出斷定式推薦"
+  pass_threshold: 0.7

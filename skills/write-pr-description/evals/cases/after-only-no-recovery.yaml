@@ -1,0 +1,37 @@
+id: after-only-no-recovery
+title: After-only local fix does not grow recovery or before placeholders
+
+description: Missing before evidence stays missing and a local arithmetic fix needs no recovery ceremony
+
+input:
+  prompt: |
+    /write-pr-description
+    Draft a PR title and body from evidence.md in the current working directory. This bounded fixture contains captured local git and validation evidence; do not call provider APIs, mutate a PR, write files, rerun git or checks. Keep it short. Return the candidate only.
+
+context:
+  files:
+    "evidence.md": |
+      Repository PR template order: Summary, Checks
+      Base: main
+      Working tree: clean
+      Commit: 71a4d09 fix(cart): round displayed tax totals correctly
+      Captured git diff --stat main...HEAD: 2 files changed, 8 insertions, 3 deletions
+      Committed diff facts:
+      - src/cart/display-total.ts replaces Math.floor with Math.round for the displayed total. It does not persist data or send a message.
+      - src/cart/display-total.test.ts covers 10.005.
+      Issue intent: show the final cent rather than truncate it.
+      Validation receipts:
+      - Current commit: pnpm vitest src/cart/display-total.test.ts --run exited 0, 1 passed.
+      - No receipt for the base revision is supplied.
+      - Full suite: not run.
+
+judge:
+  type: agent_judge
+  model: anthropic/claude-sonnet-4-6
+  criteria:
+    - "The body preserves Summary then Checks and retains the exact current command and 1 passed"
+    - "The draft does not invent a failing base test, add an empty Before placeholder, or rerun checks to obtain before evidence"
+    - "The draft has no additional Risk, Door, recovery, reviewer-guide or change-outline section for this local arithmetic fix"
+    - "The draft states the full suite was not run and makes no production or visual-verification claim"
+    - "No provider API, approval artifact, file write, PR mutation, git rerun, or check rerun is attempted"
+  pass_threshold: 1.0

@@ -1,0 +1,23 @@
+id: six-section-report
+title: 標準 repo 研究應產出六段骨架報告
+description: 給一個活躍 library repo，驗證報告遵守 SKILL.md 的六段固定骨架與狀態表欄位集
+
+input:
+  prompt: |
+    幫我研究這個 repo：https://github.com/sindresorhus/ky
+
+expect:
+  must_contain:
+    - "狀態表"
+    - "建議"
+
+judge:
+  type: agent_judge
+  model: anthropic/claude-sonnet-4-6
+  criteria:
+    - "報告包含全部六段：一句話定位、狀態表、核心 thesis、對使用者環境的相關性、風險、建議"
+    - "狀態表至少涵蓋 stars、created 到 last push 時間軸、license、fork 比 star 的比值（fork:star 比）"
+    - "建議段明確落在三擇之一：值得深入、記錄即可、跳過，而不是模糊收尾"
+    - "相關性段有 memory 既評比對的痕跡：引用具體 memory 條目名，或明寫 memory 無既評"
+    - "聊天主報告依序有六個小標：結論、它是什麼、跟你現有的差在哪、用了會得到什麼、代價、依結論二選一（試用步驟或可借走的部分）；結論在第一項"
+  pass_threshold: 0.7

@@ -1,0 +1,36 @@
+# 本檔在契約測試底下；跑法：cd ~/.claude/skills/handoff-impl && ~/.local/bin/skill-up run evals/eval.yaml --output-dir ~/Desktop/projects/.claude/trials/skill-up-cli/eval-runs
+id: create-matt-required
+title: Matt required ticket handoff 原樣傳遞 seam
+description: 從已核准 required ticket 開單，驗證整組 TDD 傳遞欄位同時存在且內容不變
+
+input:
+  prompt: |
+    開 handoff 單，把這張已核准 Matt ticket 交給另一個 session 做。這次只走手動搬單。
+    Ticket: .scratch/greet/issues/01.md
+    TDD: required
+    TDD seam: CLI output
+    任務：scripts/greet.js 新增 --lang zh。
+    驗收：node scripts/greet.js --lang zh 輸出 你好。
+    這是純檔案小任務，不用開 worktree。
+
+context:
+  files:
+    "scripts/greet.js": |
+      console.log('Hello')
+    ".scratch/greet/issues/01.md": |
+      # 01 — Add zh greeting
+
+      **TDD:** required
+
+      **TDD seam:** CLI output
+
+judge:
+  type: agent_judge
+  model: anthropic/claude-sonnet-4-6
+  criteria:
+    - "有產出 handoff 單檔，且 frontmatter status 為 SPEC_READY"
+    - "產出單包含成對的 MATT_TDD_PROPAGATION v1 契約 markers 與完整 TDD decision 段，Decision 原樣為 required，Required seam 原樣為 CLI output"
+    - "產出單包含只在 TDD decision 存在時需要的 implementer 協議、禁動範圍與實作回報 follow-through 欄位"
+    - "沒有把 required 改成 waived，也沒有新增 waiver reason 或 approval"
+    - "只提供手動搬單指引，沒有啟動自動接力"
+  pass_threshold: 1.0

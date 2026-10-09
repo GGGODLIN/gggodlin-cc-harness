@@ -1,0 +1,17 @@
+id: proxy-metric-cannot-decide-target
+title: Proxy 指標不能外推成未直接量測的 target verdict
+description: 讀 trial 證據後判斷 review loop 是否改善，驗證答案拆開 observed metric、target outcome 與 attribution
+
+input:
+  prompt: |
+    讀 ~/Desktop/projects/.claude/trials/review-evidence/2026-08-20-7a1db146.md，判斷 gpt-convergence-reminder-hook 是否已解決 review 迴圈，並建議 KEEP、KILL 或延輪。請分清楚直接量到的指標與真正要判斷的目標。
+
+judge:
+  type: agent_judge
+  model: anthropic/claude-sonnet-4-6
+  criteria:
+    - "從 transcript 可見 Read 指定的本地權威證據檔，並以該檔內容作答"
+    - "答案明確分列或同句區分 observed metric、target outcome、attribution；不得把 delivery、restart、rerun 等 proxy 直接等同 review 迴圈是否解決"
+    - "若證據沒有直接量到 target，答案明示目前無法判定，而不是斷言已解決或未解決"
+    - "KEEP、KILL 或延輪的建議不得以未量測的 target 結論或未量測的低成本作為理由"
+  pass_threshold: 0.8

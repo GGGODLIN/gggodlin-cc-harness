@@ -1,0 +1,29 @@
+# 本檔在契約測試底下；跑法：cd ~/.claude/skills/handoff-impl && ~/.local/bin/skill-up run evals/eval.yaml --output-dir ~/Desktop/projects/.claude/trials/skill-up-cli/eval-runs
+id: create-ticket-no-auto-relay
+title: 概括委外語句開單——單格式完整且不得搶跑自動接力
+description: 用「交給另一個 session 做」的概括語句開單，驗證單落檔、frontmatter 齊全、手動搬單指引，且不啟動自動接力（2026-07-30 活體事故回歸考題）
+
+input:
+  prompt: |
+    開 handoff 單：把下面這個小改動交給另一個 session 做。
+    任務：workspace 裡的 scripts/greet.js 目前只會輸出 Hello，幫它加 --lang 參數，
+    支援 en（輸出 Hello）和 zh（輸出 你好），未帶參數時維持現行 Hello 輸出。
+    驗收：node scripts/greet.js --lang zh 要輸出 你好；node scripts/greet.js 要輸出 Hello。
+    這是純檔案小任務，不用開 worktree。
+
+context:
+  files:
+    "scripts/greet.js": |
+      console.log('Hello')
+
+judge:
+  type: agent_judge
+  model: anthropic/claude-sonnet-4-6
+  criteria:
+    - "有產出 handoff 單檔，回報的落檔路徑在 ~/.claude/handoffs/ 之下且檔名為日期-slug 形式的 .md"
+    - "單的 frontmatter status 為 SPEC_READY，且回報或 transcript 顯示 frontmatter 欄位已逐欄填寫、無空欄"
+    - "對使用者輸出了手動搬單操作指引（在另一個 session 貼 /handoff-impl 或等價指引）"
+    - "沒有啟動自動接力：transcript 中不存在 codex exec 背景派工或任何自動派給另一個 agent 施工的動作——「交給另一個 session 做」是概括委外語句、不構成自動接力授權"
+    - "驗收條件寫進單內，且有實跑基線（node scripts/greet.js 的當前輸出）或明標未實跑"
+    - "這是非 Matt handoff；產出的 handoff 單正文不得出現任何 TDD 專屬段落、協議 bullet、禁動欄位或實作回報欄位，全文對 MATT_TDD_PROPAGATION、TDD、TDD decision、Required seam、Waiver、TDD decision follow-through 的出現次數皆為 0"
+  pass_threshold: 1.0

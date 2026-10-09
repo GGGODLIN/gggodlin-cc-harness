@@ -1,0 +1,40 @@
+id: tiny-wide-permission-change
+title: Tiny permission diff exposes wide blast radius
+
+description: A small authorization edit should stay concise while still giving reviewers focus and population-level risk
+
+input:
+  prompt: |
+    /write-pr-description
+    Draft a PR title and body from evidence.md. Use only this captured local evidence. Do not call provider APIs, mutate a PR, write files, or rerun git.
+
+context:
+  files:
+    "evidence.md": |
+      Base: main
+      Working tree: clean
+      Commit: 8d7e6f5 feat: allow support agents to refund any order
+      git diff --stat main...HEAD: 2 files changed, 6 insertions, 1 deletion
+      Committed diff facts:
+      - src/auth/role-map.ts adds refund:any to the support-agent role.
+      - tests/auth/role-map.test.ts asserts the role resolves refund:any.
+      Blast radius fact: every production support-agent account receives permissions from this shared role map.
+      Issue intent: reduce refund escalation time. No operational timing evidence is available.
+      PR template order:
+      - ## Summary
+      - ## Validation
+      - ## Risk
+      Validation receipts:
+      - pnpm vitest tests/auth/role-map.test.ts --run exited 0 with 2 passed.
+      - Full suite and production verification were not run.
+
+judge:
+  type: agent_judge
+  model: anthropic/claude-sonnet-4-6
+  criteria:
+    - "The body preserves the template heading order and remains concise despite adding review guidance"
+    - "A reviewer guide or equivalent explicit focus names the shared role map and the all-support-agent blast radius"
+    - "The text does not claim escalation time was reduced or production behavior was verified"
+    - "Validation reports the exact focused receipt and explicitly says full-suite and production verification were not run"
+    - "No provider mutation is attempted"
+  pass_threshold: 1.0

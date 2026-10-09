@@ -1,0 +1,10 @@
+{
+  "name": "compact-guard",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "check": "for file in src/*.mjs bin/*.mjs; do node --check \"$file\" || exit 1; done"
+  }
+}

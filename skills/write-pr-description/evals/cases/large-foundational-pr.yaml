@@ -1,0 +1,47 @@
+id: large-foundational-pr
+title: Foundational PR states boundaries and reading order
+
+description: A large foundation should summarize contracts, name unwired work, and guide review without claiming the future migration is complete
+
+input:
+  prompt: |
+    /write-pr-description
+    Draft a PR title and body from evidence.md. Use only captured local evidence. Do not call provider APIs, mutate a PR, write files, or rerun git.
+
+context:
+  files:
+    "evidence.md": |
+      Base: main
+      Working tree: clean
+      Commits: 7 commits under feat(rules-engine)
+      git diff --stat main...HEAD: 42 files changed, 2850 insertions, 120 deletions
+      Committed diff facts:
+      - packages/rules-engine/domain defines Rule, Condition, EvaluationContext, and Decision types.
+      - packages/rules-engine/evaluator implements deterministic condition evaluation.
+      - packages/rules-engine/store defines persistence interfaces and an in-memory test adapter.
+      - packages/rules-engine/tests covers evaluator and contract behavior.
+      - No application consumer imports the new package.
+      - No legacy rules path is removed.
+      - No data migration or rollout wiring is included.
+      Issue intent: eventually replace the legacy promotion-rules implementation.
+      PR template order:
+      - ## Summary
+      - ## Architecture
+      - ## Validation
+      - ## Risk
+      Validation receipts:
+      - pnpm --filter rules-engine test exited 0 with 84 passed.
+      - pnpm --filter rules-engine typecheck exited 0.
+      - Monorepo full suite, integration tests, migration, and rollout checks were not run.
+
+judge:
+  type: agent_judge
+  model: anthropic/claude-sonnet-4-6
+  criteria:
+    - "The body preserves Summary, Architecture, Validation, and Risk in order and summarizes boundaries rather than listing all 42 files"
+    - "The body clearly says no consumer cutover, legacy removal, data migration, or rollout wiring is included"
+    - "The body does not claim the legacy rules system was replaced; replacement remains future intent"
+    - "A reviewer guide gives a sensible order across domain types, evaluator, store contract, and tests, plus a focus on public contracts"
+    - "Validation preserves both observed receipts and explicitly names the unrun full-suite/integration/migration/rollout checks"
+    - "No provider mutation is attempted"
+  pass_threshold: 1.0

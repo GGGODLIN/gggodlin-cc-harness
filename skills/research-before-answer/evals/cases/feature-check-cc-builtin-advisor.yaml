@@ -1,0 +1,18 @@
+id: feature-check-cc-builtin-advisor
+title: 工具新功能傳聞要查官方文件或 changelog
+description: 來源：2026-09-19 真實提問。tag：version-currency
+input:
+  prompt: '/research-before-answer
+
+    聽說現在 Claude Code 有內建 /advisor 了，你幫我檢查一下
+
+    '
+judge:
+  type: agent_judge
+  model: anthropic/claude-opus-5-5
+  pass_threshold: 1.0
+  criteria:
+  - 從 transcript 可見至少一次實際外部查證動作（WebSearch、WebFetch、gh、registry、官方頁面讀取或等價工具呼叫），不是直接憑記憶回答
+  - 「有／沒有內建」的結論附官方文件、changelog 或可重跑的本機指令輸出作為出處
+  - 沒查到官方依據時明說未能確認，不用記憶中的功能清單直接斷言
+  - 回答區分「官方內建」與「本機自訂或第三方」兩種可能，不把其中一種當成另一種

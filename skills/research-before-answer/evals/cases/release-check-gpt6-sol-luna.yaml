@@ -1,0 +1,18 @@
+id: release-check-gpt6-sol-luna
+title: 兩個相近型號要分開確認，不能合併判斷
+description: 來源：2026-09-22 真實提問。tag：identity
+input:
+  prompt: '/research-before-answer
+
+    你幫我確認一下 gpt-6-sol、gpt-6-luna 是不是發布了
+
+    '
+judge:
+  type: agent_judge
+  model: anthropic/claude-opus-5-5
+  pass_threshold: 1.0
+  criteria:
+  - 從 transcript 可見至少一次實際外部查證動作（WebSearch、WebFetch、gh、registry、官方頁面讀取或等價工具呼叫），不是直接憑記憶回答
+  - 兩個型號分別給出結論，各自附出處；不因其中一個有資料就推論另一個也發布了
+  - 每個「已發布／未發布」判斷同句附官方或等價一手來源；只有二手來源時明標
+  - 回答沒有把型號名稱與別的名稱混用（例如把某個代號當成正式型號）

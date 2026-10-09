@@ -1,0 +1,197 @@
+[
+  {
+    "name": "sem",
+    "manager": "cargo-git",
+    "source": "Ataraxy-Labs/sem"
+  },
+  {
+    "name": "@jackwener/web-cli",
+    "manager": "npm-g",
+    "source": "@jackwener/web-cli"
+  },
+  {
+    "name": "ast-grep",
+    "manager": "brew",
+    "source": "ast-grep"
+  },
+  {
+    "name": "leaperone/smctl/smctl",
+    "manager": "brew",
+    "source": "smctl"
+  },
+  {
+    "name": "@fission-ai/openspec",
+    "manager": "npm-g",
+    "source": "@fission-ai/openspec"
+  },
+  {
+    "name": "@google/gemini-cli",
+    "manager": "npm-g",
+    "source": "@google/gemini-cli"
+  },
+  {
+    "name": "@openai/codex",
+    "manager": "npm-g",
+    "source": "@openai/codex"
+  },
+  {
+    "name": "@qwen-code/qwen-code",
+    "manager": "npm-g",
+    "source": "@qwen-code/qwen-code"
+  },
+  {
+    "name": "@googleworkspace/cli",
+    "manager": "npm-g",
+    "source": "@googleworkspace/cli"
+  },
+  {
+    "name": "agent-browser",
+    "manager": "npm-g",
+    "source": "agent-browser"
+  },
+  {
+    "name": "opencode-ai",
+    "manager": "npm-g",
+    "source": "opencode-ai"
+  },
+  {
+    "name": "cline",
+    "manager": "npm-g",
+    "source": "cline"
+  },
+  {
+    "name": "aider-chat",
+    "manager": "uv-tool",
+    "source": "aider-chat"
+  },
+  {
+    "name": "notebooklm-mcp-cli",
+    "manager": "uv-tool",
+    "source": "notebooklm-mcp-cli"
+  },
+  {
+    "name": "semble",
+    "manager": "uv-tool",
+    "source": "semble"
+  },
+  {
+    "name": "graphifyy",
+    "manager": "uv-tool",
+    "source": "graphifyy"
+  },
+  {
+    "name": "skillevaluator",
+    "manager": "uv-git",
+    "source": "NVIDIA/SkillEvaluator"
+  },
+  {
+    "name": "beads",
+    "manager": "brew",
+    "source": "beads"
+  },
+  {
+    "name": "ollama",
+    "manager": "brew",
+    "source": "ollama"
+  },
+  {
+    "name": "harbor",
+    "manager": "uv-tool",
+    "source": "harbor"
+  },
+  {
+    "name": "python@3.12",
+    "manager": "brew",
+    "source": "python@3.12"
+  },
+  {
+    "name": "e2fsprogs",
+    "manager": "brew",
+    "source": "e2fsprogs"
+  },
+  {
+    "name": "willxup/cpa-usage-keeper/cpa-usage-keeper",
+    "manager": "brew",
+    "source": "cpa-usage-keeper"
+  },
+  {
+    "name": "age-plugin-se",
+    "manager": "brew",
+    "source": "age-plugin-se"
+  },
+  {
+    "name": "sops",
+    "manager": "brew",
+    "source": "sops"
+  },
+  {
+    "name": "ollama",
+    "manager": "brew",
+    "source": "ollama"
+  },
+  {
+    "name": "opa",
+    "manager": "brew",
+    "source": "opa"
+  },
+  {
+    "name": "@earendil-works/pi-coding-agent",
+    "manager": "npm-g",
+    "source": "@earendil-works/pi-coding-agent"
+  },
+  {
+    "name": "@deepseek-ai/dsh",
+    "manager": "npm-g",
+    "source": "@deepseek-ai/dsh"
+  },
+  {
+    "name": "steipete/tap/peekaboo",
+    "manager": "brew",
+    "source": "peekaboo"
+  },
+  {
+    "name": "chrome-devtools",
+    "manager": "mcp-npx",
+    "source": "chrome-devtools-mcp"
+  },
+  {
+    "name": "open-browser-use",
+    "manager": "npm-g",
+    "source": "open-browser-use"
+  },
+  {
+    "name": "jfarcand/tap/mirroir-mcp",
+    "manager": "brew",
+    "source": "mirroir-mcp"
+  },
+  {
+    "name": "muse-cli",
+    "manager": "uv-tool",
+    "source": "muse-cli"
+  },
+  {
+    "name": "backpass",
+    "manager": "npm-g",
+    "source": "backpass"
+  },
+  {
+    "name": "acpx",
+    "manager": "npm-g",
+    "source": "acpx"
+  },
+  {
+    "name": "grok-bot-cli",
+    "manager": "npm-g",
+    "source": "grok-bot-cli"
+  },
+  {
+    "name": "ipatool",
+    "manager": "brew",
+    "source": "ipatool"
+  },
+  {
+    "name": "~/.local/share/lcu/current/bin/lcu",
+    "manager": "github-release",
+    "source": "amontlabs/lcu"
+  }
+]

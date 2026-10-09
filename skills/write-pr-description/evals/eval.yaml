@@ -1,0 +1,33 @@
+schema_version: v1alpha1
+
+environment:
+  type: none
+
+engine:
+  name: claude_code
+  model:
+    provider: anthropic
+    name: claude-sonnet-4-6
+
+cases:
+  files:
+    - evals/cases/small-bugfix.yaml
+    - evals/cases/tiny-wide-permission-change.yaml
+    - evals/cases/ui-evidence-honesty.yaml
+    - evals/cases/authz-reading-order.yaml
+    - evals/cases/dirty-tree.yaml
+    - evals/cases/large-foundational-pr.yaml
+    - evals/cases/investigation-notes-stay-out.yaml
+    - evals/cases/structural-change-outline.yaml
+    - evals/cases/paired-evidence-and-recovery.yaml
+    - evals/cases/after-only-no-recovery.yaml
+  defaults:
+    timeout_seconds: 900
+    max_turns: 30
+  parallelism: 1
+
+benchmark:
+  enabled: false
+
+report:
+  formats: [json]

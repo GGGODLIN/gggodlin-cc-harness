@@ -1,0 +1,27 @@
+# 本檔在契約測試底下；跑法：cd ~/.claude/skills/handoff-impl && ~/.local/bin/skill-up run evals/eval.yaml --output-dir ~/Desktop/projects/.claude/trials/skill-up-cli/eval-runs
+schema_version: v1alpha1
+
+environment:
+  type: none
+
+engine:
+  name: claude_code
+  model:
+    provider: anthropic
+    name: claude-sonnet-4-6
+
+cases:
+  files:
+    - evals/cases/create-ticket-no-auto-relay.yaml
+    - evals/cases/create-matt-required.yaml
+    - evals/cases/create-matt-waived.yaml
+  defaults:
+    timeout_seconds: 900
+    max_turns: 40
+  parallelism: 1
+
+benchmark:
+  enabled: false
+
+report:
+  formats: [json]

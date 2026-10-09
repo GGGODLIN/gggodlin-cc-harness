@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/Desktop/projects/.claude/hooks/trial-review.sh",
+            "statusMessage": "檢查試用觀察 review..."
+          }
+        ]
+      }
+    ]
+  }
+}

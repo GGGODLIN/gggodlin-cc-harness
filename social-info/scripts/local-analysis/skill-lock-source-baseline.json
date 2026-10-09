@@ -1,0 +1,117 @@
+{
+  "version": 1,
+  "scope": [
+    "vercel-composition-patterns",
+    "vercel-react-best-practices",
+    "vercel-react-native-skills",
+    "caveman",
+    "find-skills",
+    "grill-me",
+    "grill-with-docs",
+    "strategic-compact",
+    "zoom-out",
+    "design-taste-frontend"
+  ],
+  "entries": [
+    {
+      "skill": "vercel-composition-patterns",
+      "source": "vercel-labs/agent-skills",
+      "sourceUrl": "https://github.com/vercel-labs/agent-skills.git",
+      "skillPath": "skills/composition-patterns/SKILL.md",
+      "sourceTreeHash": "7a651a19b1658c4cd320a5e984c1be4b99d97c2c",
+      "runtimeTreeHash": "e608233b55a2e1b50cdae992e01534d4030da1cf",
+      "provenanceCommit": "999eadb6942d98085402732860b0b04d09df1b73",
+      "provenanceReason": "Source full-tree lock hash is reconciled against the installer runtime projection."
+    },
+    {
+      "skill": "vercel-react-best-practices",
+      "source": "vercel-labs/agent-skills",
+      "sourceUrl": "https://github.com/vercel-labs/agent-skills.git",
+      "skillPath": "skills/react-best-practices/SKILL.md",
+      "sourceTreeHash": "079b06a135401704ea94ab74c7c9d86c92ba259f",
+      "runtimeTreeHash": "b81d276102f6533ac1da82f58332499a8c9ab04e",
+      "provenanceCommit": "999eadb6942d98085402732860b0b04d09df1b73",
+      "provenanceReason": "Source full-tree lock hash is reconciled against the installer runtime projection."
+    },
+    {
+      "skill": "vercel-react-native-skills",
+      "source": "vercel-labs/agent-skills",
+      "sourceUrl": "https://github.com/vercel-labs/agent-skills.git",
+      "skillPath": "skills/react-native-skills/SKILL.md",
+      "sourceTreeHash": "f67a7156afdb6070594715ca0b4f12810ae32a1e",
+      "runtimeTreeHash": "56294538496ae126537d9e8b21bf980842b8336e",
+      "provenanceCommit": "999eadb6942d98085402732860b0b04d09df1b73",
+      "provenanceReason": "Source full-tree lock hash is reconciled against the installer runtime projection."
+    },
+    {
+      "skill": "caveman",
+      "source": "mattpocock/skills",
+      "sourceUrl": "https://github.com/mattpocock/skills.git",
+      "skillPath": "skills/productivity/caveman/SKILL.md",
+      "sourceTreeHash": "17972a1bdbf5909b9dbdc435ad348f0bf45f8664",
+      "runtimeTreeHash": "3a83c0077deff918cf33168302c876ec25ba7a06",
+      "provenanceCommit": "392c65fa7c16ea4d837ca4a3730f82425628762d",
+      "provenanceReason": "Upstream removed caveman; retain the local orphaned snapshot."
+    },
+    {
+      "skill": "find-skills",
+      "source": "vercel-labs/skills",
+      "sourceUrl": "https://github.com/vercel-labs/skills.git",
+      "skillPath": "skills/find-skills/SKILL.md",
+      "sourceTreeHash": "c2f31172b6f256272305a5e6e7228b258446899f",
+      "runtimeTreeHash": "3331d65305325bfecf57df0f536855557db1911e",
+      "provenanceCommit": "fd783ae162fe300d4e55535d9d3bc9fccdbc5305",
+      "provenanceReason": "Canonical copy was de-symlinked and patched; retain the CLI-managed .agents mirror."
+    },
+    {
+      "skill": "grill-me",
+      "source": "mattpocock/skills",
+      "sourceUrl": "https://github.com/mattpocock/skills.git",
+      "skillPath": "skills/productivity/grill-me/SKILL.md",
+      "sourceTreeHash": "2a1ad17028306ebe45f0e49703fa28b9b2e7f499",
+      "runtimeTreeHash": "5d85961ee10b4a4cf89bf71a8cb579b387ec7e78",
+      "provenanceCommit": "d4ecb72bf3206e0050d36454a1e705e6d3f4628a",
+      "provenanceReason": "Canonical fork grafted local rounds and validation additions; retain the upstream mirror."
+    },
+    {
+      "skill": "grill-with-docs",
+      "source": "mattpocock/skills",
+      "sourceUrl": "https://github.com/mattpocock/skills.git",
+      "skillPath": "skills/engineering/grill-with-docs/SKILL.md",
+      "sourceTreeHash": "2969a1224c70fe41b9dd2ddbe32c2ec62f2815bd",
+      "runtimeTreeHash": "4526344ee6f6b8a14d9863cbd8b77126c8906c6d",
+      "provenanceCommit": "a6c60d3825cf44c3cb8ad3ff1d2635fd8feaba05",
+      "provenanceReason": "Canonical copy became the grill-me plus domain-modeling wrapper; retain the old mirror."
+    },
+    {
+      "skill": "strategic-compact",
+      "source": "affaan-m/everything-claude-code",
+      "sourceUrl": "https://github.com/affaan-m/everything-claude-code.git",
+      "skillPath": "skills/strategic-compact/SKILL.md",
+      "sourceTreeHash": "36ba4f0616dac3d77c3f53bc58c1ef1b6bb96bf4",
+      "runtimeTreeHash": "f2ee32fb81247db6f8075d2db3df8530fa4b19be",
+      "provenanceCommit": "c73a28b6ece82d77ffe8f661e4f1aada1b04988d",
+      "provenanceReason": "Canonical hook path was corrected from suggest-compact.js to suggest-compact.sh; retain the old mirror."
+    },
+    {
+      "skill": "zoom-out",
+      "source": "mattpocock/skills",
+      "sourceUrl": "https://github.com/mattpocock/skills.git",
+      "skillPath": "skills/engineering/zoom-out/SKILL.md",
+      "sourceTreeHash": "6ecebabdea814d12888f56a611da7bf182b5fb26",
+      "runtimeTreeHash": "861e460a09988f32d7cac869916907ae5fb78772",
+      "provenanceCommit": "392c65fa7c16ea4d837ca4a3730f82425628762d",
+      "provenanceReason": "Upstream removed zoom-out; retain the local orphaned snapshot."
+    },
+    {
+      "skill": "design-taste-frontend",
+      "source": "leonxlnx/taste-skill",
+      "sourceUrl": "https://github.com/leonxlnx/taste-skill.git",
+      "skillPath": "skills/taste-skill/SKILL.md",
+      "sourceTreeHash": "826d9d12328f2d8b2c00ad5c28e02612d2484faf",
+      "runtimeTreeHash": "a6d128e53b4ec0238baee751dde33bf707adb5ec",
+      "provenanceCommit": "3c7017d636c3a4aad378433ea6d0cfa6c921da4a",
+      "provenanceReason": "Installed tree matches upstream 3c7017d; current npx skills add defaults to v2 experimental, so retain this v1 snapshot."
+    }
+  ]
+}

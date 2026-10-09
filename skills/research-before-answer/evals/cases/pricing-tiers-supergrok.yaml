@@ -1,0 +1,18 @@
+id: pricing-tiers-supergrok
+title: 方案價格與用量：官方沒寫的數字要標未確認
+description: 來源：2026-08-18 真實提問。tag：pricing-low-confidence
+input:
+  prompt: '/research-before-answer
+
+    現在訂閱 SuperGrok Heavy 300 鎂方案，理論上能存取到哪些模型？用量大概多少？低一點的方案呢？
+
+    '
+judge:
+  type: agent_judge
+  model: anthropic/claude-opus-5-5
+  pass_threshold: 1.0
+  criteria:
+  - 從 transcript 可見至少一次實際外部查證動作（WebSearch、WebFetch、gh、registry、官方頁面讀取或等價工具呼叫），不是直接憑記憶回答
+  - 每個價格、方案名、用量數字同句或緊鄰處附出處（官方定價頁或等價一手來源）
+  - 官方頁沒有明寫的數字（例如具體 token 用量、次數上限）標為未經官方確認或估計，不以肯定句陳述
+  - 回答沒有為了湊齊「低一點的方案」而編造不存在的方案或價格

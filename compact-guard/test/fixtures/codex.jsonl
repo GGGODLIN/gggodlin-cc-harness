@@ -1,0 +1,9 @@
+{"timestamp":"2026-07-16T01:00:00.000Z","type":"session_meta","payload":{"id":"session-1"}}
+{"timestamp":"2026-07-16T01:00:30.000Z","type":"response_item","payload":{"id":"codex-internal-user-1","type":"message","role":"user","content":[{"type":"input_text","text":"<recommended_plugins>internal plugin injection</recommended_plugins>"},{"type":"input_text","text":"# AGENTS.md instructions\nInternal harness rules"},{"type":"input_text","text":"<environment_context>internal environment injection</environment_context>"}]}}
+{"timestamp":"2026-07-16T01:01:00.100Z","type":"event_msg","payload":{"type":"user_message","message":"Do not browse the web."}}
+{"timestamp":"2026-07-16T01:02:00.000Z","type":"response_item","payload":{"id":"codex-assistant-1","type":"message","role":"assistant","content":[{"type":"input_text","text":"Wrong block for assistant"},{"type":"output_text","text":"The local evidence supports the fix."}]}}
+{"timestamp":"2026-07-16T01:03:00.000Z","type":"response_item","payload":{"id":"codex-developer-1","type":"message","role":"developer","content":[{"type":"input_text","text":"Developer instruction"}]}}
+{"timestamp":"2026-07-16T01:04:00.000Z","type":"response_item","payload":{"id":"codex-system-1","type":"message","role":"system","content":[{"type":"input_text","text":"System instruction"}]}}
+{"timestamp":"2026-07-16T01:05:00.000Z","type":"response_item","payload":{"type":"compacted","replacement_history":[{"type":"message","role":"user","content":[{"type":"input_text","text":"Old compacted request"}]}]}}
+not valid json either
+{"timestamp":"2026-07-16T01:06:00.000Z","type":"desktop_state","payload":{"window":"main","selection":"unknown record"}}

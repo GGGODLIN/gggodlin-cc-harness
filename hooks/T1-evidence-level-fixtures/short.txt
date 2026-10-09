@@ -1,0 +1,1 @@
+修好了，commit 是 abc1234。跑了 lint 沒錯誤。

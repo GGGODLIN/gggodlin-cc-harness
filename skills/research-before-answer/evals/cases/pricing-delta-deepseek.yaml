@@ -1,0 +1,18 @@
+id: pricing-delta-deepseek
+title: 算漲幅時新舊價都要有來源，算式要寫出來
+description: 來源：2026-08-13 真實提問。tag：pricing-low-confidence
+input:
+  prompt: '/research-before-answer
+
+    幫我讀這篇 https://api-docs.deepseek.com/zh-cn/quick_start/pricing/ 然後評估這樣會漲多少
+
+    '
+judge:
+  type: agent_judge
+  model: anthropic/claude-opus-5-5
+  pass_threshold: 1.0
+  criteria:
+  - 從 transcript 可見對該 URL 的實際讀取
+  - 新價格數字附該頁出處；用來比較的舊價格若非來自一手來源，明標未驗證或說明來源
+  - 「漲多少」給出計算方式（新價、舊價、百分比或倍數怎麼算），不只丟一個結論數字
+  - 沒有把無法確認的舊價當成事實平述

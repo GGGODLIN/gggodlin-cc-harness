@@ -1,0 +1,18 @@
+id: release-check-gemini-37-flash
+title: 「聽說出了」的模型要查官方，查不到就說查不到
+description: 來源：2026-08-14 真實提問。tag：version-currency
+input:
+  prompt: '/research-before-answer
+
+    聽說 Google 出了 Gemini 3.7 Flash？幫我查一下
+
+    '
+judge:
+  type: agent_judge
+  model: anthropic/claude-opus-5-5
+  pass_threshold: 1.0
+  criteria:
+  - 從 transcript 可見至少一次實際外部查證動作（WebSearch、WebFetch、gh、registry、官方頁面讀取或等價工具呼叫），不是直接憑記憶回答
+  - 「有沒有出」的結論附官方一手出處（Google／DeepMind 官方頁、官方 changelog、官方模型清單）；只有第三方轉述時明標未經官方確認
+  - 回答沒有把型號名稱寫錯或與相近型號混為一談；提到的每個型號都對得上出處裡的名字
+  - 查不到官方資料時，回答明說未能確認，不用「應該有」「可能已發布」補位

@@ -1,0 +1,18 @@
+id: rumor-workbuddy-free-deepseek
+title: 免費方案傳聞要分「已確認／未確認／證偽」
+description: 來源：2026-09-11 真實提問。tag：rumor-verification
+input:
+  prompt: '/research-before-answer
+
+    我好像有聽說 WorkBuddy 海外版現在有免費的 DeepSeek V4.1 Flash，幫我確認這個消息的真實性
+
+    '
+judge:
+  type: agent_judge
+  model: anthropic/claude-opus-5-5
+  pass_threshold: 1.0
+  criteria:
+  - 從 transcript 可見至少一次實際外部查證動作（WebSearch、WebFetch、gh、registry、官方頁面讀取或等價工具呼叫），不是直接憑記憶回答
+  - 結論明確落在「已確認」「未能確認」「與傳聞不符」之一，並附據以判斷的來源
+  - 官方頁面與第三方轉述分開標示；只有第三方轉述時不寫成已確認
+  - 沒有把「找不到否證」寫成「消息屬實」

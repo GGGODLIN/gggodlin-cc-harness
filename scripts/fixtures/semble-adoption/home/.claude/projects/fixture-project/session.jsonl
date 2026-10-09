@@ -1,0 +1,4 @@
+{"timestamp":"2026-08-15T01:00:00Z","message":{"content":[{"type":"tool_use","name":"mcp__semble__search","input":{"query":"code path","repo":"/repo"}}]}}
+{"timestamp":"2026-08-15T01:01:00Z","message":{"content":[{"type":"tool_use","name":"mcp__semble-docs__search","input":{"query":"historical docs path","repo":"/docs"}}]}}
+{"timestamp":"2026-08-15T01:02:00Z","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"semble search \"wiki refresh\" ~/.claude/wiki --content docs"}}]}}
+{"timestamp":"2026-08-15T01:03:00Z","message":{"content":[{"type":"tool_use","name":"Agent","input":{"subagent_type":"semble-search","prompt":"Find the implementation by intent"}}]}}

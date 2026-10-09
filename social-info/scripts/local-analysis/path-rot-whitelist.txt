@@ -1,0 +1,5 @@
+# claude-path-rot-daily.sh 白名單：一行一路徑、與文件內原文形式一致（含 ~ 或絕對路徑前綴）
+# 用途：文件裡刻意寫的範例路徑、尚未建立但已規劃的落點。真實失效不要加這裡，去改引用。
+~/.claude/hooks/fork-gate.off
+~/.claude/scripts/cc-quota-fetcher-host/quota-receiver.py
+~/.claude/pr-review/runs

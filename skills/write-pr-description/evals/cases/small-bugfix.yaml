@@ -1,0 +1,39 @@
+id: small-bugfix
+title: Small bugfix stays concise
+
+description: A narrow two-file fix should preserve the template and receipts without adding a reviewer guide or ceremonial sections
+
+input:
+  prompt: |
+    /write-pr-description
+    Draft a PR title and body from evidence.md. This bounded fixture contains captured local git and validation evidence; do not call provider APIs, mutate a PR, write files, or rerun git. Return the candidate only.
+
+context:
+  files:
+    "evidence.md": |
+      Base: main
+      Working tree: clean
+      Commit: 4a1b2c3 fix: round tax-inclusive cart totals correctly
+      git diff --stat main...HEAD: 2 files changed, 8 insertions, 3 deletions
+      Committed diff facts:
+      - src/cart/total.ts replaces Math.floor with Math.round after tax is applied.
+      - tests/cart/total.test.ts adds the 10.005 tax-inclusive regression case.
+      Issue intent: avoid dropping the final cent on tax-inclusive totals.
+      PR template order:
+      - ## Summary
+      - ## Validation
+      - ## Risk
+      Validation receipts:
+      - pnpm vitest tests/cart/total.test.ts --run exited 0 with 1 passed.
+      - Full suite was not run.
+
+judge:
+  type: agent_judge
+  model: anthropic/claude-sonnet-4-6
+  criteria:
+    - "The body keeps Summary, Validation, and Risk as top-level headings in that order"
+    - "The body is concise for a two-file bugfix and does not add a reviewer guide, change outline, architecture section, or file-by-file tour"
+    - "Validation includes the exact focused command with 1 passed and says the full suite was not run"
+    - "Claims stay within the committed diff and supplied issue intent"
+    - "No provider API, approval artifact, file write, or PR mutation is attempted"
+  pass_threshold: 1.0

@@ -1,0 +1,18 @@
+id: tool-intro-mise-with-claim
+title: 介紹工具時，網路說法要找出處，概念與事實分開
+description: 來源：2026-09-02 真實提問。tag：mixed-concept-fact
+input:
+  prompt: '/research-before-answer
+
+    https://mise.jdx.dev/ 可以跟我介紹一下這個工具嗎？網路上有人在討論不要讓 agent 碰 pip 甚至 uv，這是什麼概念？
+
+    '
+judge:
+  type: agent_judge
+  model: anthropic/claude-opus-5-5
+  pass_threshold: 1.0
+  criteria:
+  - 從 transcript 可見對該官網或其文件的實際讀取
+  - 工具功能的描述可對回官網或文件；版本、支援範圍等具體事實附出處
+  - 「網路上有人說」的說法有找出處引用，或明寫未找到具體出處、以下是概念層說明
+  - 概念解釋與查證到的事實在回答中分開，讀者能分辨哪些是查到的、哪些是解釋

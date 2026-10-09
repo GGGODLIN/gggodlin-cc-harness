@@ -1,0 +1,40 @@
+id: paired-evidence-and-recovery
+title: Pair captured evidence and state the recovery boundary
+
+description: A persisted-format change with outbound mail distinguishes restoring code from restoring state
+
+input:
+  prompt: |
+    /write-pr-description
+    I'm about to run gh pr create. Draft the PR title and body from evidence.md in the current working directory. This bounded fixture contains captured local git and validation evidence; do not call provider APIs, mutate a PR, write files, rerun git or checks. Keep the PR short. Return the candidate only.
+
+context:
+  files:
+    "evidence.md": |
+      Repository PR template order: Summary, Validation, Risk
+      Base: main
+      Working tree: clean
+      Commit: a91c2d8 fix(notifications): persist recipient IDs for queued digests
+      Captured git diff --stat main...HEAD: 3 files changed, 52 insertions, 16 deletions
+      Committed diff facts:
+      - src/digest/enqueue.ts: enabling recipientIds writes new queued records as { recipientId, status }. Previously queued records used { email, status }.
+      - src/digest/send.ts: the worker resolves recipientId, calls the outbound mail provider, then marks the record sent. The old worker reads only email. No converter or reverse migration is in the committed diff.
+      - src/digest/send.test.ts: regression covers reading the new record and issuing one provider call.
+      Issue intent: avoid stale recipient addresses. A successful provider call delivers the message outside the app.
+      Flag facts: recipientIds controls future enqueue format. Turning it off does not rewrite existing records.
+      Validation receipts, same command and regression:
+      - Current commit: pnpm vitest src/digest/send.test.ts --run exited 0, 1 passed.
+      - Base main: pnpm vitest src/digest/send.test.ts --run exited 1, 1 failed: expected recipient resolution to succeed, received undefined.
+      - Integration delivery: not run.
+      - Production rollout: not run.
+
+judge:
+  type: agent_judge
+  model: anthropic/claude-sonnet-4-6
+  criteria:
+    - "Validation presents the captured base failure and current pass together as a before/after pair, retaining the exact command and outcomes"
+    - "Risk or reviewer Focus distinguishes code/flag rollback from restoring existing recipientId records and recalling delivered messages"
+    - "The draft identifies new-format writes or outbound delivery as recovery boundaries without claiming that a reverse migration or recall mechanism exists"
+    - "The draft preserves the template, states integration delivery and production rollout were not run, and does not add a mandatory Door section"
+    - "No provider API, approval artifact, file write, PR mutation, git rerun, or check rerun is attempted"
+  pass_threshold: 1.0

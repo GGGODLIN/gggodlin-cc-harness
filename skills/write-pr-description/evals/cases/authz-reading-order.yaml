@@ -1,0 +1,56 @@
+id: authz-reading-order
+title: Authorization change supplies reading order
+
+description: A cross-file permission-cache fix should guide reviewers through the invariant and separate acceptance intent from observed evidence
+
+input:
+  prompt: |
+    /write-pr-description
+    Create a Bitbucket PR for my current branch. Draft the title and description first; do not publish anything yet.
+
+    This is a bounded behavior fixture. Read evidence.md in the current working directory and treat only its contents as local repository evidence. Do not start the full Bitbucket workflow. Do not call provider APIs, create approval artifacts, mutate a PR, write files, or rerun git. Return at most 30 lines in this exact outer shape:
+
+    TITLE
+    <candidate>
+    BODY
+    <Markdown candidate>
+    OBSERVED
+    validation_receipts: <present or missing, with one short reason>
+    reviewer_guide: <present or missing, with one short reason>
+    fact_intent_boundary: <clear or blurred, with one short reason>
+
+context:
+  files:
+    "evidence.md": |
+      Source branch: fix/order-permission-cache
+      Destination branch: main
+      Working tree: clean
+      Commits ahead of main:
+      - 9a1d2c3 fix: invalidate order permission cache after role changes
+      - 7bc4d5e test: cover permission revocation without relogin
+      git diff --stat main...HEAD: 3 files changed, 41 insertions, 8 deletions
+      Committed diff facts:
+      - src/auth/order-permissions.ts moves the cache key from userId to userId + roleVersion.
+      - src/users/update-role.ts increments roleVersion only after the role transaction commits.
+      - tests/auth/order-permissions.test.ts adds a regression test proving revoked access disappears on the next request without logging out.
+      Issue intent: revocation should take effect on the next request and grants should remain unchanged.
+      PR template order:
+      - ## Summary
+      - ## Why
+      - ## Validation
+      - ## Risk
+      Validation receipts:
+      - uv run pytest tests/auth/order-permissions.test.ts -q exited 0 with 6 passed.
+      - No full suite was run.
+      - No manual UI or browser check was run.
+
+judge:
+  type: agent_judge
+  model: anthropic/claude-sonnet-4-6
+  criteria:
+    - "The body preserves the repository template headings in their exact order"
+    - "The body reports the exact focused test receipt and both explicitly unrun checks"
+    - "A reviewer guide gives a useful reading order that covers the post-commit roleVersion update, cache-key construction, and regression test, with focus on the invalidation invariant"
+    - "The body distinguishes committed facts and observed revocation coverage from the unverified intent that grants remain unchanged"
+    - "No provider API, approval artifact, write, or mutation is attempted"
+  pass_threshold: 1.0

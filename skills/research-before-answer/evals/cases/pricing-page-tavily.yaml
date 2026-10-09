@@ -1,0 +1,18 @@
+id: pricing-page-tavily
+title: 指定定價頁要實際讀取，讀不到要換路不憑記憶
+description: 來源：2026-09-22 真實提問。tag：pricing-low-confidence
+input:
+  prompt: '/research-before-answer
+
+    https://www.tavily.com/pricing 幫我研究一下這個
+
+    '
+judge:
+  type: agent_judge
+  model: anthropic/claude-opus-5-5
+  pass_threshold: 1.0
+  criteria:
+  - 從 transcript 可見對該 URL 的實際讀取（WebFetch、fallback 抓取或瀏覽器），不是憑記憶描述該頁
+  - 回答中的每個價格、額度或方案名附出處（該頁或其他官方頁）
+  - 若頁面讀取失敗或內容不完整，transcript 可見換路重試或回答明說哪些部分未讀到；沒有用訓練記憶補上頁面內容
+  - 第三方轉述的數字（若有）標明來源並與官方頁區分

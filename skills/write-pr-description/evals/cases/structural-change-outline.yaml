@@ -1,0 +1,41 @@
+id: structural-change-outline
+title: A new endpoint gets a change outline instead of narrated structure
+
+description: A PR that adds an endpoint contract and a service call chain shows them as diff/text views and does not narrate the same structure in Summary bullets
+
+input:
+  prompt: |
+    /write-pr-description
+    I'm about to run `gh pr create` for this branch. Draft the PR title and body from evidence.md in the current working directory. This bounded fixture contains captured local git and validation evidence; do not call provider APIs, mutate a PR, write files, or rerun git. Return the candidate only.
+
+context:
+  files:
+    "evidence.md": |
+      Provider: GitHub (the caller will run `gh pr create`)
+      Repository PR template: none
+      Base: main
+      Working tree: clean
+      Commit: 3e7a1d9 feat(alerts): add read-only alert-rules endpoint for a site
+      git diff --stat main...HEAD: 6 files changed, 298 insertions, 1 deletion
+      Committed diff facts:
+      - src/alerts/alert-rules.controller.ts (new): GET /sites/:siteId/alert-rules behind the existing SiteReadGuard; returns AlertRulesResponseDto.
+      - src/alerts/alert-rules.dto.ts (new): AlertRulesResponseDto { siteId: string; rules: AlertRuleDto[] }; AlertRuleDto { ruleId: string; metric: 'temperature' | 'humidity' | 'co2'; threshold: number; severity: 'info' | 'warning' | 'critical'; enabled: boolean }.
+      - src/alerts/alert-rules.service.ts (new): forSite(siteId) calls SiteRepository.findById, then RuleRepository.listBySite, then toDto per rule; a missing site throws NotFoundException before listing rules.
+      - src/alerts/alert-rules.module.ts (new): registers controller and service; imports SiteModule and RuleModule.
+      - src/app.module.ts: imports AlertRulesModule.
+      - test/alerts/alert-rules.service.spec.ts (new): missing site, empty rule list, severity mapping.
+      Issue intent: the settings page needs one read-only call listing a site's alert rules.
+      Validation receipts:
+      - pnpm jest test/alerts --runInBand exited 0, 9 passed.
+      - Calling the endpoint against a running dev server: not run.
+
+judge:
+  type: agent_judge
+  model: anthropic/claude-sonnet-4-6
+  criteria:
+    - "The body contains a change outline with at least one fenced diff or text view showing the new endpoint contract or response shape, and a call tree or pseudocode view of forSite's call order"
+    - "Summary bullet prose does not restate the contract fields or the call order that the outline views already show. Apply this check to Summary bullets, not to one short lead-in sentence before each view inside Change outline; those lead-ins are allowed even when Change outline is nested under Summary."
+    - "The body uses no Mermaid block"
+    - "Validation keeps the exact focused command with 9 passed and says the dev-server call was not run"
+    - "No provider API, approval artifact, file write, or PR mutation is attempted"
+  pass_threshold: 1.0

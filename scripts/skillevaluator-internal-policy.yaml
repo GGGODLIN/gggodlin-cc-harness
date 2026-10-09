@@ -1,0 +1,5 @@
+profile: internal-local
+severity_overrides:
+  SCHEMA.author_missing: low
+  QUALITY.quality_efficiency: low
+  PII.personal_paths: low

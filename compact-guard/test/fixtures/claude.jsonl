@@ -1,0 +1,17 @@
+{"type":"user","uuid":"claude-user-1","timestamp":"2026-07-16T00:00:00.000Z","message":{"role":"user","content":"Keep this local only."}}
+{"type":"assistant","uuid":"claude-assistant-part-1","requestId":"claude-request-1","timestamp":"2026-07-16T00:01:00.000Z","message":{"id":"claude-message-1","role":"assistant","content":[{"type":"thinking","thinking":"hidden reasoning"},{"type":"text","text":"The first finding is unsupported."}]}}
+{"type":"assistant","uuid":"claude-assistant-part-2","requestId":"claude-request-1","timestamp":"2026-07-16T00:01:01.000Z","message":{"id":"claude-message-1","role":"assistant","content":[{"type":"tool_use","id":"tool-1","name":"Read","input":{"file_path":"secret.txt"}},{"type":"text","text":"The current verdict is reject."}]}}
+{"type":"assistant","uuid":"claude-request-part-1","requestId":"claude-request-fallback","timestamp":"2026-07-16T00:01:02.000Z","message":{"role":"assistant","content":[{"type":"text","text":"Request fallback part one."}]}}
+{"type":"assistant","uuid":"claude-request-part-2","requestId":"claude-request-fallback","timestamp":"2026-07-16T00:01:03.000Z","message":{"role":"assistant","content":[{"type":"text","text":"Request fallback part two."}]}}
+{"type":"assistant","uuid":"claude-uuid-fallback","timestamp":"2026-07-16T00:01:04.000Z","message":{"role":"assistant","content":[{"type":"text","text":"UUID fallback response."}]}}
+{"type":"user","uuid":"claude-tool-result","timestamp":"2026-07-16T00:02:00.000Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tool-1","content":"tool output"}]}}
+{"type":"user","uuid":"claude-meta","timestamp":"2026-07-16T00:03:00.000Z","isMeta":true,"message":{"role":"user","content":"Caveat: system context"}}
+{"type":"user","uuid":"claude-sidechain-user","timestamp":"2026-07-16T00:04:00.000Z","isSidechain":true,"message":{"role":"user","content":"Sidechain request"}}
+{"type":"assistant","uuid":"claude-thinking-only","timestamp":"2026-07-16T00:05:00.000Z","message":{"role":"assistant","content":[{"type":"thinking","thinking":"still hidden"}]}}
+this is not json
+{"type":"user","uuid":"claude-compact-summary","timestamp":"2026-07-16T00:05:01.000Z","isCompactSummary":true,"message":{"role":"user","content":"Compacted summary"}}
+{"type":"user","uuid":"claude-source-tool-user","timestamp":"2026-07-16T00:05:02.000Z","sourceToolUseID":"tool-2","message":{"role":"user","content":"Tool-generated user text"}}
+{"type":"assistant","uuid":"claude-source-tool-assistant","timestamp":"2026-07-16T00:05:03.000Z","sourceToolAssistantUUID":"assistant-source","message":{"role":"assistant","content":[{"type":"text","text":"Tool-generated assistant text"}]}}
+{"type":"user","uuid":"claude-tool-use-result","timestamp":"2026-07-16T00:05:04.000Z","toolUseResult":{"stdout":"result"},"message":{"role":"user","content":"Tool result wrapper"}}
+{"type":"assistant","uuid":"claude-sidechain-assistant","timestamp":"2026-07-16T00:06:00.000Z","isSidechain":true,"message":{"role":"assistant","content":[{"type":"text","text":"Sidechain answer"}]}}
+{"type":"progress","uuid":"claude-progress","timestamp":"2026-07-16T00:07:00.000Z","data":{"type":"hook_progress","message":"running"}}

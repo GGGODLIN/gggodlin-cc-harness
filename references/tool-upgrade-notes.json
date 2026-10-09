@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "tools": {
+    "skillevaluator": {
+      "aliases": [
+        "skillevaluator"
+      ],
+      "mode": "pinned",
+      "source_url": "https://github.com/NVIDIA/SkillEvaluator.git",
+      "pin_file": "~/.claude/scripts/skillevaluator-trial.py",
+      "pin_pattern": "^EXPECTED_COMMIT\\s*=\\s*[\"']([0-9a-f]{40})[\"']",
+      "report_note": "⚠️ trial 釘版：升級要一起改 EXPECTED_COMMIT、用完整 40 碼 SHA 重裝、跑 skillevaluator-trial.test.py",
+      "verify_command": "python3 ~/.claude/scripts/skillevaluator-trial.test.py",
+      "hold_until": "2026-09-16",
+      "hold_reason": "trial 第二輪觀察窗（review 2026-09-16）內不換版，避免污染 09-15 自然 weekly run 的觀察；review 後再依 report_note 流程升"
+    },
+    "chrome-devtools": {
+      "aliases": [
+        "chrome-devtools",
+        "chrome-devtools-mcp"
+      ],
+      "mode": "pinned",
+      "pin_type": "npm",
+      "package": "chrome-devtools-mcp",
+      "server": "chrome-devtools",
+      "pin_files": [
+        "~/.claude.json",
+        "~/.claude-max/.claude.json"
+      ],
+      "report_note": "⚠️ 釘版於 ~/.claude.json 與 ~/.claude-max/.claude.json 兩處（--experimentalStructuredContent）；升級改兩處後要驗 vendor workflow 的 new_page→evaluate_script→close_page pageId 契約",
+      "hold_until": "2026-09-15",
+      "hold_reason": "使用者 2026-09-10 拍板可升 1.9.0，但 ~/.npmrc min-release-age=7 使 npx 在 09-15 前解析不到 1.9.0（1.9.0 於 09-08 發布），先釘 1.8.0 等 cooldown 過"
+    }
+  }
+}

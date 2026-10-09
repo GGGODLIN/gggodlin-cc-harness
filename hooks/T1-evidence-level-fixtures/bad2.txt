@@ -1,0 +1,11 @@
+認領 [稽核 jsonl 輪轉與孤兒](file://~/.claude/.scratch/ledger-lifecycle/wayfinder/tickets/007-append-only-jsonl-rotation.md)。現況：`~/.claude/logs/` 28 個 jsonl 共 5.2MB，最大 `T2-routing-gate-audit.jsonl` 1.4MB（每天還在長）、`semble-docs-route-shadow` 564KB、memory-ripple 兩支 404KB／242KB；`archive/` 只有一筆先例（verify-audit 退役）。孤兒用「在 hooks／scripts／workflows／skills／commands 裡找不到 writer」算是 **7 個**（4 個 relay-correlate 一次性、3 個 memory-ripple 帶 PID 的一次性 audit；普查時說 15 是用較鬆的口徑，以這次 grep 為準）。`.verification-ledger.jsonl` 有 git 追蹤、`logs/` 整個 gitignored。
+
+這票小，三個子題一張表拍板：
+
+| 子題 | 建議 | 理由 |
+|---|---|---|
+| (a) 輪轉 | **按月齡，不按大小**：每支 jsonl 超過 **90 天**的行切到 `logs/archive/<名>-<YYYY-MM>.jsonl`（純搬、不壓縮、不刪）；另設 **1MB 軟門檻**只提醒「這支長太快、看要不要降採樣」 | 004 定案第 2 類月齡為主；jsonl 是稽核證據、按時間切最自然；只有 T2 一支超 1MB，大小門檻當警鈴就夠 |
+| (b) 孤兒 | **writer 歸零 + 90 天沒寫入 → 視為孤兒**，動作是**搬 `logs/archive/`**、不刪；判準成為規則、每日掃 | 對齊「不硬清」；relay／memory-ripple 那 7 個是 trial 證據，留著能考古 |
+| (c) git 追蹤 | **維持現狀不統一**：`logs/` 不追蹤（機器產、高頻）、`.verification-ledger.jsonl` 追蹤（它是 memory 的一部分、memory-audit 讀它） | 兩者用途不同，硬統一沒好處；寫成規則一句「稽核 log 不進 git、memory 附屬帳本跟 memory 走」 |
+
+**建議答「照表」**；要改就點 (a)(b)(c)。

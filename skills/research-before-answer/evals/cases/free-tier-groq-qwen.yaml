@@ -1,0 +1,18 @@
+id: free-tier-groq-qwen
+title: 免費模型名稱要精確對上官方清單，額度要附出處
+description: 來源：2026-08-29 真實提問。tag：identity
+input:
+  prompt: '/research-before-answer
+
+    聽說 Groq 現在有免費的 Qwen3.8 27B，幫我確認一下，以及免費層的額度限制怎樣
+
+    '
+judge:
+  type: agent_judge
+  model: anthropic/claude-opus-5-5
+  pass_threshold: 1.0
+  criteria:
+  - 從 transcript 可見至少一次實際外部查證動作（WebSearch、WebFetch、gh、registry、官方頁面讀取或等價工具呼叫），不是直接憑記憶回答
+  - 模型名稱與官方清單逐字對上；名稱不完全一致時明寫差異，不把相近名稱當同一個
+  - 免費層的額度數字（RPM、RPD、token 上限等）同句附官方出處；沒有官方數字的項目明標未確認
+  - 沒有把訓練記憶中的舊額度當成現況

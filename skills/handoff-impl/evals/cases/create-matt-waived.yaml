@@ -1,0 +1,39 @@
+# 本檔在契約測試底下；跑法：cd ~/.claude/skills/handoff-impl && ~/.local/bin/skill-up run evals/eval.yaml --output-dir ~/Desktop/projects/.claude/trials/skill-up-cli/eval-runs
+id: create-matt-waived
+title: Matt waived ticket handoff 原樣傳遞核准 waiver
+description: 從已核准 waived ticket 開單，驗證 closed reason 與 approval 原樣傳遞且不虛構 seam
+
+input:
+  prompt: |
+    開 handoff 單，把這張已核准 Matt ticket 交給另一個 session 做。這次只走手動搬單。
+    Ticket: .scratch/docs/issues/02.md
+    TDD: waived
+    TDD waiver: docs-only
+    TDD waiver approved: ticket-breakdown-user-approved
+    任務：更新 docs/usage.md 的 greet 範例。
+    驗收：文件同時展示 en 與 zh 用法。
+    這是純文件小任務，不用開 worktree。
+
+context:
+  files:
+    "docs/usage.md": |
+      Run node scripts/greet.js.
+    ".scratch/docs/issues/02.md": |
+      # 02 — Document greeting languages
+
+      **TDD:** waived
+
+      **TDD waiver:** `docs-only`
+
+      **TDD waiver approved:** `ticket-breakdown-user-approved`
+
+judge:
+  type: agent_judge
+  model: anthropic/claude-sonnet-4-6
+  criteria:
+    - "有產出 handoff 單檔，且 frontmatter status 為 SPEC_READY"
+    - "產出單包含成對的 MATT_TDD_PROPAGATION v1 契約 markers 與完整 TDD decision 段，Decision 原樣為 waived，Waiver 同時原樣包含 docs-only 與 ticket-breakdown-user-approved"
+    - "產出單包含只在 TDD decision 存在時需要的 implementer 協議、禁動範圍與實作回報 follow-through 欄位"
+    - "沒有把 waived 改成 required，也沒有虛構 Required seam"
+    - "只提供手動搬單指引，沒有啟動自動接力"
+  pass_threshold: 1.0

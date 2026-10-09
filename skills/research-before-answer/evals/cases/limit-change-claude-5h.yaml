@@ -1,0 +1,18 @@
+id: limit-change-claude-5h
+title: 「據說額度調整」要找官方，沒官方就標未確認
+description: 來源：2026-09-24 真實提問。tag：rumor-verification
+input:
+  prompt: '/research-before-answer
+
+    隨著 Opus 5.5 上線，據說 Claude 也有調整 5 小時 limit 的額度，你可以幫我比較一下嗎
+
+    '
+judge:
+  type: agent_judge
+  model: anthropic/claude-opus-5-5
+  pass_threshold: 1.0
+  criteria:
+  - 從 transcript 可見至少一次實際外部查證動作（WebSearch、WebFetch、gh、registry、官方頁面讀取或等價工具呼叫），不是直接憑記憶回答
+  - 任何額度數字或「有調整／沒調整」的結論附出處；官方沒公布具體數字時明寫官方未公布
+  - 第三方估算或社群回報標明為估算或回報，不與官方公告混寫
+  - 「比較」有給出比較的兩端各自來源，不只給結論

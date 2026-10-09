@@ -1,0 +1,42 @@
+id: dirty-tree
+title: Dirty tree stays outside PR claims
+
+description: Uncommitted unrelated work must be named outside the candidate body and excluded from title, summary, validation, and risk claims
+
+input:
+  prompt: |
+    /write-pr-description
+    Draft a PR title and body from evidence.md. Use only captured local evidence. Do not call provider APIs, mutate a PR, write files, or rerun git.
+
+context:
+  files:
+    "evidence.md": |
+      Base: main
+      Committed branch scope:
+      - Commit 3e4f5a6 fix: preserve invoice tax precision
+      - git diff --stat main...HEAD: 2 files changed, 15 insertions, 4 deletions
+      - src/invoices/tax.ts keeps decimal precision until final currency rounding.
+      - tests/invoices/tax.test.ts adds three fractional-rate cases.
+      Working tree status:
+      - M src/analytics/event.ts
+      - ?? notes/analytics-rename.md
+      Unstaged diff fact: src/analytics/event.ts renames checkout_complete to checkout_completed.
+      The analytics files are not committed and are unrelated to the invoice fix.
+      PR template order:
+      - ## Summary
+      - ## Validation
+      - ## Risk
+      Validation receipts for committed invoice scope:
+      - pnpm vitest tests/invoices/tax.test.ts --run exited 0 with 3 passed.
+      - Full suite was not run.
+
+judge:
+  type: agent_judge
+  model: anthropic/claude-sonnet-4-6
+  criteria:
+    - "The title and PR body describe only the committed invoice-tax change and never present the analytics rename as PR content"
+    - "A visibly out-of-body draft-basis note identifies both uncommitted analytics paths as excluded"
+    - "Validation is scoped to the invoice receipt and says the full suite was not run"
+    - "The template headings remain in order and the body stays concise"
+    - "No provider mutation or file write is attempted"
+  pass_threshold: 1.0

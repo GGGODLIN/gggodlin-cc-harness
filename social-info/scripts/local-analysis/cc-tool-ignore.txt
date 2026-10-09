@@ -1,0 +1,93 @@
+# cc-tool 黑名單：已知不追更新的系統 / 開發 / 語言 runtime 工具
+# 新發現的工具會列在 daily digest「待分類」，歸這裡 = 永久忽略
+
+# cargo
+cargo-bundle
+
+# npm 系統
+corepack
+npm
+yarn
+
+# brew（系統 / dev / 語言 runtime / dep）
+age
+awscli
+clang-format
+clojure/tools/clojure
+cmake
+duti
+edencommon
+ffmpeg
+fswatch
+fzf
+gh
+git
+git-filter-repo
+git-lfs
+go
+graykode/tap/abtop
+# tracce：2026-09-09 第二輪 KILL（eslogger 不帶 --select 燒 CPU/記憶體），改自建 agent-blackbox；brew 殘留不追
+chungchihhan/tap/tracce
+ios-deploy
+ldid
+libgit2
+librsvg
+llama.cpp
+macmon
+mactop
+mole
+mongosh
+node@16
+pkgconf
+poppler
+protobuf
+python-setuptools
+python@3.10
+python@3.11
+python@3.9
+ripgrep
+rlwrap
+ruby
+rust
+tree
+uv
+watchman
+yt-dlp
+zig
+eza
+starship
+zoxide
+zsh-autosuggestions
+zsh-completions
+zsh-syntax-highlighting
+
+# mcp（stdio 非 npx 的先全忽略；npx 釘版的 MCP 走 manifest 的 mcp-npx manager，2026-08-25 起 chrome-devtools 已移出）
+plugin
+context7
+chakra-ui
+postman
+oldco-tool
+oldco-tool
+notebooklm-mcp
+twinkle-hub
+asana
+# figma：官方 remote MCP（非 npx 釘版），版本由 Figma 端管，2026-09-10 歸忽略
+figma
+# open_browser_use：stdio 註冊、exec 本機 obu binary，版本由白名單 npm-g open-browser-use 追蹤，2026-09-20 歸忽略
+open_browser_use
+# lcu：版本由 manifest 的絕對執行檔路徑追蹤；此處只排除同一工具的 MCP 名稱，避免重複待分類。
+lcu
+
+# mcp（同一個 PyPI 套件的第二個註冊，不是獨立工具）
+# semble-docs = `uvx --from semble[mcp] semble --content docs`，與 semble server 同套件、
+# 只差 --content 旗標 + 獨立快取；版本追蹤由白名單的 semble（uv-tool）覆蓋，
+# 列這裡避免同一個套件被報兩次。2026-07-30 使用者拍板。
+semble-docs
+
+# brew：moshi-hook 2026-09-28 trial KILL（reference_moshi_hook_killed_after_trial_2026_09_28）；
+# brew package 刻意保留供日後重評、service 已停，升級不追。2026-09-30 歸忽略
+rjyo/moshi/moshi-hook
+
+# mcp：cua-driver 是 stdio 註冊、exec ~/.local/bin/cua-driver（非 npx 釘版），版本由它自己的
+# check_for_update 工具管；依「stdio 非 npx 先全忽略」慣例，2026-09-30 歸忽略
+cua-driver

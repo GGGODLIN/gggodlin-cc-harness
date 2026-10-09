@@ -1,0 +1,20 @@
+看清楚 infra：T1 case 已經是用 `(完成|全部|已覆蓋|...)` regex 從 transcript 篩過的、但只取 sample 60。要擴大 True case 必須 (1) 拉更大 pool (2) 對新 candidate 跑 label。
+
+策略 plan：
+
+| 步驟 | 做法 | 估時 |
+|---|---|---|
+| 1. 拉大 pool | extract.py 把 n 從 60 拉到 300、limit_files 200 → 500 | 1-2 分鐘 |
+| 2. 篩 high-yield | 既有 60 case 之外、bias short turn（短 turn 較不可能附 evidence、True rate 更高）| 1 分鐘 |
+| 3. Label | 用 Sonnet + Opus 2-vote（claude_cli ride OAuth）| 預估 10-15 分鐘、~200 case |
+| 4. Merge | agree=True 才加進 gold；預估 +10-15 個 True case | 2 分鐘 |
+
+quota concern：同事帳號 5h 已 78%、跑 200 case label 用 claude_cli 會撞 cache、可能達 85% threshold。
+
+兩個選項：
+- **A1. 走 claude_cli ride OAuth**（accuracy 高、有撞 quota 風險）
+- **A2. 用獨立 model 當 labeler**（避免 bias、避免 quota） — 比如 relay gpt-5.5 或 Groq gpt-oss-120b reasoning=high 都可、雖然 bench 上 acc 沒 Opus 高、但因為我們要 labelling 而不是 production、單一決策只要跟 user 直覺對齊就行
+
+最不 bias 的選：**用 relay gpt-5.5 + Groq gpt-oss-120b 各跑一次當 2-vote**（兩個獨立 vendor / model 家族 / 都不是 qwen3-32b、避免 self-bias）。Agree 才進 gold、disagree 留 user 手動 review。
+
+走哪個？或先 step 1 看候選 pool 規模再決定？

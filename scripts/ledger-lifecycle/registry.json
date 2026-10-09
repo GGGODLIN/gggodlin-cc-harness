@@ -1,0 +1,452 @@
+{
+  "schema_version": 1,
+  "scan_roots": [
+    "~/Desktop/work/*",
+    "~/Desktop/projects/*",
+    "~/code/*"
+  ],
+  "entries": [
+    {
+      "path": "~/Desktop/projects/.claude/trials/active.md",
+      "kind": "state",
+      "threshold": [
+        {
+          "metric": "size",
+          "unit": "KB",
+          "operator": ">",
+          "value": 100
+        }
+      ],
+      "action": "索引下放：主檔保留 H2 與索引欄位，長段搬到 active/",
+      "retirement": "結案段搬到 archived.md",
+      "owner": "safe-trial、trial-review"
+    },
+    {
+      "path": "~/Desktop/work/*/docs/owner/STATE.md",
+      "kind": "state",
+      "threshold": [
+        {
+          "metric": "size",
+          "unit": "KB",
+          "operator": ">",
+          "value": 40
+        }
+      ],
+      "action": "提醒執行既有 state-archive，promote 決策後 reset",
+      "owner": "state-update、state-archive"
+    },
+    {
+      "path": "~/Desktop/projects/*/docs/owner/STATE.md",
+      "kind": "state",
+      "threshold": [
+        {
+          "metric": "size",
+          "unit": "KB",
+          "operator": ">",
+          "value": 40
+        }
+      ],
+      "action": "提醒執行既有 state-archive，promote 決策後 reset",
+      "owner": "state-update、state-archive",
+      "known_paths": [
+        "~/Desktop/projects/agent-deck/docs/owner/STATE.md",
+        "~/Desktop/projects/cc-vendor-bridge/docs/owner/STATE.md",
+        "~/Desktop/projects/claude-skills/docs/owner/STATE.md",
+        "~/Desktop/projects/cli-foundry/docs/owner/STATE.md",
+        "~/Desktop/projects/example-owner-blog/docs/owner/STATE.md",
+        "~/Desktop/projects/harbor-3arm/docs/owner/STATE.md",
+        "~/Desktop/projects/hook-llm-bench/docs/owner/STATE.md",
+        "~/Desktop/projects/hv-clone/docs/owner/STATE.md",
+        "~/Desktop/projects/interview-tour-2026/docs/owner/STATE.md",
+        "~/Desktop/projects/memory-backlog-research/docs/owner/STATE.md",
+        "~/Desktop/projects/openclaw-trial/docs/owner/STATE.md",
+        "~/Desktop/projects/stock-trading-ledger/docs/owner/STATE.md"
+      ]
+    },
+    {
+      "path": "~/code/*/docs/owner/STATE.md",
+      "kind": "state",
+      "threshold": [
+        {
+          "metric": "size",
+          "unit": "KB",
+          "operator": ">",
+          "value": 40
+        }
+      ],
+      "action": "提醒執行既有 state-archive，promote 決策後 reset",
+      "owner": "state-update、state-archive",
+      "known_paths": [
+        "~/code/social-info/docs/owner/STATE.md"
+      ]
+    },
+    {
+      "path": "~/.claude/wiki/index.md",
+      "kind": "state",
+      "threshold": [
+        {
+          "metric": "size",
+          "unit": "KB",
+          "operator": ">",
+          "value": 64
+        }
+      ],
+      "action": "每條壓成一行，長描述回 entity 檔",
+      "owner": "wiki"
+    },
+    {
+      "path": "~/.claude/friction/workflow-general.md",
+      "kind": "state",
+      "threshold": [
+        {
+          "metric": "size",
+          "unit": "KB",
+          "operator": ">",
+          "value": 64
+        },
+        {
+          "metric": "friction_age_days",
+          "unit": "days",
+          "operator": ">",
+          "value": 90
+        }
+      ],
+      "action": "提醒把超過保留期的已折條目按季搬到 friction/archive/",
+      "retirement": "已折條目按季退場，主檔保留待折與近期已折",
+      "owner": "friction-review-state.py"
+    },
+    {
+      "path": "~/.claude/skills/INVENTORY.md",
+      "kind": "state",
+      "threshold": [
+        {
+          "metric": "size",
+          "unit": "KB",
+          "operator": ">",
+          "value": 96
+        }
+      ],
+      "action": "只提醒，不自動改檔",
+      "owner": "skill authoring"
+    },
+    {
+      "path": "~/Desktop/projects/example-owner-blog/docs/owner/blog-mechanisms.md",
+      "kind": "state",
+      "threshold": [
+        {
+          "metric": "size",
+          "unit": "KB",
+          "operator": ">",
+          "value": 64
+        }
+      ],
+      "action": "提醒把已否決或已併入的條目搬到歸檔，觀察中留在主檔",
+      "owner": "blog workflow"
+    },
+    {
+      "path": "~/.claude/memory/MEMORY.md",
+      "kind": "state",
+      "threshold": [
+        {
+          "metric": "size",
+          "unit": "KB",
+          "operator": ">",
+          "value": 25
+        },
+        {
+          "metric": "line_count",
+          "unit": "lines",
+          "operator": ">",
+          "value": 200
+        }
+      ],
+      "action": "沿用既有 cluster 索引下放",
+      "owner": "memory maintenance"
+    },
+    {
+      "path": "~/Desktop/projects/.claude/trials/archived.md",
+      "kind": "append",
+      "threshold": [
+        {
+          "metric": "main_size",
+          "unit": "KB",
+          "operator": ">",
+          "value": 256
+        },
+        {
+          "metric": "index_size",
+          "unit": "KB",
+          "operator": ">",
+          "value": 128
+        }
+      ],
+      "action": "先讀獨立索引，再依標題錨點 grep 或 offset；主檔不切",
+      "retirement": "只追加，不改舊條；索引超過門檻再評估切檔",
+      "owner": "trial-review",
+      "index_path": "~/Desktop/projects/.claude/trials/archived.index.md",
+      "index_relation": {
+        "entry_pattern": "^### .*(?:\\([^)]*[0-9]{4}-[0-9]{2}-[0-9]{2}[^)]*\\)|\\[結案\\s+[0-9]{4}-[0-9]{2}-[0-9]{2}\\s+·\\s+[^]]+\\].*)$",
+        "format": "slug｜verdict｜結案日｜一句理由｜標題原文",
+        "anchor_field": 5
+      }
+    },
+    {
+      "path": "~/Desktop/projects/example-owner-blog/docs/owner/proofread-log.md",
+      "kind": "append",
+      "threshold": [
+        {
+          "metric": "main_size",
+          "unit": "KB",
+          "operator": ">",
+          "value": 256
+        },
+        {
+          "metric": "index_size",
+          "unit": "KB",
+          "operator": ">",
+          "value": 64
+        }
+      ],
+      "action": "先讀獨立索引，再依標題錨點 grep 或 offset；主檔不切",
+      "owner": "material-first-writing",
+      "index_path": "~/Desktop/projects/example-owner-blog/docs/owner/proofread-log.index.md",
+      "index_relation": {
+        "entry_pattern": "^### PR-\\d+\\s+.+$",
+        "format": "編號｜文章 slug｜類型｜一句｜標題原文",
+        "anchor_field": 5
+      }
+    },
+    {
+      "path": "~/Desktop/projects/example-owner-blog/docs/owner/factcheck-log.md",
+      "kind": "append",
+      "threshold": [
+        {
+          "metric": "main_size",
+          "unit": "KB",
+          "operator": ">",
+          "value": 256
+        },
+        {
+          "metric": "index_size",
+          "unit": "KB",
+          "operator": ">",
+          "value": 64
+        }
+      ],
+      "action": "超過主檔門檻時先讀獨立索引，再依標題錨點 grep 或 offset；主檔不切",
+      "owner": "material-first-writing",
+      "index_path": null,
+      "index_relation": {
+        "path": null,
+        "entry_pattern": "^### .+$",
+        "format": "編號｜主題 slug｜判定｜一句｜標題原文",
+        "anchor_field": 5
+      }
+    },
+    {
+      "path": "~/.claude/wiki/log.md",
+      "kind": "append",
+      "threshold": [
+        {
+          "metric": "main_size",
+          "unit": "KB",
+          "operator": ">",
+          "value": 256
+        },
+        {
+          "metric": "index_size",
+          "unit": "KB",
+          "operator": ">",
+          "value": 64
+        }
+      ],
+      "action": "先加檔頭提示；超過主檔門檻時再建索引，主檔不切",
+      "owner": "wiki"
+    },
+    {
+      "path": "~/Desktop/projects/example-owner-blog/docs/owner/syndication-log.md",
+      "kind": "append",
+      "threshold": [
+        {
+          "metric": "main_size",
+          "unit": "KB",
+          "operator": ">",
+          "value": 256
+        },
+        {
+          "metric": "index_size",
+          "unit": "KB",
+          "operator": ">",
+          "value": 64
+        }
+      ],
+      "action": "先讀獨立索引，再依標題錨點 grep 或 offset；主檔不切",
+      "owner": "syndication skills"
+    },
+    {
+      "path": "~/Desktop/work/*/docs/owner/*-log.md",
+      "kind": "append",
+      "threshold": [
+        {
+          "metric": "main_size",
+          "unit": "KB",
+          "operator": ">",
+          "value": 256
+        },
+        {
+          "metric": "index_size",
+          "unit": "KB",
+          "operator": ">",
+          "value": 64
+        }
+      ],
+      "action": "先讀獨立索引，再依標題錨點 grep 或 offset；主檔不切",
+      "owner": "project writing workflow"
+    },
+    {
+      "path": "~/Desktop/projects/*/docs/owner/*-log.md",
+      "kind": "append",
+      "threshold": [
+        {
+          "metric": "main_size",
+          "unit": "KB",
+          "operator": ">",
+          "value": 256
+        },
+        {
+          "metric": "index_size",
+          "unit": "KB",
+          "operator": ">",
+          "value": 64
+        }
+      ],
+      "action": "先讀獨立索引，再依標題錨點 grep 或 offset；主檔不切",
+      "owner": "project writing workflow"
+    },
+    {
+      "path": "~/code/*/docs/owner/*-log.md",
+      "kind": "append",
+      "threshold": [
+        {
+          "metric": "main_size",
+          "unit": "KB",
+          "operator": ">",
+          "value": 256
+        },
+        {
+          "metric": "index_size",
+          "unit": "KB",
+          "operator": ">",
+          "value": 64
+        }
+      ],
+      "action": "先讀獨立索引，再依標題錨點 grep 或 offset；主檔不切",
+      "owner": "project writing workflow"
+    },
+    {
+      "path": "~/.claude/handoffs/**",
+      "kind": "append",
+      "threshold": [
+        {
+          "metric": "age",
+          "unit": "days",
+          "operator": ">",
+          "value": 90
+        }
+      ],
+      "action": "提醒搬到 handoffs/archive/，不刪",
+      "retirement": "保留歷史單據，搬遷可逆且不自動執行",
+      "owner": "handoff-impl"
+    },
+    {
+      "path": "~/.claude/logs/contract-test-runs/*.jsonl",
+      "kind": "pure-log"
+    },
+    {
+      "path": "~/.claude/logs/*.jsonl",
+      "kind": "pure-log"
+    },
+    {
+      "path": "~/.claude/memory/.verification-ledger.jsonl",
+      "kind": "pure-log"
+    },
+    {
+      "path": "~/.claude/pr-review-reports/**",
+      "kind": "pure-log"
+    },
+    {
+      "path": "~/Desktop/projects/.claude/trials/**/snapshot/before/dirs",
+      "kind": "residue",
+      "threshold": [
+        {
+          "metric": "legacy_dirs_present",
+          "unit": "boolean",
+          "operator": "equals",
+          "value": true
+        }
+      ],
+      "action": "提醒一次性縮形；移除副本前由使用者拍板",
+      "retirement": "新 trial 改記 git ref 與 status，不再產生整包副本",
+      "owner": "safe-trial"
+    },
+    {
+      "path": "~/.claude/.scratch/*",
+      "kind": "residue",
+      "threshold": [
+        {
+          "metric": "age_since_completion",
+          "unit": "days",
+          "operator": ">",
+          "value": 30
+        }
+      ],
+      "action": "提醒搬到 .scratch/archive/<slug>/，不刪",
+      "retirement": "工作區全關或 spec 交付後才開始計算保留期",
+      "owner": "workflow closeout"
+    },
+    {
+      "path": "~/Desktop/projects/.scratch/*",
+      "kind": "residue",
+      "threshold": [
+        {
+          "metric": "age_since_completion",
+          "unit": "days",
+          "operator": ">",
+          "value": 30
+        }
+      ],
+      "action": "提醒搬到 .scratch/archive/<slug>/，不刪",
+      "retirement": "工作區全關或 spec 交付後才開始計算保留期",
+      "owner": "workflow closeout"
+    },
+    {
+      "path": "~/Desktop/projects/.claude/trials/review-evidence/**",
+      "kind": "residue",
+      "threshold": [
+        {
+          "metric": "status",
+          "unit": "state",
+          "operator": "equals",
+          "value": "active"
+        }
+      ],
+      "action": "保持不動；這是活的 review evidence",
+      "owner": "trial review"
+    },
+    {
+      "path": "~/.claude/references/failure-mode-taxonomy.md",
+      "kind": "append",
+      "threshold": [
+        {
+          "metric": "main_size",
+          "unit": "KB",
+          "operator": ">",
+          "value": 32
+        }
+      ],
+      "action": "案例登記區超過門檻仍保留逐筆原文，不因檔案大小刪除或合併案例；拆檔或新增歸檔機制須另經使用者批准；探針問句段不因此改寫",
+      "retirement": "案例只追加不改舊條；某類 12 個月無新案例時在該類標註待觀察",
+      "owner": "to-tickets／implement 收尾 code-review（Failure-miss 標記）"
+    }
+  ]
+}
