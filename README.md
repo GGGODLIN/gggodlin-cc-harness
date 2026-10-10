@@ -1,5 +1,7 @@
 # claude-harness（治理部分的公開版）
 
+https://github.com/user-attachments/assets/0421df31-50ee-447b-a314-a471e8e156a3
+
 ## English summary
 
 This repository is the governance part of one person's Claude Code harness: always-on rules (`CLAUDE.md`, `rules/`), hooks that enforce some of those rules mechanically, the skills, commands and agents that the workflow depends on, and the systems around them — a memory system, a trial (observation period) ledger, a friction log, a daily local analysis report, and compact-guard, which keeps evidence across context compaction. Personal customisation (status line, personal tools, blog pipeline, account and browser setup) is not included.
