@@ -88,7 +88,7 @@ It is a reference, not a product. You can install single pieces, but nothing gua
 - 🔌 [session 歷史檢索](WIRING.md#session-歷史檢索) — 推薦工具：ccsi（原作者自寫，以 SQLite FTS5 trigram 索引 session jsonl）
 - 🔌 [workflow-monitor 後端轉接](WIRING.md#workflow-monitor-後端轉接) — 推薦工具：自己寫一支 case 分支的 shell 腳本（原作者的版本含灰色中轉站分支，未公開）
 - 🔌 [中轉站](WIRING.md#中轉站) — 僅定義介面（interface only），實作請自行提供
-- 🔌 [多帳號與帳號判定](WIRING.md#多帳號與帳號判定) — 推薦工具：自己寫一支小 shell 函式庫；多帳號共用的做法見 README
+- 🔌 [多帳號與帳號判定](WIRING.md#多帳號與帳號判定) — 推薦工具：自己寫一支小 shell 函式庫
 - 🔌 [後端標記 CC_VENDOR](WIRING.md#後端標記-cc_vendor) — 推薦工具：自己的 shell launcher（原作者用一組 `ccp-*` 函式，未公開）
 - 🔌 [架構圖產生與審批](WIRING.md#架構圖產生與審批) — 推薦工具：Archify（產圖）＋ Plannotator（瀏覽器審批）
 - 🔌 [瀏覽器自動化](WIRING.md#瀏覽器自動化) — 推薦工具：LCU MCP（工具名 `mcp__lcu__js`）；console、network、效能等診斷另用 chrome-devtools MCP
@@ -97,15 +97,6 @@ It is a reference, not a product. You can install single pieces, but nothing gua
 - 🔌 [跨模型後端](WIRING.md#跨模型後端) — 推薦工具：CLIProxyAPI（本機 OpenAI 相容端點）；需要接更多模型時在前面加 LiteLLM proxy；第二意見用 Codex CLI 與 openai/codex-plugin-cc
 - 🔌 [非官方內容抓取](WIRING.md#非官方內容抓取) — 僅定義介面（interface only），實作請自行提供
 - 🔌 [額度資料來源](WIRING.md#額度資料來源) — 僅定義介面（interface only），實作請自行提供
-
-## 多帳號共用一套設定
-
-原作者同時用幾個 Claude Code 帳號。做法是每個帳號一個 config 目錄（例如 `~/.claude-alt`），裡面的 `CLAUDE.md`、`rules/`、`hooks/`、`skills/`、`commands/`、`agents/`、`settings.json` 等全部用 symlink 指回 `~/.claude`，啟動時用 `CLAUDE_CONFIG_DIR` 指定要用哪個目錄。這樣規則與 hook 只維護一份，各帳號的登入狀態與 session 紀錄仍然分開。
-
-要注意的地方：
-
-- 讀「目前帳號」的程式要先看 `CLAUDE_CONFIG_DIR` 底下的 `.claude.json`，再退回 `$HOME`，否則會讀到別的帳號（見 `WIRING.md` 的多帳號與帳號判定）。
-- 用 symlink 共用 `.git` 時，git 收尾要用 canonical 路徑判斷 repo，避免同一個 repo 被當成好幾個。
 
 ## 完整目錄
 

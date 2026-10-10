@@ -111,7 +111,7 @@ ccsi（原作者自寫，以 SQLite FTS5 trigram 索引 session jsonl）
 
 ### 推薦工具
 
-自己寫一支小 shell 函式庫；多帳號共用的做法見 README
+自己寫一支小 shell 函式庫
 
 ## 後端標記 CC_VENDOR
 
