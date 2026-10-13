@@ -24,7 +24,12 @@ def validate(source):
   inline = section(live, '## 交付前 inline 自查（R1–R3）', '### 抽樣 dispatch verify')
   dispatch = section(live, '### 抽樣 dispatch verify', '## 記憶升級')
   errors = []
+  routing = section(live, '## 來源選路：先分最新外部題與個人歷史', '## 交付前 inline 自查（R1–R3）')
   checks = [
+    ('external current routing', r'1\. 如果是最新外部事實查核或外部探索[^\n]*本機 memory、wiki、session、報告與歷史收錄不作探索入口，也不作搜尋失敗的替代', routing),
+    ('current eligibility separate', r'2\. 如果同時問「我能不能用」[^\n]*目前帳號、設定或即時資格回應[^\n]*不因此觸發個人歷史檢索', routing),
+    ('history retained', r'3\. 如果是個人歷史、既有決策或經驗回顧[^\n]*個人資料層', routing),
+    ('blocked external no history fallback', r'\*\*外部搜尋受阻或沒答案\*\*[^\n]*不改查本機歷史收錄', routing),
     ('R1 local evidence', r'^- \*\*R1[^\n]*個人或本地現況可用權威檔案的 Read、git／CLI 原始輸出', inline),
     ('R2 decision claims', r'^- \*\*R2[^\n]*decision table 每一列[^\n]*不得拿來推薦或排除方案', inline),
     ('decision table source column', r'^- \*\*Decision table 固定形狀\*\*[^\n]*欄名逐字為 `來源`[^\n]*每列[^\n]*逐項對應[^\n]*不得交付推薦', inline),
@@ -96,7 +101,25 @@ if not validate(continuation_mutant):
   raise SystemExit(1)
 print('PASS auditor-continuation mutant rejected')
 
-print('PASS=7 FAIL=0')
+routing_line = next(line for line in text.splitlines() if line.startswith('1. 如果是最新外部事實查核或外部探索'))
+if not validate(text.replace(routing_line, '', 1)):
+  print('FAIL external-routing mutant passed')
+  raise SystemExit(1)
+print('PASS external-routing mutant rejected')
+
+eligibility_line = next(line for line in text.splitlines() if line.startswith('2. 如果同時問「我能不能用」'))
+if not validate(text.replace(eligibility_line, '', 1)):
+  print('FAIL eligibility-routing mutant passed')
+  raise SystemExit(1)
+print('PASS eligibility-routing mutant rejected')
+
+blocked_line = next(line for line in text.splitlines() if line.startswith('- **外部搜尋受阻或沒答案**'))
+if not validate(text.replace(blocked_line, '', 1)):
+  print('FAIL blocked-routing mutant passed')
+  raise SystemExit(1)
+print('PASS blocked-routing mutant rejected')
+
+print('PASS=10 FAIL=0')
 PY
 
 python3 "$SCRIPT_DIR/decision-table-output-contract.py" --self-test

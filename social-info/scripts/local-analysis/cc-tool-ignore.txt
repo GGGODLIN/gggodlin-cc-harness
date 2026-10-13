@@ -77,6 +77,8 @@ figma
 open_browser_use
 # lcu：版本由 manifest 的絕對執行檔路徑追蹤；此處只排除同一工具的 MCP 名稱，避免重複待分類。
 lcu
+# mirroir：版本由 manifest 的 brew jfarcand/tap/mirroir-mcp 追蹤；此處只排除同一工具的 MCP 名稱，2026-10-10 歸忽略
+mirroir
 
 # mcp（同一個 PyPI 套件的第二個註冊，不是獨立工具）
 # semble-docs = `uvx --from semble[mcp] semble --content docs`，與 semble server 同套件、

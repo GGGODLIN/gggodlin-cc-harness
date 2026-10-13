@@ -3,7 +3,7 @@ name: wayfinder
 description: Plan a huge, foggy chunk of work — more than one agent session can hold — as a local map of decision tickets, resolved one at a time until the way to the destination is clear. Use when the user types /wayfinder, or when a requirements gate (e.g. to-spec step 0) reports wayfinder-scale fog and the user explicitly agrees to chart a map. Do not use for well-scoped features (to-spec / to-tickets handle those), single-session work, or without the user's explicit go-ahead.
 upstream: mattpocock/skills
 upstream-path: skills/engineering/wayfinder/SKILL.md
-upstream-pinned: 6654f6b
+upstream-pinned: 49dd158
 ---
 
 <!-- 本檔在契約測試底下：python3 ~/.claude/commands/tests/test_skill_verify_one_shot_callers.py -->

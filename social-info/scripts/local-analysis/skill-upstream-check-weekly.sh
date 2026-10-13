@@ -284,7 +284,8 @@ hot_latest=$(gh api "repos/shanraisshan/claude-code-best-practice/commits?path=R
 # --- ⚠️ 升級段（2026-07-10 加）---
 # 巡邏失敗曾連續 5 週每週有印 ⚠️ 但被 digest 濃縮掉沒進注意力；
 # ⚠️ = 巡邏機制本身失效（非「本週沒新東西」），首次出現即升級、digest 端有對應保留規則。
-warn_lines=$(grep '⚠️' "$LOG_FILE" || true)
+# capability delta 的 ⚠️ 是「pull 前過目」提示、不是巡邏失效，撈進升級段會每週製造假 🚨（2026-10-13 實例）
+warn_lines=$(grep '⚠️' "$LOG_FILE" | grep -v 'capability delta' || true)
 if [ -n "$warn_lines" ]; then
   {
     echo ""

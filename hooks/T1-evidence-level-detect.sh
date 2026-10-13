@@ -18,8 +18,8 @@
 # Architecture: G0（剔 code 後長度 < 200 → exit）→ 單判官（背景）→ ledger
 #   judge（2026-09-29 使用者拍板，所有 session 一視同仁；Groq 同樣是外部服務，不另設資料邊界）：
 #   - 主判官 jev-latest via Experiential Labs /v1/systemone（免費 promo；key 在 Keychain experiential-api-key）
-#   - Jev 兩次都失敗 → groq-qwen-3.8-27b via CLIProxyAPI relay（→ LiteLLM key pool → Groq）補判
-#   ledger 的 model 欄記實際判定的判官，統計可分軌；兩個判官判準不同，合併計數前先分開看。
+#   - Jev 兩次都失敗 → Groq relay → Drex API（Keychain nace-api-key）依序補判
+#   ledger 的 model 欄記實際判定的判官；各模型判斷不同，合併計數前先分開看。
 #   Jev 題目＝~/Desktop/projects/jev-hook-backtest 的 B 臂（本檔 rubric 原文＋一個 Noul＋一個主類型 Choice），
 #   門檻 0.5：117 筆 Opus 標籤回測 test 半 recall 0.41→0.80、precision 0.90→0.88；
 #   平衡準確度差 +0.076、95% CI [-0.097, 0.249] 含 0（results/2026-09-29-evidence-level.md）。
@@ -48,9 +48,9 @@
 # 2. 被糾正的宣稱在更早的訊息、當則只是延續 → 判官只看單則、會誤報
 # 3. 長回覆截斷 6000 字元 → 尾段無據宣稱漏偵
 # 4. 判分數學由週結 script 從 jsonl 重算、不信判官自報
-# 5. Jev 掛 → Groq 補判（2026-09-29 使用者拍板互為 fallback）；ledger model 欄分軌，兩者都掛才記 unavailable
-# 6. 單點鏈：CLIProxyAPI（launchd 停）→ LiteLLM（:8000 pool）→ Groq free tier（TPM 413 / RPD 耗盡）
-#    任一環掛 = 全滅記 unavailable；提示型 gate、判不出來一律放行不卡 session
+# 5. Jev 掛 → Groq → Drex 補判；ledger model 欄分軌，三者都掛才記 unavailable
+# 6. Groq relay 鏈失敗時改走獨立 Drex API；Drex 憑證或服務也不可用則記 unavailable
+#    提示型 gate、判不出來一律放行不卡 session
 # 7. log 目標病態（symlink / FIFO / 非 regular file）→ 拒寫並整支放行，不卡住不寫到別處
 set -uo pipefail
 
@@ -74,9 +74,11 @@ done
 GROQ_JUDGE="groq-qwen-3.8-27b"
 JEV_JUDGE="jev-latest"
 JEV_URL="${T1_EV_JEV_URL:-https://api.experientiallabs.ai/v1/systemone}"
+DREX_JUDGE="drex-v1.5"
+DREX_URL="${T1_EV_DREX_URL:-https://console.nace.ai/v1/systemone}"
 JUDGE_TIMEOUT="${T1_EV_TIMEOUT:-30}"
 
-CLIPROXY_BASE_URL="http://127.0.0.1:8317"
+CLIPROXY_BASE_URL="${T1_EV_GROQ_URL:-http://127.0.0.1:8317}"
 if [[ -f "$HOME/.cli-proxy-api/keys.env" ]]; then
   # shellcheck disable=SC1091
   source "$HOME/.cli-proxy-api/keys.env" 2>/dev/null || true
@@ -156,12 +158,12 @@ call_judge() {
 # Jev 判官：輸出與 extract_json 同形（violation/types/evidence）另加 p_violation。
 # state 截 20000 字元：官方上限是 state＋最長一題 32K tokens，rubric 本身約 2K 字元。
 call_jev() {
-  local key
-  key=$(security find-generic-password -s experiential-api-key -w 2>/dev/null) || return 1
+  local key service="${1:-experiential-api-key}" url="${2:-$JEV_URL}" model="${3:-$JEV_JUDGE}"
+  key=$(security find-generic-password -s "$service" -w 2>/dev/null) || return 1
   [[ -z "$key" ]] && return 1
-  JEV_KEY="$key" JEV_URL="$JEV_URL" JEV_MODEL="$JEV_JUDGE" JEV_TIMEOUT="$JUDGE_TIMEOUT" \
+  JEV_KEY="$key" JEV_URL="$url" JEV_MODEL="$model" JEV_TIMEOUT="$JUDGE_TIMEOUT" \
   JEV_PROMPT_FILE="$PROMPT_FILE" python3 -c '
-import json, os, sys, urllib.request
+import json, math, os, sys, urllib.request
 text = sys.stdin.read()[:20000]
 rub = open(os.environ["JEV_PROMPT_FILE"], encoding="utf-8").read()
 cut = rub.find("只輸出一行 JSON")
@@ -185,8 +187,13 @@ req = urllib.request.Request(os.environ["JEV_URL"], json.dumps(body).encode(), {
     "Authorization": "Bearer " + os.environ["JEV_KEY"], "Content-Type": "application/json"})
 try:
     d = json.load(urllib.request.urlopen(req, timeout=float(os.environ["JEV_TIMEOUT"])))
-    p = float(d["answers"]["violation"]["noul"])
+    value = d["answers"]["violation"]["noul"]
+    if type(value) not in (int, float) or not math.isfinite(value) or not 0 <= value <= 1:
+        sys.exit(1)
+    p = float(value)
     main = d["answers"]["main_type"].get("choice")
+    if main not in types:
+        sys.exit(1)
 except Exception:
     sys.exit(1)
 viol = p >= 0.5
@@ -195,7 +202,13 @@ print(json.dumps({"violation": viol, "types": [main] if viol and main and main !
 }
 
 run_judge() {
-  if [[ "$JUDGE" == "$JEV_JUDGE" ]]; then call_jev; else call_judge "$JUDGE"; fi
+  if [[ "$JUDGE" == "$JEV_JUDGE" ]]; then
+    call_jev
+  elif [[ "$JUDGE" == "$DREX_JUDGE" ]]; then
+    call_jev nace-api-key "$DREX_URL" "$DREX_JUDGE"
+  else
+    call_judge "$JUDGE"
+  fi
 }
 
 judge_and_log() {
@@ -208,8 +221,13 @@ judge_and_log() {
     JUDGE="$GROQ_JUDGE"
     v=$(run_judge || true)
   fi
+  if [[ -z "$v" && "$JUDGE" == "$GROQ_JUDGE" ]]; then
+    echo "$(date -Iseconds) groq failed, fallback drex (sid=$SID)" >> "$WARN_LOG"
+    JUDGE="$DREX_JUDGE"
+    v=$(run_judge || true)
+  fi
   if [[ -z "$v" ]]; then
-    echo "$(date -Iseconds) judge failed x2 (sid=$SID)" >> "$WARN_LOG"
+    echo "$(date -Iseconds) all judges unavailable (sid=$SID)" >> "$WARN_LOG"
     jq -nc --arg ts "$(date -Iseconds)" --arg sid "$SID" --arg model "$JUDGE" \
       '{ts:$ts, session_id:$sid, model:$model, status:"unavailable"}' >> "$LEDGER" 2>/dev/null || true
     return 0

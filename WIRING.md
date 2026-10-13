@@ -33,22 +33,6 @@
 
 TesterArmy（tester-army/e2e：官方 skill 加 e2e 框架）
 
-## better-rm
-
-### 用到的元件
-
-- `hooks/better-rm-env.sh`
-- `hooks/better-rm-env.test.sh`
-- `scripts/skill-changes-daily.py`
-
-### 需提供的介面
-
-一個把 `rm` 改成丟垃圾桶的 shim 目錄；SessionStart hook 把它放到 PATH 最前面，讓 agent 誤刪檔案時還救得回來。
-
-### 推薦工具
-
-better-rm
-
 ## session 歷史檢索
 
 ### 用到的元件
@@ -91,6 +75,20 @@ ccsi（原作者自寫，以 SQLite FTS5 trigram 索引 session jsonl）
 第三方中轉服務的健康度指標（0–100，越低越差），以及在 Codex 額度用完時改走同一個 review 指令的備援 provider 設定。
 
 此接線點只定義介面，實作請自行提供。
+
+## 全機文件定位
+
+### 用到的元件
+
+- `rules/common/code-search.md`
+
+### 需提供的介面
+
+一個有界範圍的文件定位索引：輸入一句描述，回傳最可能的原始檔路徑與摘錄，並附索引時間與「原檔是否已變」旗標；用在「不知道東西在哪個 repo／目錄」的時候。已知 repo 的程式探索仍走程式碼搜尋、session 歷史走 session 歷史檢索；沒有這個工具時退回檔名／關鍵詞查找，空結果不代表檔案不存在。
+
+### 推薦工具
+
+DigUp（原作者試用中，用一支小 wrapper 包起來、掃描範圍由私人設定檔決定，兩者未公開；不是強依賴，規則其餘路由不靠它）
 
 ## 多帳號與帳號判定
 

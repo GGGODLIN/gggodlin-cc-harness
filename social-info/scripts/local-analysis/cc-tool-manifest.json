@@ -193,5 +193,20 @@
     "name": "~/.local/share/lcu/current/bin/lcu",
     "manager": "github-release",
     "source": "amontlabs/lcu"
+  },
+  {
+    "name": "tmux",
+    "manager": "brew",
+    "source": "tmux"
+  },
+  {
+    "name": "tuios",
+    "manager": "brew",
+    "source": "tuios"
+  },
+  {
+    "name": "zellij",
+    "manager": "brew",
+    "source": "zellij"
   }
 ]

@@ -81,11 +81,11 @@ Before proposing a fix:
    ```bash
    # Layer 1: Workflow
    echo "=== Secrets available in workflow: ==="
-   echo "IDENTITY: ${IDENTITY:+SET}${IDENTITY:-UNSET}"
+   [ -n "${IDENTITY:-}" ] && echo "IDENTITY: SET" || echo "IDENTITY: UNSET"   # 不用 ${IDENTITY:-UNSET}：有值時會把值印出來
 
    # Layer 2: Build script
    echo "=== Env vars in build script: ==="
-   env | grep IDENTITY || echo "IDENTITY not in environment"
+   env | grep -q '^IDENTITY=' && echo "IDENTITY present" || echo "IDENTITY not in environment"
 
    # Layer 3: Signing script
    echo "=== Keychain state: ==="
@@ -100,7 +100,7 @@ Before proposing a fix:
 
    **Redact before showing**（吸收自上游 2026-08-11；適用於本步驟與 Phase 3 證據表——所有要秀給使用者的指令、輸出、log、抓包內容）：
    - Secret 值本身（API key / password / token 值 / DSN 密碼段）不逐字出現在你顯示的輸出裡——改寫**指位**：env var 名、`.env` 路徑＋行、keychain 條目名（與 save-session 同一條規則）；同一值的非 secret 部分（host / port / db 名）照舊原樣。
-   - Feedback loop 綁 env var 讓憑證留在環境不進輸出——上面 `${IDENTITY:+SET}` 的「印存在性不印值」就是標準形。
+   - Feedback loop 綁 env var 讓憑證留在環境不進輸出——上面 `[ -n "${IDENTITY:-}" ] && echo SET || echo UNSET` 的「印存在性不印值」就是標準形（`${VAR:-UNSET}` 有值時會印出值，不算；上游 superpowers `bb92a777` 同一修法）。
    - 帶 auth header 的 captured artifact 只引用有訊號的行。
    - 遮完不足以診斷 → 明說並問使用者，不要印出 secret。
 

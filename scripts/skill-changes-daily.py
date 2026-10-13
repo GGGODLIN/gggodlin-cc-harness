@@ -41,6 +41,18 @@ def git(*args):
   return subprocess.run(["git", "-C", str(CONFIG), *args], capture_output=True, text=True, check=False)
 
 
+class GitError(RuntimeError):
+  pass
+
+
+def git_ok(*args):
+  # log／status 失敗時 stdout 是空的，跟「沒有改版」長得一樣；不擋下就會把書籤推過沒看過的 commit
+  proc = git(*args)
+  if proc.returncode != 0:
+    raise GitError(f"git {args[0]} exit {proc.returncode}：{(proc.stderr or '').strip()[-200:]}")
+  return proc
+
+
 def load_state():
   try:
     data = json.loads(STATE.read_text())
@@ -71,10 +83,10 @@ VENDOR_MANAGED_PREFIXES = ("skills/.trash/", "skills/synced/")
 
 def changed_paths(last_head, fallback_since, seen_uncommitted):
   if last_head and git("cat-file", "-e", f"{last_head}^{{commit}}").returncode == 0:
-    committed = git("log", "--name-only", "--format=", f"{last_head}..HEAD", "--", "skills/*/SKILL.md", "commands/*.md")
+    committed = git_ok("log", "--name-only", "--format=", f"{last_head}..HEAD", "--", "skills/*/SKILL.md", "commands/*.md")
   else:
-    committed = git("log", "--name-only", "--format=", f"--since={fallback_since}", "--", "skills/*/SKILL.md", "commands/*.md")
-  dirty = git("status", "--porcelain", "--", "skills/*/SKILL.md", "commands/*.md")
+    committed = git_ok("log", "--name-only", "--format=", f"--since={fallback_since}", "--", "skills/*/SKILL.md", "commands/*.md")
+  dirty = git_ok("status", "--porcelain", "--", "skills/*/SKILL.md", "commands/*.md")
   paths = {}
   for line in committed.stdout.splitlines():
     line = line.strip()
@@ -142,13 +154,6 @@ def run_evaluator(skill_targets, date):
   return per, (f"Tier 2 preflight {preflight}：{reason}" if preflight == "infrastructure_failure" else None)
 
 
-def skill_up_env():
-  env = dict(os.environ)
-  shim = str(HOME / ".local/share/better-rm/bin")
-  env["PATH"] = os.pathsep.join(p for p in env.get("PATH", "").split(os.pathsep) if p and p != shim)
-  return env
-
-
 def launch_skill_up(targets, date):
   launched = []
   if not SKILL_UP.is_file():
@@ -165,7 +170,6 @@ def launch_skill_up(targets, date):
       subprocess.Popen(
         [str(SKILL_UP), "run", "evals/eval.yaml", "--output-dir", str(EVAL_RUNS / t["name"])],
         cwd=str(t["eval_dir"]), stdout=handle, stderr=subprocess.STDOUT, start_new_session=True,
-        env=skill_up_env(),
       )
     launched.append(t["name"])
   return launched, None
@@ -195,6 +199,23 @@ def collect_skill_up_results(since_epoch):
   return sorted(results, key=lambda r: (r["skill"], r["iteration"]))
 
 
+def skill_up_result_tier(result):
+  # FAIL 是 skill 沒過；ERROR 是 harness，不能升成高，但也不能當全過掉進低。
+  if result["failed"]:
+    return "高"
+  if result.get("errored"):
+    return "中"
+  return "低"
+
+
+def skill_up_detail(result):
+  # iteration 目錄名在不同 output root 會重覆；不帶 result.json 路徑，同名 run 在報告裡分不開。
+  detail = f"{result['passed']} PASS／{result['failed']} FAIL／{result.get('errored', 0)} ERROR"
+  if result.get("errored") and not result["failed"]:
+    detail += "（harness 錯誤、非 skill 失敗）"
+  return f"{detail} {result['path']}"
+
+
 def tier_for(target, evaluation, skill_up, runner_error):
   reasons = []
   tier = "低"
@@ -216,15 +237,12 @@ def tier_for(target, evaluation, skill_up, runner_error):
       elif t2.get("status") not in ("passed", None):
         tier = "高" if tier == "高" else "中"
         reasons.append(f"Tier 2 {t2.get('status')}：{t2.get('reason')}")
+  rank = {"低": 0, "中": 1, "高": 2}
   for r in skill_up:
-    if r["failed"]:
-      tier = "高"
-      reasons.append(f"skill-up {r['iteration']}：{r['passed']} PASS／{r['failed']} FAIL")
-    elif r.get("errored"):
-      tier = "高" if tier == "高" else "中"
-      reasons.append(f"skill-up {r['iteration']}：{r['passed']} PASS／{r['errored']} ERROR（harness 錯誤、非 skill 失敗）")
-    else:
-      reasons.append(f"skill-up {r['iteration']}：{r['passed']} PASS")
+    result_tier = skill_up_result_tier(r)
+    if rank[result_tier] > rank[tier]:
+      tier = result_tier
+    reasons.append(f"skill-up {r['iteration']}：{skill_up_detail(r)}")
   if not reasons:
     reasons.append("Tier 1／Tier 2 通過" if target["kind"] == "skill" else "無 SkillEvaluator 面；只排 skill-up")
   return tier, reasons
@@ -256,9 +274,9 @@ def render(date, targets, evaluations, runner_error, launched, launch_error, ski
     lines.append("## 上一輪啟動的 skill-up 回歸結果")
     for name, rows in sorted(by_skill.items()):
       for r in rows:
-        tier = "高" if r["failed"] else "低"
+        tier = skill_up_result_tier(r)
         tiers[tier].append(f"{name} skill-up")
-        lines.append(f"- {name} {r['iteration']}：{r['passed']} PASS／{r['failed']} FAIL → 建議檔位：{tier}")
+        lines.append(f"- {name} {r['iteration']}：{skill_up_detail(r)} → 建議檔位：{tier}")
     lines.append("")
   lines.append("## 本輪限制")
   if runner_error:
@@ -293,10 +311,15 @@ def main():
     parser.error("the daily report requires --out")
   out = Path(args.out).expanduser()
   state = load_state()
-  head = git("rev-parse", "HEAD").stdout.strip()
   now = time.time()
   fallback_since = (dt.datetime.now() - dt.timedelta(hours=24)).strftime("%Y-%m-%dT%H:%M:%S")
-  paths, current_uncommitted = changed_paths(state.get("last_head"), fallback_since, state.get("uncommitted_stamps") or {})
+  try:
+    head = git_ok("rev-parse", "HEAD").stdout.strip()
+    paths, current_uncommitted = changed_paths(state.get("last_head"), fallback_since, state.get("uncommitted_stamps") or {})
+  except GitError as error:
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(f"# skill-changes {args.date}\n\n⚠️ 讀不到 ~/.claude 的 git 紀錄，本輪沒有檢查改版、書籤未前進：{error}\n")
+    return 1
   targets = to_targets(paths)
   skill_up_results = collect_skill_up_results(float(state.get("last_run_epoch", now - 86400)))
   plugin_events = plugin_hook_drift.scan(CONFIG, APPROVED_HOOKS)

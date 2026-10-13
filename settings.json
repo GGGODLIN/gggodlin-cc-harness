@@ -319,11 +319,6 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/bin/sh ~/.claude/hooks/better-rm-env.sh",
-            "timeout": 5
-          },
-          {
-            "type": "command",
             "command": "~/.claude/hooks/session-start-state.sh",
             "timeout": 10
           },

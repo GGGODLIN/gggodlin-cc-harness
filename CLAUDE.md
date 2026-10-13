@@ -2,15 +2,15 @@
 
 ## 語言偏好
 
-- 回應請使用繁體中文；Commit message 使用英文，遵循 Conventional Commits 規範（feat、fix、test 等 prefix）
+- 回應請使用繁體中文，背景任務通知喚醒後的進度回報與等待說明也一樣，通知本身是英文不代表要用英文回；Commit message 使用英文，遵循 Conventional Commits 規範（feat、fix、test 等 prefix）
 - 指代與數量點名：「這個部分／相關單位／儘速／定期」改成具體對象與數字（「三天內」勝過「儘速」）
 - 條件放動作前面（「如果 X，就做 Y」），讓不適用的讀者早點離開
 
 ## 連結格式
 
 - 提及網頁、文件、Issue、PR 一律組完整可點擊 URL，不要只給縮寫或純文字描述；GitHub / Bitbucket 可加 `owner/repo#123` 短格式，但完整 URL 至少出現一次；對人敘事用標題帶連結、不要裸編號牆（一排 #42 #43 讀不出資訊）
-- 本地檔案路徑分情境：對話內回答 / 暫時性檔案 → `file:///絕對路徑`（terminal 可點）；會 commit 的 repo markdown → repo-root relative path（leading slash，如 `[docs/spec.md](/docs/spec.md)`，web UI 才 render 跳檔 link）；個人 memory / 機器特定路徑不寫進 commit 的 doc、改純文字描述
-- 不要只用 inline code backtick 包路徑（不會 render 成 clickable link）
+- 本地檔案路徑分情境：對話內回答 / 暫時性檔案 → `file:///絕對路徑`（terminal 可點）；會 commit 的 repo markdown → repo-root relative path（leading slash，如 `[docs/spec.md](/docs/spec.md)`，web UI 才 render 跳檔 link）；個人 memory / 機器特定路徑不寫進 commit 的 doc、改純文字描述；長期 memory／wiki 不連 scratchpad 或 /tmp 暫存檔，要留的證據先搬到持久位置再連
+- 不要只用 inline code backtick 包路徑（不會 render 成 clickable link）；例外是附在宣稱旁的短出處標註（`檔名:行號`），要使用者打開、編輯或確認的檔案仍給可點連結
 
 ## 程式碼風格
 
@@ -60,7 +60,7 @@
 - Remote master / main = ground truth、本地可能 stale。查 PR / ship 狀態 / 比對 master 前先 `git fetch`；本地與 remote 不一致時**主動 surface 給 user**、不要靜默以本地為準
 - 「不確定 / 看不到 / 只有你知道」≠ 出口：grep / git log / session jsonl / api 三秒事，先翻過才能說查不到
 - 使用者句中出現「我記得 / 之前有 / 上次 / 翻一下 / 你查一下」等指涉過去工作的詞 → **回答前必先翻對應紀錄**（session jsonl / git / memory / 實驗輸出），找到或確認不存在才下判斷；不得憑印象直接回
-- STATE.md / docs / memory 寫的狀態屬 claim、不是 evidence；要 API 查詢 / `git log` / master grep 才算數
+- STATE.md / docs / memory / claude-mem 注入或搜到的摘要寫的狀態屬 claim、不是 evidence；要 API 查詢 / `git log` / master grep 或讀程式碼才算數
 - 寫 utility / 工具函式前先查 registry 有沒有現成 battle-tested 套件，優先採用而非手寫
 - 發現安全問題：停下當前工作先修 CRITICAL；已暴露的 secret 立即輪替；修完掃整個 codebase 同類問題
 - Code 未變更就不重跑同一驗證指令——重跑不產生新證據；要更強證據就換驗證角度，不是重複同一發

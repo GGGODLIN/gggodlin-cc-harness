@@ -3,7 +3,7 @@ name: to-tickets
 description: "Break a plan, spec, or the current conversation into tracer-bullet tickets, each declaring its blocking edges. Lands in the repo's convention: sections in the openspec change's tasks.md if openspec/ exists, else one file per ticket under .scratch/{feature-slug}/issues/. Use when a spec or plan has converged and it is time to break it into executable units — 拆 ticket / 排 task / to-tickets, or the local pipeline was chosen at kickoff. Do not use for: single-step fixes too small to slice, or editing an existing ticket set (edit it directly)."
 upstream: mattpocock/skills
 upstream-path: skills/engineering/to-tickets/SKILL.md
-upstream-pinned: 6654f6b
+upstream-pinned: 49dd158
 ---
 
 <!-- 本檔在契約測試底下：node ~/.claude/skills/implement/scripts/tests/testing-mode-contract.test.mjs -->

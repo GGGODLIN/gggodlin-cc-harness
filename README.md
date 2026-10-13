@@ -84,10 +84,10 @@ It is a reference, not a product. You can install single pieces, but nothing gua
 
 - 🔌 [ChatGPT 網頁版席位](WIRING.md#chatgpt-網頁版席位) — 僅定義介面（interface only），實作請自行提供
 - 🔌 [E2E 測試服務](WIRING.md#e2e-測試服務) — 推薦工具：TesterArmy（tester-army/e2e：官方 skill 加 e2e 框架）
-- 🔌 [better-rm](WIRING.md#better-rm) — 推薦工具：better-rm
 - 🔌 [session 歷史檢索](WIRING.md#session-歷史檢索) — 推薦工具：ccsi（原作者自寫，以 SQLite FTS5 trigram 索引 session jsonl）
 - 🔌 [workflow-monitor 後端轉接](WIRING.md#workflow-monitor-後端轉接) — 推薦工具：自己寫一支 case 分支的 shell 腳本（原作者的版本含灰色中轉站分支，未公開）
 - 🔌 [中轉站](WIRING.md#中轉站) — 僅定義介面（interface only），實作請自行提供
+- 🔌 [全機文件定位](WIRING.md#全機文件定位) — 推薦工具：DigUp（原作者試用中，用一支小 wrapper 包起來、掃描範圍由私人設定檔決定，兩者未公開；不是強依賴，規則其餘路由不靠它）
 - 🔌 [多帳號與帳號判定](WIRING.md#多帳號與帳號判定) — 推薦工具：自己寫一支小 shell 函式庫
 - 🔌 [後端標記 CC_VENDOR](WIRING.md#後端標記-cc_vendor) — 推薦工具：自己的 shell launcher（原作者用一組 `ccp-*` 函式，未公開）
 - 🔌 [架構圖產生與審批](WIRING.md#架構圖產生與審批) — 推薦工具：Archify（產圖）＋ Plannotator（瀏覽器審批）
@@ -100,6 +100,7 @@ It is a reference, not a product. You can install single pieces, but nothing gua
 
 ## 完整目錄
 
+- [`CHANGELOG.md`](CHANGELOG.md)
 - [`CLAUDE.md`](CLAUDE.md)
 - [`LICENSE`](LICENSE)
 - [`README.md`](README.md)
@@ -113,8 +114,8 @@ It is a reference, not a product. You can install single pieces, but nothing gua
 - [`examples/`](examples/) — 8 個檔案；內含 `friction/`、`memory/`、`tool-upgrade-notes/`、`trials/`、`wiki/`
 - [`folder-level/`](folder-level/) — 15 個檔案；內含 `.claude/`、`CLAUDE.md`
 - [`friction/`](friction/) — 1 個檔案；內含 `PROTOCOL.md`
-- [`hooks/`](hooks/) — 113 個檔案；內含 `T1-claim-detect-local-first.llm.test.sh`、`T1-claim-detect-local-first.sh`、`T1-claim-detect-local-first.test.sh`、`T1-evidence-level-detect.sh`、`T1-evidence-level-detect.test.sh`、`T1-evidence-level-fixtures/`、`T1-evidence-level-prompt-v2.txt`、`T1-system-prompt-v5d.txt`…（共 109 項）
-- [`install/`](install/) — 45 個檔案；內含 `compact-guard/`、`folder-level/`、`hooks/`、`output-styles/`、`workflows/`
+- [`hooks/`](hooks/) — 111 個檔案；內含 `T1-claim-detect-local-first.llm.test.sh`、`T1-claim-detect-local-first.sh`、`T1-claim-detect-local-first.test.sh`、`T1-evidence-level-detect.sh`、`T1-evidence-level-detect.test.sh`、`T1-evidence-level-fixtures/`、`T1-evidence-level-prompt-v2.txt`、`T1-system-prompt-v5d.txt`…（共 107 項）
+- [`install/`](install/) — 44 個檔案；內含 `compact-guard/`、`folder-level/`、`hooks/`、`output-styles/`、`workflows/`
 - [`model-routing.env`](model-routing.env)
 - [`openspec/`](openspec/) — 3 個檔案；內含 `specs/`
 - [`output-styles/`](output-styles/) — 1 個檔案；內含 `Explanatory.md`
@@ -122,6 +123,6 @@ It is a reference, not a product. You can install single pieces, but nothing gua
 - [`rules/`](rules/) — 14 個檔案；內含 `common/`、`typescript/`
 - [`scripts/`](scripts/) — 100 個檔案；內含 `advisor-extract-context.py`、`agent-contract-command/`、`agent-contract-validator.definition.test.sh`、`agent-contract-validator.diagnostics.test.sh`、`agent-contract-validator.frontmatter.test.sh`、`agent-contract-validator.mcp-tools.test.sh`、`agent-contract-validator.mjs`、`agent-contract-validator.name.test.sh`…（共 86 項）
 - [`settings.json`](settings.json)
-- [`skills/`](skills/) — 198 個檔案；內含 `INVENTORY.md`、`absorb-pack/`、`agent-authoring/`、`agent-dispatch/`、`align-intent/`、`auto-choice/`、`brainstorm/`、`caveman/`…（共 42 項）
+- [`skills/`](skills/) — 203 個檔案；內含 `INVENTORY.md`、`absorb-pack/`、`agent-authoring/`、`agent-dispatch/`、`align-intent/`、`auto-choice/`、`brainstorm/`、`caveman/`…（共 42 項）
 - [`social-info/`](social-info/) — 76 個檔案；內含 `scripts/`、`tests/`
 - [`workflows/`](workflows/) — 7 個檔案；內含 `best-of-n-implement.js`、`failure-mode-daily.sh`、`local-analysis.js`、`skill-changes-daily.sh`、`skillevaluator-weekly.sh`、`tests/`

@@ -20,11 +20,11 @@ def locations(config):
     if not isinstance(records, list) or not records:
       errors.append({"plugin": name, "status": "遺失", "category": "安裝記錄"})
       continue
-    paths = {record.get("installPath") for record in records if isinstance(record, dict)}
-    if len(paths) != 1 or not all(isinstance(path, str) and Path(path).is_absolute() for path in paths):
+    paths = [record.get("installPath") if isinstance(record, dict) else None for record in records]
+    if not all(isinstance(path, str) and Path(path).is_absolute() for path in paths):
       errors.append({"plugin": name, "status": "無法檢查", "category": "安裝位置"})
       continue
-    found[name] = Path(next(iter(paths)))
+    found[name] = tuple(Path(path) for path in sorted(set(paths)))
   return found, errors
 
 
@@ -66,6 +66,20 @@ def snapshot(plugin):
     return None, "無法檢查"
 
 
+def installation_content(roots):
+  if len(roots) == 1:
+    return snapshot(roots[0])
+  contents = {}
+  for root in roots:
+    current, error = snapshot(root)
+    if error not in (None, "no-hooks"):
+      return None, error
+    contents[str(root)] = current
+  if all(content is None for content in contents.values()):
+    return None, "no-hooks"
+  return {"installations": contents}, None
+
+
 def read_state(path):
   if not path.exists():
     return {}
@@ -104,8 +118,8 @@ def scan(config, approved_path):
   except (OSError, ValueError, TypeError):
     return [{"plugin": "plugin inventory", "status": "無法檢查", "category": "清單或批准基準"}]
   events = list(errors)
-  for name, root in sorted(installed.items()):
-    current, error = snapshot(root)
+  for name, roots in sorted(installed.items()):
+    current, error = installation_content(roots)
     if error == "no-hooks" and name not in approved:
       continue
     if error:
@@ -121,6 +135,9 @@ def scan(config, approved_path):
     if not isinstance(content, dict):
       events.append({"plugin": name, "status": "未審", "category": "舊格式批准需重新批准"})
       continue
+    if "installations" in current or "installations" in content:
+      events.append({"plugin": name, "status": "未審", "category": "安裝位置或 hook 內容"})
+      continue
     categories = []
     if content.get("manifest") != current["manifest"]:
       categories.append("manifest")
@@ -134,7 +151,7 @@ def current_content(config, name):
   installed, errors = locations(config)
   if name not in installed:
     raise ValueError(f"plugin is not an enabled installation: {name}; {errors}")
-  current, error = snapshot(installed[name])
+  current, error = installation_content(installed[name])
   if error:
     raise ValueError(f"plugin hook cannot be inspected: {error}")
   return current

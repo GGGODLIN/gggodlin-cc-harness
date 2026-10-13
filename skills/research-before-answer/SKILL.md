@@ -19,16 +19,20 @@ description: Use when answering a factual question about a named repo, package, 
 
 **不觸發**：純框架 / 原則 / 設計模式 / 概念解釋（用訓練知識即可）。
 
-## 並行策略：個人 + 外部（預設）
+## 來源選路：先分最新外部題與個人歷史
 
-本地（wiki + session memory）與外部採**並行 + merge**，不是 wiki 優先。
+1. 如果是最新外部事實查核或外部探索，就直接接「外部工具分流」，用網路搜尋、第一手來源或已配置的外部查詢工具。本機 memory、wiki、session、報告與歷史收錄不作探索入口，也不作搜尋失敗的替代；收錄內容無法代表最新外部資訊。
+2. 如果同時問「我能不能用」，就並行讀目前帳號、設定或即時資格回應；「我的」不因此觸發個人歷史檢索。外部功能現況與本人資格分開舉證。
+3. 如果是個人歷史、既有決策或經驗回顧，就接「個人資料層」。混合題只對回顧部分查本機紀錄，最新外部部分仍走第 1 步。
 
-### 個人資料層
+完成條件：每個待答問題已分到外部現況、本人現況或個人歷史，選定來源後再查詢。
+
+### 個人資料層（只用於歷史／決策／經驗回顧）
 
 - **wiki** (`~/.claude/wiki/`): 個人經驗／偏好／踩過的坑
   - 寫/改 entity 前：(1) `cat ~/.claude/wiki/_schema.md` 確認格式 (2) `grep -ri "<keyword>" ~/.claude/memory/` 撈既有 reference / project / feedback memory，不要只憑當次對話
 - **session memory** (`~/.claude/memory/`, canonical 由 `autoMemoryDirectory` setting 指定): hand-curated reference / project / feedback / user 4 類 .md + 兩層 index 結構（MEMORY.md + `_index_*.md` cluster files，2026-05-07 起）
-  - Step 0：**query 含個人化線索（「我的 X setup」「我這台機器」「我之前 X 怎處理」「我有沒有寫過」）→ 並行** `grep -rli "<keyword>" ~/.claude/memory/` 列出 hit file，補捕 MEMORY.md 沒列 pointer 但 file 還在的 standalone reference（2026-05-14 E 規範後 MEMORY.md 改 on-demand-friendly trim、許多 standalone 移除 pointer 但保留 file）
+  - Step 0：**query 要回顧個人歷史（「我之前 X 怎處理」「我有沒有寫過」）→ 並行查 wiki 與 memory**，用既有散文／session 檢索路由列出 hit file，補捕 MEMORY.md 沒列 pointer 但 file 還在的 standalone reference。只有「我的 X setup」「我這台機器」時，依上一段讀目前設定，不啟動本段。
   - Step 1：`cat ~/.claude/memory/MEMORY.md` 看索引（含 `### Cluster indexes` + `### Standalone reference` 兩段）
   - Step 2：MEMORY.md 看到相關 cluster pointer → `Read ~/.claude/memory/_index_<topic>.md` 看 sub-entries
   - Step 3：drill 進具體 topic file 取細節（**注意**：cluster index 內每 entry 的 1 行 description 通常已足夠形成 informed opinion，不要無腦 Read 對應 topic file 浪費 context）
@@ -45,6 +49,8 @@ description: Use when answering a factual question about a named repo, package, 
 | 套件（npm / pypi / crates） | registry search 或 WebSearch |
 | 市場 / 人物 / 公司動態 | WebSearch、Exa |
 | 深度多輪研究 | `Skill(deep-research)` 或 `Workflow({name:"deep-research-paced"})` |
+
+分流後，如果使用者要補查社群評價、實際使用經驗或跨平台評論，或明確指定 Monid，就在任何 Monid 呼叫前讀 [Monid 當次選用](references/monid-opt-in.md)，照其中步驟提出選項與核對當次授權；一般文件查詢不加問。沒有選用時沿原路查證，不把 Monid 當自動 fallback。下方搜尋配對、正文抓取與來源核對規則照常適用。
 
 ### 搜尋 layer：同 query 一輪 nav + WS（2026-06-01 結案保留，agent_type 範圍化）
 
@@ -74,7 +80,10 @@ SERP 抽取 JS pattern 跟試用背景見 `~/.claude/memory/reference_search_too
 
 ### URL 內容抓取
 
-預設用 `WebFetch`（server-side、快、token 省，99% URL 都 work）。
+先看這次抓頁面要拿來做什麼，再選工具。`WebFetch` 回的不是原文：頁面先交給小模型照你的 prompt 改寫成回答。它回 200、讀起來通順，細節卻可能被改掉或漏掉（實例：從相對日期推錯年份、讀錯表格欄位、憑空加一段「官方回應」），而且這種錯不會命中下面任何退路條件——「回傳看起來完整」不是判斷依據。
+
+- **要讀整篇、研究一篇文章，或要引用頁面上的數字／日期／原句** → 不用 WebFetch。用網址抓取退路（見 WIRING.md「非官方內容抓取」）把正文存到 `<scratchpad>/<名稱>.md`（輸出已是正文 markdown；不要印到畫面上，長頁會吃掉 context），再用 Read 讀。長文先 `grep -n '^#'` 看標題，按段落範圍讀。寫給使用者的數字、日期、引文都從這個檔取，附行號。
+- **只是導航**（找連結、確認頁面還在、判斷該讀哪一頁哪一段）→ 可用 `WebFetch`（快、省 token）。它的回答只用來決定下一步；要寫成事實就回上一條抓原文。
 
 **WebFetch 拿 4xx/5xx 或內容明顯不夠（403 body / "Forbidden" / 亂碼 / < 200 字模板 / "Please enable JavaScript"）→ 必須立刻 fallback，不要回覆「官網沒爬到」「403 抓不到」就跳過——fallback 是 mandatory 不是 optional（踩坑紀錄 [[feedback_webfetch_fallback_must_trigger]]）。** 兩段退路階梯：
 
@@ -90,15 +99,15 @@ SERP 抽取 JS pattern 跟試用背景見 `~/.claude/memory/reference_search_too
 
 如果頁面是 SPA，就在抽取前依 LCU 的當次 API 說明等待實際內容，再讀回；不拿傳輸成功代替頁面就緒。
 
-大多 URL 先用 WebFetch；只在既定退路條件命中時啟用 LCU browser，不額外開重複分頁。
+讀內容走網址抓取退路（見 WIRING.md「非官方內容抓取」）；只在它 exit 75/1 時啟用 LCU browser，不額外開重複分頁。
 
 ### 執行模式
 
-- **淺題**（單次查）：`cat ~/.claude/wiki/index.md` + 外部工具同 response 分段 merge
+- **淺題**（單次查）：沿「來源選路」直接查選定來源；最新外部題不額外讀 wiki index。
 - **深題**（多輪研究）：派**背景 subagent**（`run_in_background: true`），**main session 繼續做其他工作、不要用 `sleep` 空轉輪詢**；背景 agent 完成會自動送 task-notification，收到才 merge（禁止 `Bash sleep 60` 類 poll、也不要 Read 未完成的 output 檔）
-- **單邊**：純個人經驗 → 只 wiki；純外部即時（SDK / API spec / 公司動態 / GitHub repo URL 研究——repo 研究的 memory 既評比對由 github-repo-research skill 的起手三路涵蓋）→ 只外部
-- **Cold case**（wiki 沒收 + 外部沒答案）：`grep -ri "<keyword>" ~/.claude/memory/` 翻既有 reference / project memory；不夠再 grep 對應 session transcript（`~/.claude/projects/**/*.jsonl`）
-- **衝突時**：外部為準，主動提議「`wiki/X.md` 可能過期，要更新嗎？」
+- **個人歷史**：查 wiki／memory；如果要找對話原文，就走 session 檢索路由。
+- **外部搜尋受阻或沒答案**：如果已有原文 URL，就接「URL 內容抓取」；否則依既有授權換已配置的外部來源類型。仍受阻時回報具體缺口，不改查本機歷史收錄，也不把未找到當成不存在。
+- **混合題**：外部現況、本人目前資格與個人歷史分開查、分開標出處；歷史紀錄不能佐證外部現況。
 
 答案成稿後 → 接下方「交付前 inline 自查（R1–R3）」再送出。
 
@@ -151,7 +160,7 @@ audit 後不得新增或改寫推薦理由，交付文字須等於修正後的 d
 
 - WebSearch 排名容易漏掉官方文件，需搭配 chrome SERP nav 並行比對才不會漏 → [[feedback_websearch_misses_official_docs]] / [[feedback_parallel_decision_by_structural_failure]]
 - WebFetch 拿到 4xx/5xx 或內容明顯不夠（403 / 亂碼 / 模板）時必須立刻 fallback，不能回「抓不到」就跳過 → [[feedback_webfetch_fallback_must_trigger]]
-- OBU 抽取 SPA 內容時要按頁面狀態等待再讀，通用抓法會漏 → `skills/open-browser-use/SKILL.md`
+- 用瀏覽器抽取 SPA 內容時要按頁面狀態等待再讀，通用抓法會漏（舊瀏覽器工具時期的經驗，原文已退役、公開版不附）
 - 查證做得再全、交付端仍會丟資訊：低信心標記被平述、來源限制被整條省略、無版號成績掛到具體版號（rba-verify 離線抽驗連兩週抓到真 FAIL）→ 2026-08-12 加「交付前 inline 自查」段；抽驗 verdict 見 trials archived.md rba-verify 段
 - 2026-08-25 抽驗抓到三種漏網：decision table 的取捨列沒逐列出處、proxy metric 被外推成 target verdict、未查證的 cleanup／成本理由被拿來排除方案；另有 auditor 回 `R2 FAIL` 卻同時寫 `VERDICT: COMPLIANT`。修法是 claim inventory、metric→target→attribution、替代方案理由納入 R2/R3，以及互斥 verdict＋final draft 重驗。
 - 2026-08-29 同一份 draft、同一條「信心標記」規則，auditor 兩輪各自解讀（第一輪抓 2 處漏 token 倍數、第二輪只抓 token 倍數）：規則只寫判準沒給實例，「宣稱」兩字被當成標記、對象自稱沒列進來源清單。修法＝來源清單補「對象自稱」、附一對只差 ⚠️＋來源註的 ❌／✅ anchor、第一手指令數字明文排除；同稿加 anchor 後 2/2 抓全，壓力場景 4 FAIL／1 PASS／3 N-A 零誤標。機制借自 NeoLabHQ/context-engineering-kit meta-judge（改寫不抄）；trial `cek-anchor-rubric` review 2026-09-05

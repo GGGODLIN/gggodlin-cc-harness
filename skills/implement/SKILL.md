@@ -3,14 +3,14 @@ name: implement
 description: "Use when a spec or ticket set is ready to build and the user says implement / 開工 / 照 ticket 做 / start building, or the local pipeline reaches its implementation stage. Do not use for exploratory prototyping without a spec or debugging existing failures (debugging skill)."
 upstream: mattpocock/skills
 upstream-path: skills/engineering/implement/SKILL.md
-upstream-pinned: ed37663
+upstream-pinned: 49dd158
 ---
 
 <!-- 本檔在契約測試底下：bash ~/.claude/skills/implement/scripts/tests/preflight-contract.test.sh && bash ~/.claude/skills/implement/scripts/tests/review-reception-contract.test.sh && bash ~/.claude/skills/implement/scripts/tests/review-implement-handoff-contract.test.sh && bash ~/.claude/skills/implement/scripts/tests/architecture-visual-gate-contract.test.sh && bash ~/.claude/skills/implement/scripts/tests/worker-guardrails-contract.test.sh && bash ~/.claude/skills/implement/scripts/tests/transport-contract.test.sh && bash ~/.claude/commands/tests/failure-mode-loop-contract.test.sh -->
 
 <!-- 本檔在契約測試底下：python3 ~/.claude/commands/tests/test_verification_recipe_grafts.py -->
 
-<!-- 本檔在契約測試底下：node ~/.claude/skills/implement/scripts/tests/testing-mode-contract.test.mjs -->
+<!-- 本檔在契約測試底下：node ~/.claude/skills/implement/scripts/tests/testing-mode-contract.test.mjs && node --test ~/.claude/skills/implement/scripts/tests/material-preparation-contract.test.mjs && node --test ~/.claude/skills/implement/scripts/tests/compose-materials.test.mjs -->
 
 # Implement
 
@@ -72,7 +72,7 @@ Transport baseline: Before the first worker, pre-create every sibling worktree f
 
 Subagent-Driven control loop:
 
-1. Before dispatching each worker, append both control clauses to its prompt:
+1. 如果同任務已有材料清單，或已知後續會再次派工，就在本步組 worker prompt 前、完成上方 Main scope 差額檢查後讀 [實作派工材料 trial](/skills/implement/references/material-preparation.md)，完成材料準備後回本步；只有一次交付且沒有清單時沿原路，不為試用新建摘錄。此接點只填材料區，完整票文、測試模式、權限與下列控制條款照舊，review-implement 不走此路。Before dispatching each worker, append both control clauses to its prompt:
    - `Do not call Agent yourself. If you need a fresh agent or reviewer, return NEEDS_DELEGATION: <role> — <bounded task> alongside whatever else you have finished, and keep working on anything that does not depend on it.` A worker never creates its own child Agent.
    - `If a tool call is denied by a hook or permission boundary, do not retry it. Return BLOCKED: <denied action> unless a safe path that does not use that tool exists; when using the safe path, report the fallback to the controller before continuing.`
 2. Dispatch the background worker and record its `workerTaskId`. Immediately launch a main-session background Bash reminder and record the returned background-task handle as `reminderTaskId`:

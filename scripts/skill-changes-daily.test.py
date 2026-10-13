@@ -76,6 +76,9 @@ class PluginHookDriftTest(unittest.TestCase):
     self.approved = self.config / "logs/plugin-hook-drift/approved.json"
     self.marker = self.home / "hook-ran"
     self.env = {**os.environ, "HOME": str(self.home), "SKILL_CHANGES_STATE_DIR": str(self.home / "daily-state")}
+    # 正式環境的 ~/.claude 一定是 git repo；fixture 不是 repo 時每次 git 都失敗，會跟「讀 git 失敗要報錯」的行為打架
+    subprocess.run(["git", "init", "-q", str(self.config)], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(self.config), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "commit", "-q", "--allow-empty", "-m", "init"], check=True, capture_output=True)
     self.command_manifest("first")
 
   def command_manifest(self, value):
@@ -122,6 +125,17 @@ class PluginHookDriftTest(unittest.TestCase):
     subprocess.run(["git", "-C", str(self.config), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "commit", "-qm", "baseline"], check=True, capture_output=True)
     target.write_text(text)
     return target
+
+  def test_unreadable_git_is_reported_and_keeps_the_bookmark(self):
+    # git 失敗時 stdout 是空的，以前會被當成「沒有改版」並把書籤推過沒看過的 commit（2026-10-10 稽核找到）
+    self.daily()
+    state_path = self.home / "daily-state/state.json"
+    before = json.loads(state_path.read_text())
+    (self.config / ".git/HEAD").write_text("garbage\n")
+    result = self.run_cli("--out", str(self.report), "--no-skill-up")
+    self.assertEqual(result.returncode, 1, result.stderr)
+    self.assertIn("讀不到", self.report.read_text())
+    self.assertEqual(json.loads(state_path.read_text()), before)
 
   def test_unapproved_change_reports_until_explicit_approval(self):
     first = self.daily()
@@ -224,6 +238,53 @@ class PluginHookDriftTest(unittest.TestCase):
     self.assertIn(PLUGIN, report)
     self.assertNotIn("__SILENT__\n", report)
     self.assertFalse(self.marker.exists())
+
+  def add_project_installation(self, with_hooks=False):
+    project = self.config / "plugins/cache/fixture/demo/0.9.0"
+    project.mkdir(parents=True)
+    if with_hooks:
+      (project / "hooks").mkdir()
+      (project / "hooks/hooks.json").write_text(json.dumps({"hooks": {}}))
+    data = json.loads(self.registry.read_text())
+    data["plugins"][PLUGIN].append({"installPath": str(project), "scope": "project", "projectPath": str(self.home)})
+    self.registry.write_text(json.dumps(data))
+    return project
+
+  def test_multiple_installations_without_hooks_are_silent(self):
+    (self.hooks / "hooks.json").unlink()
+    self.add_project_installation()
+    self.assertEqual(self.daily(), "__SILENT__\n")
+    self.assertFalse(self.approved.exists())
+
+  def test_multiple_installations_inspect_approve_and_detect_each_change(self):
+    project = self.add_project_installation(with_hooks=True)
+    self.assertIn("未審", self.daily())
+    inspected = self.inspect()
+    self.assertEqual(set(inspected["installations"]), {str(self.plugin), str(project)})
+    (project / "hooks/hooks.json").write_text(json.dumps({"hooks": {}}))
+    self.assertNotEqual(self.run_cli("--approve-plugin", PLUGIN).returncode, 0)
+    self.assertFalse(self.approved.exists())
+    self.approve()
+    before = self.approved.read_bytes()
+    self.assertEqual(self.daily(), "__SILENT__\n")
+    self.command_manifest("changed-user-installation")
+    self.assertIn("未審", self.daily())
+    self.assertEqual(self.approved.read_bytes(), before)
+    self.approve()
+    (project / "hooks/hooks.json").unlink()
+    self.assertIn("未審", self.daily())
+    project.joinpath("hooks").rmdir()
+    project.rmdir()
+    self.assertIn("遺失", self.daily())
+    self.assertFalse(self.marker.exists())
+
+  def test_multiple_installations_keep_malformed_location_visible(self):
+    self.add_project_installation()
+    data = json.loads(self.registry.read_text())
+    data["plugins"][PLUGIN][1]["installPath"] = "relative/path"
+    self.registry.write_text(json.dumps(data))
+    self.assertIn("無法檢查", self.daily())
+    self.assertFalse(self.approved.exists())
 
   def test_missing_referenced_module_without_approval_is_not_silent(self):
     self.manifest({"modules": ["./missing.ts"]})
@@ -353,6 +414,88 @@ class SkillUpOutputIsolationTest(unittest.TestCase):
     results = self.module.collect_skill_up_results(0)
     self.assertEqual({r["skill"] for r in results}, {"legacy-skill", "alpha", "beta"})
     self.assertEqual({r["skill"]: r["path"] for r in results}["alpha"], str(self.runs / "alpha" / "iteration-1" / "result.json"))
+
+
+class SkillUpStatusRenderTest(unittest.TestCase):
+  """skill-up 列要同時看得到 PASS／FAIL／ERROR 與 result.json 路徑；檔位才不會把 harness ERROR 當低。"""
+
+  def setUp(self):
+    self.temp = tempfile.TemporaryDirectory()
+    self.addCleanup(self.temp.cleanup)
+    self.module = load_daily({"SKILL_EVAL_RUNS_DIR": str(Path(self.temp.name) / "unused-runs")})
+
+  def target(self, name):
+    return {name: {"name": name, "kind": "command", "dir": Path("."), "eval_dir": Path("."), "origin": "committed"}}
+
+  def render(self, targets, results):
+    return self.module.render("2026-10-12", targets, {}, None, [], None, results, {}, [])
+
+  def line_with(self, report, needle):
+    found = [line for line in report.splitlines() if needle in line]
+    self.assertEqual(len(found), 1, report)
+    return found[0]
+
+  def test_both_routes_keep_path_status_and_tier(self):
+    left = "/runs/left/iteration-1/result.json"
+    right = "/runs/right/iteration-1/result.json"
+    errored = "/runs/err-only/iteration-9/result.json"
+    clean = "/runs/clean/iteration-2/result.json"
+    results = [
+      {"skill": "dup", "iteration": "iteration-1", "passed": 2, "failed": 1, "errored": 1, "path": left},
+      {"skill": "dup", "iteration": "iteration-1", "passed": 3, "failed": 0, "errored": 0, "path": right},
+      {"skill": "err-only", "iteration": "iteration-9", "passed": 0, "failed": 0, "errored": 2, "path": errored},
+      {"skill": "clean", "iteration": "iteration-2", "passed": 4, "failed": 0, "errored": 0, "path": clean},
+    ]
+    via_target = self.render(self.target("dup"), results)
+    fail_line = self.line_with(via_target, left)
+    self.assertIn("2 PASS／1 FAIL／1 ERROR", fail_line)
+    self.assertIn(right, via_target)
+    self.assertIn("3 PASS／0 FAIL／0 ERROR", self.line_with(via_target, right))
+    self.assertIn("## dup（command，committed）\n- 建議檔位：高", via_target)
+    self.assertIn("建議檔位：中", self.line_with(via_target, errored))
+    self.assertIn("0 PASS／0 FAIL／2 ERROR", self.line_with(via_target, errored))
+    self.assertIn("建議檔位：低", self.line_with(via_target, clean))
+    self.assertIn("建議檔位彙總：高 1／中 1／低 1", via_target)
+    via_fallback = self.render({**self.target("err-only"), **self.target("clean")}, results)
+    self.assertIn("## err-only（command，committed）\n- 建議檔位：中", via_fallback)
+    self.assertIn(errored, self.line_with(via_fallback, "0 PASS／0 FAIL／2 ERROR"))
+    self.assertIn("## clean（command，committed）\n- 建議檔位：低", via_fallback)
+    self.assertIn("建議檔位：高", self.line_with(via_fallback, left))
+    self.assertIn("建議檔位：低", self.line_with(via_fallback, right))
+    self.assertNotIn("建議檔位：低", self.line_with(via_fallback, errored))
+
+  def test_result_json_keeps_distinct_runs_and_errors(self):
+    # 形狀與 2026-10-12 三份 result.json 的計數相同：兩條 iteration-1、一條 FAIL+ERROR。
+    rels = [
+      "run-a/iteration-1/result.json",
+      "run-b/iteration-1/result.json",
+      "run-c/iteration-8/result.json",
+    ]
+    counts = [(10, 6, 0), (8, 8, 0), (8, 5, 3)]
+    runs = Path(self.temp.name) / "eval-runs"
+    for rel, (passed, failed, errored) in zip(rels, counts):
+      dest = runs / rel
+      dest.parent.mkdir(parents=True, exist_ok=True)
+      cases = [{"status": "PASS"}] * passed + [{"status": "FAIL"}] * failed + [{"status": "ERROR"}] * errored
+      dest.write_text(json.dumps({"skill_name": "research-before-answer", "case_results": cases}))
+    self.module.EVAL_RUNS = runs
+    results = self.module.collect_skill_up_results(0)
+    self.assertEqual(len(results), 3)
+    self.assertTrue(all(r["skill"] == "research-before-answer" for r in results))
+    by_suffix = {next(rel for rel in rels if rel in r["path"]): r for r in results}
+    self.assertEqual((by_suffix[rels[0]]["passed"], by_suffix[rels[0]]["failed"], by_suffix[rels[0]]["errored"]), (10, 6, 0))
+    self.assertEqual((by_suffix[rels[1]]["passed"], by_suffix[rels[1]]["failed"], by_suffix[rels[1]]["errored"]), (8, 8, 0))
+    self.assertEqual((by_suffix[rels[2]]["passed"], by_suffix[rels[2]]["failed"], by_suffix[rels[2]]["errored"]), (8, 5, 3))
+    fallback = self.render({}, results)
+    target = self.render(self.target("research-before-answer"), results)
+    for report in (fallback, target):
+      self.assertIn("10 PASS／6 FAIL／0 ERROR", self.line_with(report, by_suffix[rels[0]]["path"]))
+      self.assertIn("8 PASS／8 FAIL／0 ERROR", self.line_with(report, by_suffix[rels[1]]["path"]))
+      self.assertIn("8 PASS／5 FAIL／3 ERROR", self.line_with(report, by_suffix[rels[2]]["path"]))
+      self.assertNotEqual(self.line_with(report, rels[0]), self.line_with(report, rels[1]))
+    self.assertIn("上一輪啟動的 skill-up 回歸結果", fallback)
+    self.assertNotIn("上一輪啟動的 skill-up 回歸結果", target)
+    self.assertIn("## research-before-answer（command，committed）\n- 建議檔位：高", target)
 
 
 if __name__ == "__main__":

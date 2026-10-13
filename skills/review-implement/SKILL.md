@@ -99,15 +99,15 @@ Fable seat 使用 `model: "fable"` 與 `<fable-ok> <review-implement-selection:v
 
 ## 5. Main 逐條驗證與決策
 
-Main 收到本輪全部 reviewer 結果後，逐條查相關 evidence，再決定 finding。合成只使用本輪 selected seats 的 output，按 `<model, axis>` 保留來源；未選 seat 不補成缺席、不寫成完成。source／requirements evidence 每條都查；只有 behavioral claim 才跑 regression test；只有 safety／risk claim 才查 threat model。先去重再計算待決策列，保留每個來源 ID 與 evidence。
+Main 收到本輪全部 reviewer 結果後，逐條查相關 evidence，再決定 finding。合成只使用本輪 selected seats 的 output，按 `<model, axis>` 保留來源；未選 seat 不補成缺席、不寫成完成。source／requirements evidence 每條都查；只有 behavioral claim 才跑 regression test；只有 safety／risk claim 才查 threat model。先去重再逐條依授權缺口分流，保留每個來源 ID 與 evidence。
 
 - Scope finding 用 `S1`、`S2`…；每條附 session path、event／turn ID、verbatim top-level user quote 與 implementation file:line，並標 `CONFIRMED` 或 `PLAUSIBLE`。直接 evidence 證明 reviewer 誤讀時才 dismiss；`CONFIRMED` scope finding block completion，`PLAUSIBLE` scope finding 上呈使用者。
-- YAGNI finding 用 `Y1`、`Y2`…；每條附 diff hunk、較小替代方案與仍滿足的 acceptance IDs。Main 對每條做 `accept` 或 `dispute`；accept 轉成 repair obligation，dispute 與雙方 rationale 一起上呈使用者。
-- 去重後若待決策列 >5，停止自動處理，先呈現完整 overview；不隱藏、刪除或合併到使用者看不到的 finding。
+- YAGNI finding 用 `Y1`、`Y2`…；每條附 diff hunk、較小替代方案與仍滿足的 acceptance IDs。是否上呈只看授權缺口，不看 finding 數量、reviewer 異議或可撤回性。留在已批准授權內、且不改既有 acceptance 的條目，Main 查證後自決 `accept` 或 `dispute`，並記下 evidence 與理由；沒有實益就 `dispute`。`accept` 轉成 repair obligation；`dispute` 留在本輪 disposition，不因 reviewer 不同意就上呈。提案若是未批准的需求縮減、新承諾、範圍擴張或風險承擔改變，才標使用者待決策；只暫停依賴該決定的工作，已批准且不相依的工作繼續。
+- 去重後的列數只影響呈現：列數多時先給完整 overview，仍逐條做上面的授權分流。不因列數 >5 停止自動處理，也不隱藏、刪除或合併到使用者看不到的 finding。
 
 **橡皮圖章訊號靠紀錄算出來，不靠記得。** 派 reviewer 前先讀回同一份 report 既有 Run 的 disposition 行（`grep -h '^- disposition:' <report 路徑>`），當場數出前幾輪各有幾條 substantive finding、其中幾條被 accepted，並印給使用者。**連續 2+ 輪有 substantive findings 而 0 條 accepted** 就停下，把 Main 的判定理由攤給使用者檢查，不要繼續蓋章。首輪查無前輪 disposition 就明寫查無，不要當成乾淨。
 
-完成條件：每條 finding 都有對應 evidence 與 `S`／`Y` ID、Main verdict 或明確使用者待決策；超過 5 列時只輸出完整 overview，不自動關閉任何列；dispatch 前已輸出前輪 disposition 統計或「查無前輪」。
+完成條件：每條 finding 都有對應 evidence 與 `S`／`Y` ID；授權內條目有 Main 的 `accept`／`dispute` 與理由，只有未批准的需求縮減、新承諾、範圍擴張或風險承擔改變才標使用者待決策，且只暫停相依工作；列數不決定是否上呈，列數多時 overview 與逐條分流一起留下，不自動關閉待人決定的列；dispatch 前已輸出前輪 disposition 統計或「查無前輪」。
 
 ## 6. 保持唯讀，讓 implement 完成既有 obligation
 
