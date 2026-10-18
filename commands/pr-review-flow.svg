@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg viewBox="0 0 1280 720" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="pr-review-flow-title pr-review-flow-desc" id="pr-review-flow-root">
+<svg viewBox="0 0 1280 720" width="1280" height="720" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="pr-review-flow-title pr-review-flow-desc" id="pr-review-flow-root">
         <title id="pr-review-flow-title">/pr-review 多軸對抗式審查與雙閘門流程</title>
         <desc id="pr-review-flow-desc">由左至右展示 /pr-review 的三個階段：前置隔離與標準挑選、選席授權閘門與平行審查席位、交叉驗證與報告投影寫入閘門。</desc>
         <defs>

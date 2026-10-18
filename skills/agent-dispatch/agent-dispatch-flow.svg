@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg viewBox="0 0 1280 720" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="agent-dispatch-flow-title agent-dispatch-flow-desc" id="agent-dispatch-flow-root">
+<svg viewBox="0 0 1280 720" width="1280" height="720" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="agent-dispatch-flow-title agent-dispatch-flow-desc" id="agent-dispatch-flow-root">
         <title id="agent-dispatch-flow-title">agent-dispatch 跨外殼終端 Worker 派工流程</title>
         <desc id="agent-dispatch-flow-desc">由左至右展示 agent-dispatch 的三個階段：當次同意與隔離工位準備、啟動閘門與三種終端外殼分流、背景監看與收工對話對帳。</desc>
         <defs>

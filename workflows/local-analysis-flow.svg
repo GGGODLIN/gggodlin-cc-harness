@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg viewBox="0 0 1280 720" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="local-analysis-flow-title local-analysis-flow-desc" id="local-analysis-flow-root">
+<svg viewBox="0 0 1280 720" width="1280" height="720" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="local-analysis-flow-title local-analysis-flow-desc" id="local-analysis-flow-root">
         <title id="local-analysis-flow-title">local-analysis（/daily-local）30 頻道本機治理分析流程</title>
         <desc id="local-analysis-flow-desc">由左至右展示 local-analysis 的三個階段：觸發與到期頻道篩選、LLM 分析與宣稱證據抽樣審計、待辦帳本對帳與優先度 Digest。</desc>
         <defs>

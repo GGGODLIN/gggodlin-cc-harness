@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg viewBox="0 0 1280 720" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="implement-flow-title implement-flow-desc" id="implement-flow-root">
+<svg viewBox="0 0 1280 720" width="1280" height="720" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="implement-flow-title implement-flow-desc" id="implement-flow-root">
         <title id="implement-flow-title">implement 票券執行與收尾雙閘門流程</title>
         <desc id="implement-flow-desc">由左至右展示 implement 的三個階段：前置盤點與 TDD 決策清單、Frontier 執行與 TDD 守門閘、跨軸審查修補與架構視覺核對。</desc>
         <defs>

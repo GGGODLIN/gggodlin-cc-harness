@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg viewBox="0 0 1280 720" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="model-onboard-flow-title model-onboard-flow-desc" id="model-onboard-flow-root">
+<svg viewBox="0 0 1280 720" width="1280" height="720" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="model-onboard-flow-title model-onboard-flow-desc" id="model-onboard-flow-root">
         <title id="model-onboard-flow-title">model-onboard 第三方模型接入與五階段評估流程</title>
         <desc id="model-onboard-flow-desc">由左至右展示 model-onboard 的三個階段：WIRE 登記與 SMOKE 三態探針、能力評估分流與真 CC 測試、三段入鏈回歸關卡與裁決。</desc>
         <defs>

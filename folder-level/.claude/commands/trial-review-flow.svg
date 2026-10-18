@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg viewBox="0 0 1280 720" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="trial-review-flow-title trial-review-flow-desc" id="trial-review-flow-root">
+<svg viewBox="0 0 1280 720" width="1280" height="720" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="trial-review-flow-title trial-review-flow-desc" id="trial-review-flow-root">
         <title id="trial-review-flow-title">/trial-review 觀察期到期檢討與摩擦歸因流程</title>
         <desc id="trial-review-flow-desc">由左至右展示 /trial-review 的三個階段：到期候選與摩擦帳本盤點、事件歸因封包與 KEEP/MODIFY/KILL 拍板、歸檔索引同步與獨立審計。</desc>
         <defs>

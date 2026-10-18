@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg viewBox="0 0 1280 720" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="research-before-answer-flow-title research-before-answer-flow-desc" id="research-before-answer-flow-root">
+<svg viewBox="0 0 1280 720" width="1280" height="720" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="research-before-answer-flow-title research-before-answer-flow-desc" id="research-before-answer-flow-root">
         <title id="research-before-answer-flow-title">research-before-answer 雙軌事實查證與自查流程</title>
         <desc id="research-before-answer-flow-desc">由左至右展示 research-before-answer 的三個階段：題型來源分流、雙軌搜尋配對與第一手抓取、R1 至 R3 交付前自查與出處綁定。</desc>
         <defs>

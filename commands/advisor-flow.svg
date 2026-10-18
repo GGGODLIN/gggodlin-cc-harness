@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg viewBox="0 0 1280 720" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="advisor-flow-title advisor-flow-desc" id="advisor-flow-root">
+<svg viewBox="0 0 1280 720" width="1280" height="720" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="advisor-flow-title advisor-flow-desc" id="advisor-flow-root">
         <title id="advisor-flow-title">/advisor 跨模型單次顧問外包與差異裁決流程</title>
         <desc id="advisor-flow-desc">由左至右展示 /advisor 的三個階段：問題抽離與額度推薦、顧問席位選擇與 Fable 守門閘、原文差異對照與使用者逐條裁決。</desc>
         <defs>

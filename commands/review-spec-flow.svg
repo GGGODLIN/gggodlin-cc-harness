@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg viewBox="0 0 1280 720" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="review-spec-flow-title review-spec-flow-desc" id="review-spec-flow-root">
+<svg viewBox="0 0 1280 720" width="1280" height="720" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="review-spec-flow-title review-spec-flow-desc" id="review-spec-flow-root">
         <title id="review-spec-flow-title">/review-spec 規格四級審查與 YAGNI 定價流程</title>
         <desc id="review-spec-flow-desc">由左至右展示 /review-spec 的三個階段：CLAIM 隔離與級別路由、Tier 1 至 4 與 YAGNI 對抗審查、共用收斂與最後一輪拍板表。</desc>
         <defs>

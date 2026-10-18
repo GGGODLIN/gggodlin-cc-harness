@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg viewBox="0 0 1280 720" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="skill-creator-flow-title skill-creator-flow-desc" id="skill-creator-flow-root">
+<svg viewBox="0 0 1280 720" width="1280" height="720" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="skill-creator-flow-title skill-creator-flow-desc" id="skill-creator-flow-root">
         <title id="skill-creator-flow-title">skill-creator 漸進揭露與對抗式行為驗證流程</title>
         <desc id="skill-creator-flow-desc">由左至右展示 skill-creator 的三個階段：三層結構設計與修改性質分類、RED-GREEN-REFACTOR 實測閘門、契約測試與庫存登記。</desc>
         <defs>
