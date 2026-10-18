@@ -16,7 +16,7 @@ It is a reference, not a product. You can install single pieces, but nothing gua
 
 - 常駐規則：`CLAUDE.md`、`rules/`、`output-styles/`，以及規則引用的 `references/`。
 - hook：把部分規則從「靠模型自律」改成機械檢查，註冊寫在 `settings.json`。
-- skill、command、agent：規劃、實作、審查、查證這條工作流用到的部分。
+- skill、command、agent 與審查標準：規劃、實作、審查、查證這條工作流用到的部分，以及按變更條件載入的 34 份審查標準（`review-standards/`）。
 - 四套制度：memory（跨 session 記憶）、wiki（收斂後的知識條目）、trial（新工具與新機制的觀察期帳本）、摩擦紀錄（卡住、繞路、規則沒被遵守的事件）。四套都只公開機制，內容換成 `examples/` 裡的虛構範例。
 - daily-local：每天跑一次的本機分析報告，掃規則用量、摩擦、壞掉的路徑等，程式在 `social-info/` 與 `cc-skill-doctor/`。
 - compact-guard：context 壓縮前存一份可稽核的 checkpoint，壓縮後把原始對話證據注回來，含 Codex 支援，在 `compact-guard/`。
@@ -27,10 +27,60 @@ It is a reference, not a product. You can install single pieces, but nothing gua
 
 | 你想做的事 | 先看 |
 |---|---|
-| 已經有自己的 Claude Code 設定，想讓 agent 守紀律 | `skills/gate-authoring/SKILL.md`、`rules/common/dispatch-and-verify.md`、`friction/PROTOCOL.md` 與 `examples/trials/` |
-| 想挑一個完整的工具來試 | `compact-guard/README.md`：有完整程式與測試，可以單獨安裝 |
-| 想研究 agent 治理、人工授權與出錯後怎麼恢復 | 下面的「設計原則」「已知風險」，以及 `rules/common/git-workflow.md` |
-| 想幾分鐘內裝好整套 | 目前做不到：路徑寫死、接線要自己補。單一元件看 `install/` |
+| 已經有自己的 Claude Code 設定，想讓 agent 守紀律 | [`skills/gate-authoring/SKILL.md`](/skills/gate-authoring/SKILL.md)、[`rules/common/dispatch-and-verify.md`](/rules/common/dispatch-and-verify.md)、[`friction/PROTOCOL.md`](/friction/PROTOCOL.md) 與 [`examples/trials/`](/examples/trials/) |
+| 想挑一個完整的工具來試 | [`compact-guard/README.md`](/compact-guard/README.md)：有完整程式與測試，可以單獨安裝 |
+| 想看大型機制與工作流怎麼咬合（附 Mermaid 流程圖） | 下方「核心機制與大型 Skill 圖解導覽」表格，點進各機制的圖解檔即可看完整狀態流 |
+| 想研究 agent 治理、人工授權與出錯後怎麼恢復 | 下面的「設計原則」「已知風險」，以及 [`rules/common/git-workflow.md`](/rules/common/git-workflow.md) |
+| 想幾分鐘內裝好整套 | 目前做不到：路徑寫死、接線要自己補。單一元件看 [`install/`](/install/) 與下方「怎麼讓你的 Claude Code 幫你挑選與改裝」 |
+
+## 核心機制與大型 Skill 圖解導覽
+
+這座 repo 最複雜的 10 個機制都附有同層的 Mermaid 流程圖與隨附元件對照表（Skill 直接放在該目錄的 `README.md`，點進資料夾就會在 GitHub 網頁下方自動展開；Command 放在同層的 `.overview.md`）：
+
+| 機制／Skill | 解決什麼問題 | 圖解導覽（含 Mermaid 圖） | 規範正本 |
+|---|---|---|---|
+| **`/pr-review`** | 多目標／分支隔離 worktree、自動選 Claude 側審查席、雙閘門守衛（派工授權＋報告寫入）與跨模型比較報告 | [`commands/pr-review.overview.md`](/commands/pr-review.overview.md) | [`commands/pr-review.md`](/commands/pr-review.md) |
+| **`implement`** | 按依賴圖逐批跑完票券、強制對齊 TDD 決策清單（`matt-tdd-gate`），收尾串起全套測試、跨軸審查與架構視覺核對 | [`skills/implement/README.md`](/skills/implement/README.md) | [`skills/implement/SKILL.md`](/skills/implement/SKILL.md) |
+| **`agent-dispatch`** | 經 Herdr 在隔離 worktree 啟動完整終端 worker（Claude Code／Codex CLI／pi），由主 session 負責同意門檻、背景監看與收工對帳 | [`skills/agent-dispatch/README.md`](/skills/agent-dispatch/README.md) | [`skills/agent-dispatch/SKILL.md`](/skills/agent-dispatch/SKILL.md) |
+| **`research-before-answer`** | 回答前先分流最新外部事實與個人歷史，強制雙軌搜尋與第一手查證，並在交付前通過 R1–R3 自查 | [`skills/research-before-answer/README.md`](/skills/research-before-answer/README.md) | [`skills/research-before-answer/SKILL.md`](/skills/research-before-answer/SKILL.md) |
+| **`skill-creator`** | 撰寫與修改 skill／command 的單一規範來源：三層漸進揭露設計，加上新鮮 subagent 的 `RED → GREEN → REFACTOR` 行為實測 | [`skills/skill-creator/README.md`](/skills/skill-creator/README.md) | [`skills/skill-creator/SKILL.md`](/skills/skill-creator/SKILL.md) |
+| **`model-onboard`** | 把第三方模型接進本機模型池，用五階段（WIRE → SMOKE 三態 → BENCH → LIVE → 回歸關卡）分離環境限流與模型能力 | [`skills/model-onboard/README.md`](/skills/model-onboard/README.md) | [`skills/model-onboard/SKILL.md`](/skills/model-onboard/SKILL.md) |
+| **`/review-spec`** | 規格進入實作前的第 1–4 級對抗式審查與 YAGNI（砍過度設計）需求定價，強制隔離作者辯護理由並一次收斂拍板表 | [`commands/review-spec.overview.md`](/commands/review-spec.overview.md) | [`commands/review-spec.md`](/commands/review-spec.md) |
+| **`/advisor`** | 不切換主 session 模型，把單次架構取捨或盲審打包交給 Fable、網頁版 GPT Pro 或 Codex CLI，收回獨立意見與差異對照 | [`commands/advisor.overview.md`](/commands/advisor.overview.md) | [`commands/advisor.md`](/commands/advisor.md) |
+| **`/trial-review`** | 統一盤點 7 天觀察期到期的工具／hook 與累積達門檻的摩擦帳本，用真實行為證據與事件歸因封包決定留、改或撤 | [`folder-level/.claude/commands/trial-review.overview.md`](/folder-level/.claude/commands/trial-review.overview.md) | [`folder-level/.claude/commands/trial-review.md`](/folder-level/.claude/commands/trial-review.md) |
+| **`local-analysis`（`/daily-local`）** | 每日與每週自動掃描 30 個治理頻道（規則退化、摩擦、記憶審計、證據層級抽樣），對帳後產出優先度 Digest | [`install/workflows/local-analysis.js.md`](/install/workflows/local-analysis.js.md) | [`workflows/local-analysis.js`](/workflows/local-analysis.js) |
+
+## 元件分類地圖（依採用門檻挑選）
+
+如果你想挑單一機制裝進自己的 `~/.claude`，建議按下面的依賴門檻由淺入深挑選（每個 hook 的具體安裝步驟與必備隨附檔案都在 [`install/`](/install/)）：
+
+1. **零外部依賴、單純擋誤操作或補提醒的入門 Hook**（只需 Bash／Python 3，不需本地模型池或特殊服務）：
+   - 防止 `cd && git ...` 污染後續工作目錄：[`install/hooks/cd-cwd-persistence-nudge.sh.md`](/install/hooks/cd-cwd-persistence-nudge.sh.md)
+   - 攔截 zsh 下誤用 `$PIPESTATUS`：[`install/hooks/pipestatus-zsh-gate.py.md`](/install/hooks/pipestatus-zsh-gate.py.md)
+   - 連續重跑同一驗證指令時提醒換角度：[`install/hooks/repeat-verify-reminder.sh.md`](/install/hooks/repeat-verify-reminder.sh.md)
+   - 攔截重複的 `TaskOutput` 輪詢：[`install/hooks/taskoutput-dedup-hook.py.md`](/install/hooks/taskoutput-dedup-hook.py.md)
+   - 修改規則或新增 hook 時提醒對齊治理規範：[`install/hooks/gate-authoring-nudge.sh.md`](/install/hooks/gate-authoring-nudge.sh.md)、[`install/hooks/skill-description-gate.sh.md`](/install/hooks/skill-description-gate.sh.md)
+2. **規劃 → 實作 → 審查工作流組**（適合整組借鑑流程設計）：
+   - 釐清模糊意圖與探索邊界：[`skills/align-intent/`](/skills/align-intent/SKILL.md) → [`skills/grill-me/`](/skills/grill-me/SKILL.md) → [`skills/wayfinder/`](/skills/wayfinder/SKILL.md)
+   - 規格撰寫、審查與拆票：[`skills/to-spec/`](/skills/to-spec/SKILL.md) → [`commands/review-spec.md`](/commands/review-spec.md) → [`skills/to-tickets/`](/skills/to-tickets/SKILL.md)
+   - 實作、TDD 守門與收尾審查：[`skills/implement/`](/skills/implement/README.md) ＋ [`install/hooks/matt-tdd-gate.sh.md`](/install/hooks/matt-tdd-gate.sh.md) → [`skills/review-implement/`](/skills/review-implement/SKILL.md) → [`commands/pr-review.md`](/commands/pr-review.md)（搭配 [`review-standards/`](/review-standards/catalog.md)）
+3. **宣稱證據與模型路由守門組**（部分需接 [`WIRING.md`](/WIRING.md) 的跨模型後端或判官 API）：
+   - 宣稱詞本地偵測與證據層級判官：[`install/hooks/T1-claim-detect-local-first.sh.md`](/install/hooks/T1-claim-detect-local-first.sh.md)、[`install/hooks/T1-evidence-level-detect.sh.md`](/install/hooks/T1-evidence-level-detect.sh.md)
+   - Subagent 路由與高單價模型守門：[`references/subagent-routing.md`](/references/subagent-routing.md)、[`install/hooks/T2-routing-gate.sh.md`](/install/hooks/T2-routing-gate.sh.md)、[`install/hooks/fable-gate.sh.md`](/install/hooks/fable-gate.sh.md)
+4. **四大回饋帳本與跨壓縮守衛**：
+   - 壓縮前後保留原始證據：[`compact-guard/README.md`](/compact-guard/README.md)（可獨立安裝）
+   - 觀察期帳本、摩擦協議與失敗模式分類表：[`examples/trials/`](/examples/trials/)、[`friction/PROTOCOL.md`](/friction/PROTOCOL.md)、[`references/failure-mode-taxonomy.md`](/references/failure-mode-taxonomy.md)、[`install/hooks/ledger-bootstrap.sh.md`](/install/hooks/ledger-bootstrap.sh.md)
+
+## 怎麼讓你的 Claude Code 幫你挑選與改裝
+
+因為這座 repo 的路徑與接線是照原作者環境寫的，最省力的方式是 clone 下來後，請你自己的 Claude Code 照下面順序幫你評估與移植：
+
+1. **先讓 agent 讀導覽與風險邊界**：請它先讀本檔（[`README.md`](/README.md)）的「已知風險」「元件分類地圖」與 [`WIRING.md`](/WIRING.md)。
+2. **挑定單一元件後，必讀對應的 `install/` 說明**：例如想裝某支 hook，請 agent 先讀 `install/hooks/<名稱>.md`，確認列出的「隨附檔案」（設定 JSON、helper 腳本、契約測試）有哪些，連同隨附檔案一起複製，不要只抄單一 `.sh` 或 `.py`。
+3. **請 agent 檢查並替換三類環境綁定**：
+   - **寫死的目錄結構**：例如 `~/Desktop/work/`（公司 repo）與 `~/Desktop/projects/`（個人 repo）、`~/code/social-info` 等路徑，請 agent 改成你機器上的實際路徑。
+   - **🔌 接線點替身**：凡是檔案內標有 `🔌` 或執行時報出 `WIRING.md` 的段落，請 agent 對照 [`WIRING.md`](/WIRING.md) 裡的「需提供的介面」，換成你自己的 CLI／MCP 工具，或把該選用分支裁掉。
+   - **跑隨附契約測試確認移植結果**：多數 hook、script 與 skill 在同目錄或 `commands/tests/`、`skills/*/scripts/tests/` 附有 `.test.sh`／`.test.py`／`.test.mjs`，改完後直接跑對應測試確認沒有漏拷檔案。
 
 ## 設計原則
 
@@ -94,7 +144,7 @@ It is a reference, not a product. You can install single pieces, but nothing gua
 - 🔌 [瀏覽器自動化](WIRING.md#瀏覽器自動化) — 推薦工具：LCU MCP（工具名 `mcp__lcu__js`）；console、network、效能等診斷另用 chrome-devtools MCP
 - 🔌 [程式碼搜尋](WIRING.md#程式碼搜尋) — 推薦工具：semble（MinishLab/semble）
 - 🔌 [終端後端](WIRING.md#終端後端) — 推薦工具：Herdr
-- 🔌 [跨模型後端](WIRING.md#跨模型後端) — 推薦工具：CLIProxyAPI（本機 OpenAI 相容端點）；需要接更多模型時在前面加 LiteLLM proxy；第二意見用 Codex CLI 與 openai/codex-plugin-cc
+- 🔌 [跨模型後端](WIRING.md#跨模型後端) — 推薦工具：Magpie 或 CLIProxyAPI（本機多模型代理端點，可選擇搭配 LiteLLM proxy）；第二意見席位用 Codex CLI 與 openai/codex-plugin-cc
 - 🔌 [非官方內容抓取](WIRING.md#非官方內容抓取) — 僅定義介面（interface only），實作請自行提供
 - 🔌 [額度資料來源](WIRING.md#額度資料來源) — 僅定義介面（interface only），實作請自行提供
 
@@ -108,11 +158,11 @@ It is a reference, not a product. You can install single pieces, but nothing gua
 - [`WIRING.md`](WIRING.md)
 - [`agents/`](agents/) — 33 個檔案；內含 `advisor-seat.md`、`architecture-critic.md`、`architecture-critic.md.LICENSE`、`code-reviewer.md`、`code-reviewer.md.LICENSE`、`deep-explore.md`、`docs-lookup.md`、`docs-lookup.md.LICENSE`…（共 30 項）
 - [`cc-skill-doctor/`](cc-skill-doctor/) — 2 個檔案；內含 `scripts/`
-- [`commands/`](commands/) — 58 個檔案；內含 `advisor.md`、`aside.md`、`aside.md.LICENSE`、`daily-local.md`、`docs.md`、`docs.md.LICENSE`、`git-closeout.md`、`goal-gen.md`…（共 33 項）
+- [`commands/`](commands/) — 61 個檔案；內含 `advisor.md`、`advisor.overview.md`、`aside.md`、`aside.md.LICENSE`、`daily-local.md`、`docs.md`、`docs.md.LICENSE`、`git-closeout.md`…（共 36 項）
 - [`compact-guard/`](compact-guard/) — 23 個檔案；內含 `README.md`、`bin/`、`docs/`、`package.json`、`src/`、`test/`
 - [`config/`](config/) — 1 個檔案；內含 `gpt-models.env`
 - [`examples/`](examples/) — 8 個檔案；內含 `friction/`、`memory/`、`tool-upgrade-notes/`、`trials/`、`wiki/`
-- [`folder-level/`](folder-level/) — 15 個檔案；內含 `.claude/`、`CLAUDE.md`
+- [`folder-level/`](folder-level/) — 16 個檔案；內含 `.claude/`、`CLAUDE.md`
 - [`friction/`](friction/) — 1 個檔案；內含 `PROTOCOL.md`
 - [`hooks/`](hooks/) — 110 個檔案；內含 `T1-claim-detect-local-first.llm.test.sh`、`T1-claim-detect-local-first.sh`、`T1-claim-detect-local-first.test.sh`、`T1-evidence-level-detect.sh`、`T1-evidence-level-detect.test.sh`、`T1-evidence-level-fixtures/`、`T1-evidence-level-prompt-v2.txt`、`T1-system-prompt-v5d.txt`…（共 106 項）
 - [`install/`](install/) — 44 個檔案；內含 `compact-guard/`、`folder-level/`、`hooks/`、`output-styles/`、`workflows/`
@@ -124,6 +174,6 @@ It is a reference, not a product. You can install single pieces, but nothing gua
 - [`rules/`](rules/) — 14 個檔案；內含 `common/`、`typescript/`
 - [`scripts/`](scripts/) — 100 個檔案；內含 `advisor-extract-context.py`、`agent-contract-command/`、`agent-contract-validator.definition.test.sh`、`agent-contract-validator.diagnostics.test.sh`、`agent-contract-validator.frontmatter.test.sh`、`agent-contract-validator.mcp-tools.test.sh`、`agent-contract-validator.mjs`、`agent-contract-validator.name.test.sh`…（共 86 項）
 - [`settings.json`](settings.json)
-- [`skills/`](skills/) — 201 個檔案；內含 `INVENTORY.md`、`absorb-pack/`、`agent-authoring/`、`agent-dispatch/`、`align-intent/`、`auto-choice/`、`brainstorm/`、`caveman/`…（共 43 項）
+- [`skills/`](skills/) — 206 個檔案；內含 `INVENTORY.md`、`absorb-pack/`、`agent-authoring/`、`agent-dispatch/`、`align-intent/`、`auto-choice/`、`brainstorm/`、`caveman/`…（共 43 項）
 - [`social-info/`](social-info/) — 76 個檔案；內含 `scripts/`、`tests/`
 - [`workflows/`](workflows/) — 7 個檔案；內含 `best-of-n-implement.js`、`failure-mode-daily.sh`、`local-analysis.js`、`skill-changes-daily.sh`、`skillevaluator-weekly.sh`、`tests/`

@@ -240,11 +240,11 @@ Herdr
 
 ### 需提供的介面
 
-一個本機的 OpenAI 相容 chat completions 端點、它的金鑰（hook 從 `CLIPROXY_KEY_CC` 這類環境變數讀），以及 `model-routing.env`、`config/gpt-models.env` 裡的模型名稱；第二意見席位另需 Codex CLI 或同類 CLI。沒有這些時，依賴它的 hook 會略過或報錯，判斷照常由主 session 做。
+一個本機的 OpenAI／Anthropic 相容代理端點（預設 `:8317`）、它的金鑰（hook 從 `CLIPROXY_KEY_CC` 這類環境變數讀），以及 `model-routing.env`、`config/gpt-models.env` 裡的模型名稱；第二意見席位另需 Codex CLI 或同類 CLI。沒有這些時，依賴它的 hook 會略過或報錯，判斷照常由主 session 做。
 
 ### 推薦工具
 
-CLIProxyAPI（本機 OpenAI 相容端點）；需要接更多模型時在前面加 LiteLLM proxy；第二意見用 Codex CLI 與 openai/codex-plugin-cc
+Magpie 或 CLIProxyAPI（本機多模型代理端點，可選擇搭配 LiteLLM proxy）；第二意見席位用 Codex CLI 與 openai/codex-plugin-cc
 
 ## 非官方內容抓取
 
