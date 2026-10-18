@@ -158,7 +158,7 @@ It is a reference, not a product. You can install single pieces, but nothing gua
 - [`WIRING.md`](WIRING.md)
 - [`agents/`](agents/) — 33 個檔案；內含 `advisor-seat.md`、`architecture-critic.md`、`architecture-critic.md.LICENSE`、`code-reviewer.md`、`code-reviewer.md.LICENSE`、`deep-explore.md`、`docs-lookup.md`、`docs-lookup.md.LICENSE`…（共 30 項）
 - [`cc-skill-doctor/`](cc-skill-doctor/) — 2 個檔案；內含 `scripts/`
-- [`commands/`](commands/) — 61 個檔案；內含 `advisor.md`、`advisor.overview.md`、`aside.md`、`aside.md.LICENSE`、`daily-local.md`、`docs.md`、`docs.md.LICENSE`、`git-closeout.md`…（共 36 項）
+- [`commands/`](commands/) — 62 個檔案；內含 `advisor.md`、`advisor.overview.md`、`aside.md`、`aside.md.LICENSE`、`daily-local.md`、`docs.md`、`docs.md.LICENSE`、`git-closeout.md`…（共 37 項）
 - [`compact-guard/`](compact-guard/) — 23 個檔案；內含 `README.md`、`bin/`、`docs/`、`package.json`、`src/`、`test/`
 - [`config/`](config/) — 1 個檔案；內含 `gpt-models.env`
 - [`examples/`](examples/) — 8 個檔案；內含 `friction/`、`memory/`、`tool-upgrade-notes/`、`trials/`、`wiki/`

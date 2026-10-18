@@ -1,0 +1,162 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg viewBox="0 0 1280 720" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="pr-review-flow-title pr-review-flow-desc" id="pr-review-flow-root">
+        <title id="pr-review-flow-title">/pr-review 多軸對抗式審查與雙閘門流程</title>
+        <desc id="pr-review-flow-desc">由左至右展示 /pr-review 的三個階段：前置隔離與標準挑選、選席授權閘門與平行審查席位、交叉驗證與報告投影寫入閘門。</desc>
+        <defs>
+      <style>#pr-review-flow-root { --color-paper:   #f5f5f5;
+      --color-ink:     #2d3142;
+      --color-muted:   #4f5d75;
+      --color-soft:    #5a6580;
+      --color-accent:  #bf4520;
+      --color-link:    #2e5aa8;
+      --font-sans:     'Geist', 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', system-ui, sans-serif;
+      --font-serif:    'Instrument Serif', 'Noto Serif', 'Noto Serif TC', serif;
+      --font-mono:     'Geist Mono', ui-monospace, monospace; }
+      #pr-review-flow-root { font-family: var(--font-sans); color: var(--color-ink); }
+      #pr-review-flow-root .diagram-container { width: 100%; overflow-x: auto; }
+      #pr-review-flow-root .diagram-container { overflow-x: visible; }</style>
+          <marker id="pr-review-flow-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+            <polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/>
+          </marker>
+          <marker id="pr-review-flow-arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+            <polygon points="0 0, 8 3, 0 6" fill="#bf4520"/>
+          </marker>
+          <marker id="pr-review-flow-arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+            <polygon points="0 0, 8 3, 0 6" fill="#2e5aa8"/>
+          </marker>
+        </defs>
+
+        <!-- Background -->
+        <rect width="100%" height="100%" fill="#f5f5f5"/>
+
+        <!-- ZONES (drawn before arrows and nodes) -->
+        <!-- Zone 1: Stage 1 -->
+        <rect x="40" y="56" width="340" height="544" rx="8" fill="#2d3142" stroke="#2d3142" stroke-width="0.8" fill-opacity="0.02" stroke-opacity="0.12"/>
+        <rect x="56" y="60" width="228" height="16" rx="2" fill="#f5f5f5"/>
+        <text x="170" y="72" fill="#5a6580" font-size="8" font-weight="500" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.14em">STAGE 1 · PREFLIGHT &amp; WORKTREE</text>
+
+        <!-- Zone 2: Stage 2 -->
+        <rect x="440" y="56" width="380" height="544" rx="8" fill="#2d3142" stroke="#2d3142" stroke-width="0.8" fill-opacity="0.02" stroke-opacity="0.12"/>
+        <rect x="456" y="60" width="244" height="16" rx="2" fill="#f5f5f5"/>
+        <text x="578" y="72" fill="#5a6580" font-size="8" font-weight="500" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.14em">STAGE 2 · GATED DISPATCH &amp; SEATS</text>
+
+        <!-- Zone 3: Stage 3 -->
+        <rect x="880" y="56" width="360" height="544" rx="8" fill="#2d3142" stroke="#2d3142" stroke-width="0.8" fill-opacity="0.02" stroke-opacity="0.12"/>
+        <rect x="896" y="60" width="232" height="16" rx="2" fill="#f5f5f5"/>
+        <text x="1012" y="72" fill="#5a6580" font-size="8" font-weight="500" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.14em">STAGE 3 · VERIFY &amp; REPORT GATE</text>
+
+        <!-- ARROWS (drawn before node boxes) -->
+        <!-- 1 -> 2 -->
+        <line x1="210" y1="200" x2="210" y2="256" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#pr-review-flow-arrow)"/>
+        <!-- 2 -> 3 -->
+        <line x1="210" y1="360" x2="210" y2="416" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#pr-review-flow-arrow)"/>
+        <!-- 3 -> 4 (Stage 1 to Stage 2 Gate, headline path) -->
+        <path d="M 348,468 H 404 Q 412,468 412,460 V 160 Q 412,152 420,152 H 472" fill="none" stroke="#bf4520" stroke-width="1.4" marker-end="url(#pr-review-flow-arrow-accent)"/>
+        <!-- 4 -> 5 (Claude seats auto-allowed) -->
+        <line x1="630" y1="208" x2="630" y2="272" stroke="#bf4520" stroke-width="1.4" marker-end="url(#pr-review-flow-arrow-accent)"/>
+        <rect x="640" y="232" width="84" height="16" rx="2" fill="#f5f5f5"/>
+        <text x="682" y="243" fill="#bf4520" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.06em">AUTO ALLOW</text>
+
+        <!-- 4 -> 6 (External seats opt-in, dashed) -->
+        <path d="M 472,184 H 464 Q 456,184 456,192 V 476 Q 456,484 464,484 H 472" fill="none" stroke="#2e5aa8" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#pr-review-flow-arrow-link)"/>
+
+        <!-- 5 -> 7 (Claude findings to Verify) -->
+        <path d="M 788,324 H 840 Q 848,324 848,316 V 224 Q 848,216 856,216 H 912" fill="none" stroke="#bf4520" stroke-width="1.4" marker-end="url(#pr-review-flow-arrow-accent)"/>
+
+        <!-- 6 -> 7 (External findings to Verify, dashed) -->
+        <path d="M 788,484 H 856 Q 864,484 864,476 V 264 Q 864,256 872,256 H 912" fill="none" stroke="#2e5aa8" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#pr-review-flow-arrow-link)"/>
+
+        <!-- 7 -> 8 (Verified findings to Report Gate) -->
+        <line x1="1060" y1="288" x2="1060" y2="384" stroke="#bf4520" stroke-width="1.4" marker-end="url(#pr-review-flow-arrow-accent)"/>
+        <rect x="1072" y="328" width="96" height="16" rx="2" fill="#f5f5f5"/>
+        <text x="1120" y="339" fill="#5a6580" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.06em">VERIFIED SET</text>
+
+        <!-- NODES -->
+        <!-- Node 1: Step 1-2.06 -->
+        <rect x="72" y="96" width="276" height="104" rx="6" fill="#f5f5f5"/>
+        <rect x="72" y="96" width="276" height="104" rx="6" fill="#ffffff" stroke="#4f5d75" stroke-width="1"/>
+        <rect x="84" y="108" width="56" height="14" rx="2" fill="none" stroke="#4f5d75" stroke-width="0.8" stroke-opacity="0.45"/>
+        <text x="112" y="118" fill="#4f5d75" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">STEP 1–2</text>
+        <text x="210" y="144" fill="#2d3142" font-size="14" font-weight="600" font-family="'Geist', 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif" text-anchor="middle">目標解析與分頁抓檔</text>
+        <text x="210" y="166" fill="#4f5d75" font-size="12" font-weight="500" font-family="'Geist', 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif" text-anchor="middle">單目標・多目標・REST 完整清單</text>
+        <text x="210" y="186" fill="#5a6580" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">scripts/pr-review-targets.py</text>
+
+        <!-- Node 2: Step 2.5-2.55 -->
+        <rect x="72" y="256" width="276" height="104" rx="6" fill="#f5f5f5"/>
+        <rect x="72" y="256" width="276" height="104" rx="6" fill="#ffffff" stroke="#4f5d75" stroke-width="1"/>
+        <rect x="84" y="268" width="64" height="14" rx="2" fill="none" stroke="#4f5d75" stroke-width="0.8" stroke-opacity="0.45"/>
+        <text x="116" y="278" fill="#4f5d75" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">STEP 2.5</text>
+        <text x="210" y="304" fill="#2d3142" font-size="14" font-weight="600" font-family="'Geist', 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif" text-anchor="middle">建立隔離審查 Worktree</text>
+        <text x="210" y="326" fill="#4f5d75" font-size="12" font-weight="500" font-family="'Geist', 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif" text-anchor="middle">對齊 PR HEAD・分離基底混入檔案</text>
+        <text x="210" y="346" fill="#5a6580" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">git worktree · authored vs inherited</text>
+
+        <!-- Node 3: Step 2.6-2.97 -->
+        <rect x="72" y="416" width="276" height="104" rx="6" fill="#f5f5f5"/>
+        <rect x="72" y="416" width="276" height="104" rx="6" fill="#ffffff" stroke="#4f5d75" stroke-width="1"/>
+        <rect x="84" y="428" width="68" height="14" rx="2" fill="none" stroke="#4f5d75" stroke-width="0.8" stroke-opacity="0.45"/>
+        <text x="118" y="438" fill="#4f5d75" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">STEP 2.6+</text>
+        <text x="210" y="464" fill="#2d3142" font-size="14" font-weight="600" font-family="'Geist', 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif" text-anchor="middle">前置掃描與審查標準挑選</text>
+        <text x="210" y="486" fill="#4f5d75" font-size="12" font-weight="500" font-family="'Geist', 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif" text-anchor="middle">Formal Spec・影響半徑・34 份標準</text>
+        <text x="210" y="506" fill="#5a6580" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">review-standards/catalog.md</text>
+
+        <!-- Node 4 (FOCAL 1): Step 2.98 Dispatch Gate -->
+        <rect x="472" y="96" width="316" height="112" rx="6" fill="#f5f5f5"/>
+        <rect x="472" y="96" width="316" height="112" rx="6" fill="#bf4520" stroke="#bf4520" stroke-width="1.5" fill-opacity="0.08"/>
+        <rect x="484" y="108" width="84" height="14" rx="2" fill="none" stroke="#bf4520" stroke-width="0.8" stroke-opacity="0.55"/>
+        <text x="526" y="118" fill="#bf4520" font-size="7" font-weight="600" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">GATE 1 · C4</text>
+        <text x="630" y="144" fill="#2d3142" font-size="14" font-weight="600" font-family="'Geist', 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif" text-anchor="middle">選席矩陣與派工授權閘門</text>
+        <text x="630" y="168" fill="#4f5d75" font-size="12" font-weight="500" font-family="'Geist', 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif" text-anchor="middle">Claude 席自動放行；外部席需真人確認</text>
+        <text x="630" y="190" fill="#bf4520" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">pr-review-c4.py + c4-dispatch-gate.py</text>
+
+        <!-- Node 5: Claude Reviewer Seats -->
+        <rect x="472" y="272" width="316" height="104" rx="6" fill="#f5f5f5"/>
+        <rect x="472" y="272" width="316" height="104" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+        <rect x="484" y="284" width="68" height="14" rx="2" fill="none" stroke="#2d3142" stroke-width="0.8" stroke-opacity="0.45"/>
+        <text x="518" y="294" fill="#2d3142" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">CLAUDE</text>
+        <text x="630" y="320" fill="#2d3142" font-size="14" font-weight="600" font-family="'Geist', 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif" text-anchor="middle">Claude 側平行審查席</text>
+        <text x="630" y="342" fill="#4f5d75" font-size="12" font-weight="500" font-family="'Geist', 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif" text-anchor="middle">語言專屬・安全性・正式規格對照</text>
+        <text x="630" y="362" fill="#5a6580" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">ts / py / code / security / spec-reviewer</text>
+
+        <!-- Node 6: External Model Seats (optional) -->
+        <rect x="472" y="432" width="316" height="104" rx="6" fill="#f5f5f5"/>
+        <rect x="472" y="432" width="316" height="104" rx="6" fill="#ffffff" stroke="#2e5aa8" stroke-width="1" stroke-dasharray="5,4"/>
+        <rect x="484" y="444" width="76" height="14" rx="2" fill="none" stroke="#2e5aa8" stroke-width="0.8" stroke-opacity="0.45"/>
+        <text x="522" y="454" fill="#2e5aa8" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">EXTERNAL</text>
+        <text x="630" y="480" fill="#2d3142" font-size="14" font-weight="600" font-family="'Geist', 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif" text-anchor="middle">跨模型外部審查席（選用）</text>
+        <text x="630" y="502" fill="#4f5d75" font-size="12" font-weight="500" font-family="'Geist', 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif" text-anchor="middle">Codex 雙軸・Web GPT Pro・Gemini</text>
+        <text x="630" y="522" fill="#2e5aa8" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">pr-review-codex-set.mjs · WIRING.md</text>
+
+        <!-- Node 7: Step 4-4.8 Cross-Axis Verify -->
+        <rect x="912" y="176" width="296" height="112" rx="6" fill="#f5f5f5"/>
+        <rect x="912" y="176" width="296" height="112" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+        <rect x="924" y="188" width="68" height="14" rx="2" fill="none" stroke="#2d3142" stroke-width="0.8" stroke-opacity="0.45"/>
+        <text x="958" y="198" fill="#2d3142" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">STEP 4</text>
+        <text x="1060" y="224" fill="#2d3142" font-size="14" font-weight="600" font-family="'Geist', 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif" text-anchor="middle">跨軸驗證與確定性後處理</text>
+        <text x="1060" y="246" fill="#4f5d75" font-size="12" font-weight="500" font-family="'Geist', 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif" text-anchor="middle">單方發現挑戰・覆蓋率・行號重錨</text>
+        <text x="1060" y="268" fill="#5a6580" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">Lone-Finding · ENH-A · ENH-B</text>
+
+        <!-- Node 8 (FOCAL 2): Step 5-7 Report Gate & Cleanup -->
+        <rect x="912" y="384" width="296" height="112" rx="6" fill="#f5f5f5"/>
+        <rect x="912" y="384" width="296" height="112" rx="6" fill="#bf4520" stroke="#bf4520" stroke-width="1.5" fill-opacity="0.08"/>
+        <rect x="924" y="396" width="84" height="14" rx="2" fill="none" stroke="#bf4520" stroke-width="0.8" stroke-opacity="0.55"/>
+        <text x="966" y="406" fill="#bf4520" font-size="7" font-weight="600" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">GATE 2 · OUT</text>
+        <text x="1060" y="432" fill="#2d3142" font-size="14" font-weight="600" font-family="'Geist', 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif" text-anchor="middle">報告投影寫入閘門與清理</text>
+        <text x="1060" y="454" fill="#4f5d75" font-size="12" font-weight="500" font-family="'Geist', 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif" text-anchor="middle">核對各席狀態後落檔・移除 Worktree</text>
+        <text x="1060" y="476" fill="#bf4520" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">pr-review-report-projection.py</text>
+
+        <!-- LEGEND STRIP -->
+        <line x1="40" y1="636" x2="1240" y2="636" stroke="#2d3142" stroke-width="0.8" stroke-opacity="0.15"/>
+        <text x="40" y="664" fill="#4f5d75" font-size="8" font-weight="500" font-family="'Geist Mono', ui-monospace, monospace" letter-spacing="0.14em">LEGEND</text>
+
+        <rect x="128" y="652" width="16" height="16" rx="3" fill="#bf4520" stroke="#bf4520" stroke-width="1.5" fill-opacity="0.08"/>
+        <text x="152" y="664" fill="#2d3142" font-size="12" font-weight="500" font-family="'Geist', 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif">機械守門點（PreToolUse Hook Gate）</text>
+
+        <rect x="408" y="652" width="16" height="16" rx="3" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+        <text x="432" y="664" fill="#2d3142" font-size="12" font-weight="500" font-family="'Geist', 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif">預設必跑步驟／Claude 側席位</text>
+
+        <rect x="656" y="652" width="16" height="16" rx="3" fill="#ffffff" stroke="#2e5aa8" stroke-width="1" stroke-dasharray="4,3"/>
+        <text x="680" y="664" fill="#2d3142" font-size="12" font-weight="500" font-family="'Geist', 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif">選用外部模型席（需當輪授權）</text>
+
+        <line x1="920" y1="660" x2="956" y2="660" stroke="#bf4520" stroke-width="1.4" marker-end="url(#pr-review-flow-arrow-accent)"/>
+        <text x="968" y="664" fill="#2d3142" font-size="12" font-weight="500" font-family="'Geist', 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif">主幹資料流（Headline Path）</text>
+      </svg>

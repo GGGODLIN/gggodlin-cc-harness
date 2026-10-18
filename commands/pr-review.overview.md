@@ -4,27 +4,29 @@
 
 ## 運作流程圖
 
+![/pr-review 多軸對抗式審查與雙閘門流程](/commands/pr-review-flow.svg)
+
+<details>
+<summary>展開查看 Mermaid 結構原始碼（供 Agent／文字搜尋對照）</summary>
+
 ```mermaid
-flowchart TD
-  Start(["執行 /pr-review"]) --> Prep["Step 1–2.06：解析目標與抓取 PR 資料\nscripts/pr-review-targets.py 處理單目標 / 多目標 / --merged\nREST 分頁拉完整變更清單（防 100 檔截斷）"]
-  Prep --> Worktree["Step 2.5–2.55：建立隔離审查 Worktree\ngit worktree 對齊 PR HEAD SHA\n區分 Authored（本 PR 改動）與 Inherited（基底混入）"]
-  Worktree --> SpecGate["Step 2.6–2.97：前置掃描與條件收集\n① Formal Spec Gate（抽規範條款）\n② sem 影響半徑 ＋ react-doctor 機械檢查\n③ 對照 review-standards/catalog.md 判定適用標準"]
-  SpecGate --> Matrix["Step 2.98：選席矩陣與授權檢查\nscripts/pr-review-c4.py authorize-dispatch\nClaude 側席位自動放行；外部額度席需當輪確認"]
-
-  Matrix --> Dispatch["Step 3：平行派出已選審查席\n（hooks/pr-review-c4-dispatch-gate.py 攔截未授權席位）"]
-
-  subgraph Seats["可選審查席位（互不讀對方輸出）"]
-    direction LR
-    SClaude["Claude 側席位\ntypescript/python/code-reviewer\nsecurity-reviewer\nspec-compliance-reviewer"]
-    SCodex["Codex 席位（選用）\nscripts/pr-review-codex-set.mjs\n一般審查軸 ＋ 對抗攻擊軸"]
-    SWeb["外部網頁模型席（選用）\n🔌 ChatGPT 網頁版席位 / Gemini"]
+flowchart LR
+  subgraph S1["Stage 1 · 前置隔離與標準挑選"]
+    Prep["Step 1–2.06：目標解析與分頁抓檔"] --> Worktree["Step 2.5：建立隔離審查 Worktree"] --> SpecGate["Step 2.6+：前置掃描與挑選審查標準"]
   end
-
-  Dispatch --> Seats
-  Seats --> Verify["Step 4–4.8：交叉驗證與確定性後處理\n① 跨軸挑戰單方發現（Lone-Finding）\n② 核對變更檔案覆蓋率（ENH-A）與行號重錨（ENH-B）\n③ 對帳上一輪 PR 審查是否已修（Step 4.7）"]
-  Verify --> Report["Step 5–6.5：產出比較報告與回流登記\nscripts/pr-review-report-projection.py\n（hooks/pr-review-report-write-gate.py 守門）\n漏抓類型追加至 references/failure-mode-taxonomy.md"]
-  Report --> Cleanup(["Step 7：移除臨時 worktree 並還原設定"])
+  subgraph S2["Stage 2 · 選席授權閘與平行審查"]
+    Matrix["Step 2.98：選席矩陣與授權閘（C4 Gate）"] --> SClaude["Claude 側審查席（自動放行）"]
+    Matrix -.-> SExt["跨模型外部審查席（選用，需確認）"]
+  end
+  subgraph S3["Stage 3 · 交叉驗證與報告寫入閘"]
+    Verify["Step 4：跨軸挑戰・覆蓋率・行號重錨"] --> Report["Step 5–7：報告投影寫入閘與清理"]
+  end
+  SpecGate --> Matrix
+  SClaude --> Verify
+  SExt -.-> Verify
 ```
+
+</details>
 
 ## 同目錄與隨附元件對照
 
