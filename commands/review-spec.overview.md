@@ -4,29 +4,29 @@
 
 ## 運作流程圖
 
+![/review-spec 規格四級審查與 YAGNI 定價流程](/commands/review-spec-flow.svg)
+
+<details>
+<summary>展開查看 Mermaid 結構原始碼（供 Agent／文字搜尋對照）</summary>
+
 ```mermaid
-flowchart TD
-  Start(["執行 /review-spec [tier] <spec>"]) --> Parse["解析輸入與貫穿守則\n守則 0：CLAIM 隔離（只給 spec 與事實，不放作者自評）\n守則 1：架構視覺圖預檢（🔌 架構圖產生與審批）"]
-  Parse --> HasTier{"呼叫時是否已指定\nTier（1/2/3/4/yagni）？"}
-
-  HasTier -- "未指定 Tier" --> AutoPick["main 依『什麼時候選』欄\n在第 1、2 級間自選並立即執行\n（若符合第 3、4 級條件，於結尾附推薦指令，不代簽 permit）"]
-  HasTier -- "已指定 Tier" --> RouteTier{"指定哪一級？"}
-  AutoPick --> RouteTier
-
-  RouteTier -- "Tier 1（預設地板）" --> T1["In-context 唱反調自審\n依 7 大失敗模式探針逐項挑刺"]
-  RouteTier -- "Tier 2（中小型跨模組）" --> T2["派單一 architecture-critic\n（fresh context 無歷史包袱）"]
-  RouteTier -- "Tier 3（核心架構 / 生產資料）" --> T3["多角度平行審查（架構＋安全＋領域）\n使用者親手送出 Tier 3 指令才可簽雙跑 permit"]
-  RouteTier -- "Tier 4（關鍵高風險決策）" --> T4["外部跨模型審查\n🔌 ChatGPT 網頁版席位 / Codex CLI"]
-  RouteTier -- "yagni（需求定價）" --> Yagni["組隔離 packet（spec ＋ 使用者原話對照 ＋ 研究數據）\n逐條分類：(a) 原話 / (b) 量測證據 → 保護\n(c) 模型推導 → 答不出具體損失就砍或降級"]
-
-  T1 --> Converge["共用收斂：root / first_nail\n先區分題目誤讀、可直接修的缺陷、與真取捨"]
-  T2 --> Converge
-  T3 --> Converge
-  T4 --> Converge
-  Yagni --> Converge
-
-  Converge --> FinalTable(["整理成最後一輪拍板表（一列一題 a/b/c）\n拍板後落檔寫入 spec 與審查紀錄"])
+flowchart LR
+  subgraph S1["Stage 1 · CLAIM 隔離與級別路由"]
+    Parse["解析輸入與貫穿守則（剝除作者自評）"] --> AutoTier["未指定級別時於 Tier 1–2 自選"] --> Probe["對照七大失敗模式探針表"]
+  end
+  subgraph S2["Stage 2 · 分級審查與 Permit 邊界"]
+    Gate1["GATE 1：Tier 分流與雙跑 Permit 邊界"] --> ClaudeTiers["Claude 側對抗審查（Tier 1–3）"]
+    Gate1 -.-> ExtYagni["Tier 4 外部跨模型 ／ YAGNI 定價"]
+  end
+  subgraph S3["Stage 3 · 共用收斂與最後拍板"]
+    Converge["共用收斂：先修誤讀與無爭議缺陷"] --> FinalTable["GATE 2：最後一輪拍板表（一列一題 a/b/c）"]
+  end
+  Probe --> Gate1
+  ClaudeTiers --> Converge
+  ExtYagni -.-> Converge
 ```
+
+</details>
 
 ## 同目錄與隨附元件對照
 

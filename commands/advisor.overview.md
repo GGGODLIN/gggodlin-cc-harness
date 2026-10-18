@@ -4,25 +4,29 @@
 
 ## 運作流程圖
 
+![/advisor 跨模型單次顧問外包與差異裁決流程](/commands/advisor-flow.svg)
+
+<details>
+<summary>展開查看 Mermaid 結構原始碼（供 Agent／文字搜尋對照）</summary>
+
 ```mermaid
-flowchart TD
-  Start(["執行 /advisor"]) --> Step0["Step 0–1：整理任務目的與材料策略\n從當前對話抽離問題背景、候選方案與必要原碼\n（不要求使用者背分類參數）"]
-  Step0 --> Step2["Step 2：讀取額度並產生推薦\n檢查當前主模型與額度狀態（🔌 額度資料來源）"]
-  Step2 --> Step3["Step 3：呈現三種顧問席選單並等待使用者選擇"]
-
-  Step3 --> Pick{"使用者選定哪一席？"}
-  Pick -- "未回答 / 取消" --> Stop(["停止，不派出任何顧問"])
-
-  Pick -- "選項 1：Claude Fable 顧問席" --> Seat1["派 advisor-seat subagent\ndescription 帶 <fable-ok> 通過 hooks/fable-gate.sh"]
-  Pick -- "選項 2：網頁版 GPT Pro" --> Seat2["走 🔌 ChatGPT 網頁版席位（見 WIRING.md）\n材料模式把必要原文內嵌進四段式 prompt"]
-  Pick -- "選項 3：Codex CLI 獨立推理" --> Seat3["以唯讀 sandbox 執行 Codex CLI\n跑完從 rollout 檔核實 model / effort / sandbox_policy"]
-
-  Seat1 --> Step5["Step 5：原文呈現顧問回答\n用一句話標出『顧問看法跟主 session 哪裡不同』"]
-  Seat2 --> Step5
-  Seat3 --> Step5
-
-  Step5 --> Step6(["Step 6：列出分歧點供使用者逐條裁決\n（顧問本身零改檔權限）"])
+flowchart LR
+  subgraph S1["Stage 1 · 問題抽離與額度檢查"]
+    Step0["Step 0–1：整理任務目的與材料策略"] --> Step2["Step 2：讀取額度狀態並產生推薦"] --> Step4["Step 4：組裝四段式顧問 Prompt"]
+  end
+  subgraph S2["Stage 2 · 選席與 Fable 守門閘"]
+    Gate1["GATE 1：使用者選定席位與 fable-gate.sh"] --> Seat1["選項 1：Claude Fable 唯讀顧問席"]
+    Gate1 -.-> SeatExt["選項 2/3：Web GPT Pro ／ Codex CLI"]
+  end
+  subgraph S3["Stage 3 · 原文差異對照與裁決"]
+    Step5["Step 5：原文呈現回答並點出與 main 差異"] --> Step6["GATE 2：列出分歧點供使用者逐條裁決"]
+  end
+  Step4 --> Gate1
+  Seat1 --> Step5
+  SeatExt -.-> Step5
 ```
+
+</details>
 
 ## 同目錄與隨附元件對照
 

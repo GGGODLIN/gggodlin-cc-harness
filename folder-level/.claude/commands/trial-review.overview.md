@@ -4,23 +4,29 @@
 
 ## 運作流程圖
 
+![/trial-review 觀察期到期檢討與摩擦歸因流程](/folder-level/.claude/commands/trial-review-flow.svg)
+
+<details>
+<summary>展開查看 Mermaid 結構原始碼（供 Agent／文字搜尋對照）</summary>
+
 ```mermaid
-flowchart TD
-  Start(["執行 /trial-review\n（或由 hooks/trial-review.sh 到期提醒觸發）"]) --> Step0["Step 0：撈取到期候選清單\n掃描 trials/active.md 到期項目\n＋ friction-review-state.py 達門檻的摩擦帳本\n直接認領第一候選開跑（不先停下來問選哪題）"]
-
-  Step0 --> Kind{"候選類型？"}
-
-  Kind -- "一般工具 / Hook Trial" --> GatherTrial["Step 1A：收集觀察期行為證據\n查 git log / hook 觸發紀錄 / session 實測表現\n（只寫進文件不算採用證據）"]
-  Kind -- "摩擦帳本（Friction Log）" --> GatherFriction["Step 1B：分群、來源核實與事件歸因\n① 依 target 與根因分群，核對原話與測試出處\n② 跑 scripts/friction-outcome-packet.py 打包上下文\n③ 派 routed-judge 判 NEW_ACTIONABLE / ALREADY_FIXED / NOT_SKILL_CAUSED"]
-
-  GatherTrial --> Present["整理 3–4 句短背景＋唯一拍板問句\n（a. KEEP 轉正 / b. MODIFY 調整 / c. KILL 移除 / d. 延一輪）"]
-  GatherFriction --> Present
-
-  Present --> UserPick{"使用者拍板決定"}
-  UserPick --> Step2["Step 2：結案執行\n① 更新 trials/active.md 並用 hooks/trial-archive-resources.py 歸檔至 archived.md\n② 若拍板折入規則/skill → 走 skill-creator 或 gate-authoring\n③ 漏抓案例同步回寫 references/failure-mode-taxonomy.md"]
-  Step2 --> Step3["Step 3：Self-Verify 獨立審計（必跑）\n將變更清單與 rubric 交給 skill-verify-auditor\n（hooks/skill-verify-once-gate.py 限制單次配額）"]
-  Step3 --> Step4(["Step 4：輸出結案總結並推進下一候選"])
+flowchart LR
+  subgraph S1["Stage 1 · 到期候選與摩擦盤點"]
+    Step0["Step 0：掃描到期 Trial 與達門檻摩擦帳本"] --> Step1A["Step 1A：收集工具／Hook 真實行為證據"] --> Step1B["Step 1B：摩擦帳本分群與來源權威核對"]
+  end
+  subgraph S2["Stage 2 · 事件歸因與拍板決定"]
+    Gate1["GATE 1：事件歸因封包與規則變更分類閘"] --> Decide["呈現 3–4 句短背景與 KEEP/MODIFY/KILL 選單"]
+    Gate1 -.-> FoldIn["拍板折入規則／Skill／Hook（選用）"]
+  end
+  subgraph S3["Stage 3 · 歸檔與獨立審計"]
+    Archive["Step 2：搬移至 archived.md 並更新索引"] --> Verify["GATE 2：Self-Verify 獨立審計守門閘"]
+  end
+  Step1B --> Gate1
+  Decide --> Archive
+  FoldIn -.-> Archive
 ```
+
+</details>
 
 ## 同目錄與隨附元件對照
 

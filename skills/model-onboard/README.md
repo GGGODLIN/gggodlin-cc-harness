@@ -4,25 +4,29 @@
 
 ## 運作流程圖
 
+![model-onboard 第三方模型接入與五階段評估流程](/skills/model-onboard/model-onboard-flow.svg)
+
+<details>
+<summary>展開查看 Mermaid 結構原始碼（供 Agent／文字搜尋對照）</summary>
+
 ```mermaid
-flowchart TD
-  Start(["接入新模型 / 新 provider"]) --> Stage1["階段一：WIRE 登記與額度盤點\n讀 references/wiring-layers.md（🔌 跨模型後端）\n實打 /v1/models 與單發請求確認 model ID\n記錄額度來源與是否跟既有模型共用額度"]
-  Stage1 --> Stage2["階段二：SMOKE 十二道接線探針（必跑）\n每道預設跑 3 次，採三態判定：\nPASS（有效樣本過半）/ FAIL（200 但內容錯）/ N/A（429/5xx 請求層失敗）"]
-  Stage2 --> StopBench{"停點 1：定位是否需要\nagentic 多步工具能力？"}
-
-  StopBench -- "需要" --> Stage3["階段三：BENCH 能力評估\n讀 references/bench-suite.md\n跑多步工具鏈與真實工作量題組"]
-  StopBench -- "僅單次來回（翻譯/摘要/分類）" --> SkipBench["標註『未測能力，定位僅限單次來回』"]
-
-  Stage3 --> Stage4["階段四：LIVE 真實 CC Session 測試\n讀 references/live-session.md\n實測 context window、ToolSearch、stop hook 與風格遵從"]
-  SkipBench --> Stage4
-
-  Stage4 --> WantChain{"是否要排進\n日常免費備援鏈（free chain）？"}
-  WantChain -- "是" --> RegressGate["入鏈關卡：三段回歸題組\n讀 references/regress-gate.md\n① v1 日常短任務對照凍結基準\n② v3 分析類查證題組\n③ 真實工作量盲評題組"]
-  WantChain -- "否（僅保留獨立 alias）" --> Stage5
-
-  RegressGate --> StopChain["停點 2：帶著回歸報告\n請使用者拍板 chain priority"]
-  StopChain --> Stage5["階段五：VERDICT 裁決與登記\n依 references/verdict-template.md 填表\n過 skill-verify-auditor 檢查"]
+flowchart LR
+  subgraph S1["Stage 1 · WIRE 登記與 SMOKE 探針"]
+    Wire["階段一：WIRE 登記端點與盤點額度"] --> Budget["核實來源可用輸出上限"] --> Smoke["階段二：SMOKE 十二道三態探針（PASS/FAIL/N/A）"]
+  end
+  subgraph S2["Stage 2 · 能力定位與真 CC 整合"]
+    Gate1["GATE 1：能力定位分流與真 CC 整合閘"] --> Live["階段四：LIVE 真實 CC Session 驗證"]
+    Gate1 -.-> Bench["階段三：BENCH 多步工具鏈與工作量題組（選用）"]
+  end
+  subgraph S3["Stage 3 · 入鏈回歸關卡與裁決"]
+    Regress["入鏈三段回歸題組（v1 / v3 / 工作量）"] --> Verdict["GATE 2：拍板 Chain Priority 與 VERDICT 審計"]
+  end
+  Smoke --> Gate1
+  Live --> Regress
+  Bench -.-> Regress
 ```
+
+</details>
 
 ## 同目錄與隨附元件對照
 

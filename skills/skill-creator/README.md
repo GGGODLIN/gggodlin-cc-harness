@@ -5,24 +5,29 @@
 
 ## 運作流程圖
 
+![skill-creator 漸進揭露與對抗式行為驗證流程](/skills/skill-creator/skill-creator-flow.svg)
+
+<details>
+<summary>展開查看 Mermaid 結構原始碼（供 Agent／文字搜尋對照）</summary>
+
 ```mermaid
-flowchart TD
-  Start(["新建或修改 skill / command"]) --> Understand["1. 盤點具體觸發情境與重用資源\n拆三層：frontmatter 摘要 → SKILL.md 主幹（<500 行）\n→ references/、scripts/、assets/"]
-  Understand --> Classify{"2. 判定本次修改性質"}
-
-  Classify -- "Mechanical Edit\n（改檔名、移路徑、同步 CLI --help 旗標）" --> MechCheck["確定性檢查（免跑 RED/GREEN）\n① 變更行所有路徑與連結存在\n② 指令旗標對照 --help\n③ grep 確認舊名稱零殘留"]
-  Classify -- "Behavioral Edit 或新建\n（改規則、決策樹、觸發語、模糊分類）" --> RedPhase["3a. RED Baseline（動手改檔前！）\n派 fresh subagent 跑誘發壓力情境\n觀察未改版如何失守（讀到待測檔算無效）"]
-
-  RedPhase --> RedCheck{"RED 是否重現問題？"}
-  RedCheck -- "未重現（基線已合規）" --> StopAsk(["停下回報使用者「無法證明有問題」\n由使用者決定是否仍要改"])
-  RedCheck -- "已重現缺口" --> EditSkill["3b. 撰寫 / 修改 SKILL.md\n外部指標用『如果 X，就在 Y 前讀 Z』句型\n模糊形容詞改寫為可觀察條件"]
-  EditSkill --> GreenPhase["3c. GREEN 驗證\n派 fresh subagent 重跑同一壓力情境\n確認有實際工具呼叫與外部產物證據"]
-  GreenPhase --> RefactorPhase["3d. REFACTOR 找漏洞\n用偷懶或邊界情境測試，修補後重跑回歸"]
-
-  MechCheck --> SelfVerify["4. 契約測試與 Self-Verify\n跑 scripts/quick_validate.py 與專屬 contract test\n有 Self-Verify 段則過 skill-verify-auditor"]
-  RefactorPhase --> SelfVerify
-  SelfVerify --> Inventory(["5. 更新 skills/INVENTORY.md 登記表"])
+flowchart LR
+  subgraph S1["Stage 1 · 三層結構與修改分類"]
+    Step1["1. 盤點觸發情境與三層漸進揭露"] --> Step2["2. 判定行為規則或機械性修改"] --> Author["依可觀察條件撰寫指引條文"]
+  end
+  subgraph S2["Stage 2 · RED-GREEN-REFACTOR 閘門"]
+    Gate1["GATE 1：改檔前新鮮 Subagent RED 基線"] --> GreenRef["GREEN 實測與 REFACTOR 補洞"]
+    Gate1 -.-> Mech["機械性修改確定性檢查路線（選用）"]
+  end
+  subgraph S3["Stage 3 · 契約測試與庫存登記"]
+    Step4["4. 執行專屬契約測試與格式驗證"] --> Verify["GATE 2：Self-Verify 單次審計與庫存登記"]
+  end
+  Author --> Gate1
+  GreenRef --> Step4
+  Mech -.-> Step4
 ```
+
+</details>
 
 ## 同目錄與隨附元件對照
 

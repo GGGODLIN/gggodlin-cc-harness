@@ -29,15 +29,15 @@ It is a reference, not a product. You can install single pieces, but nothing gua
 |---|---|
 | 已經有自己的 Claude Code 設定，想讓 agent 守紀律 | [`skills/gate-authoring/SKILL.md`](/skills/gate-authoring/SKILL.md)、[`rules/common/dispatch-and-verify.md`](/rules/common/dispatch-and-verify.md)、[`friction/PROTOCOL.md`](/friction/PROTOCOL.md) 與 [`examples/trials/`](/examples/trials/) |
 | 想挑一個完整的工具來試 | [`compact-guard/README.md`](/compact-guard/README.md)：有完整程式與測試，可以單獨安裝 |
-| 想看大型機制與工作流怎麼咬合（附 Mermaid 流程圖） | 下方「核心機制與大型 Skill 圖解導覽」表格，點進各機制的圖解檔即可看完整狀態流 |
+| 想看大型機制與工作流怎麼咬合（附寬版 SVG 架構圖） | 下方「核心機制與大型 Skill 圖解導覽」表格，點進各機制的圖解檔即可看完整三階段流程 |
 | 想研究 agent 治理、人工授權與出錯後怎麼恢復 | 下面的「設計原則」「已知風險」，以及 [`rules/common/git-workflow.md`](/rules/common/git-workflow.md) |
 | 想幾分鐘內裝好整套 | 目前做不到：路徑寫死、接線要自己補。單一元件看 [`install/`](/install/) 與下方「怎麼讓你的 Claude Code 幫你挑選與改裝」 |
 
 ## 核心機制與大型 Skill 圖解導覽
 
-這座 repo 最複雜的 10 個機制都附有同層的 Mermaid 流程圖與隨附元件對照表（Skill 直接放在該目錄的 `README.md`，點進資料夾就會在 GitHub 網頁下方自動展開；Command 放在同層的 `.overview.md`）：
+這座 repo 最複雜的 10 個機制都附有同層的寬版 SVG 運作流程圖、摺疊 Mermaid 結構原始碼與隨附元件對照表（Skill 直接放在該目錄的 `README.md`，點進資料夾就會在 GitHub 網頁下方自動展開；Command 放在同層的 `.overview.md`）：
 
-| 機制／Skill | 解決什麼問題 | 圖解導覽（含 Mermaid 圖） | 規範正本 |
+| 機制／Skill | 解決什麼問題 | 圖解導覽（含 SVG 流程圖） | 規範正本 |
 |---|---|---|---|
 | **`/pr-review`** | 多目標／分支隔離 worktree、自動選 Claude 側審查席、雙閘門守衛（派工授權＋報告寫入）與跨模型比較報告 | [`commands/pr-review.overview.md`](/commands/pr-review.overview.md) | [`commands/pr-review.md`](/commands/pr-review.md) |
 | **`implement`** | 按依賴圖逐批跑完票券、強制對齊 TDD 決策清單（`matt-tdd-gate`），收尾串起全套測試、跨軸審查與架構視覺核對 | [`skills/implement/README.md`](/skills/implement/README.md) | [`skills/implement/SKILL.md`](/skills/implement/SKILL.md) |
@@ -158,11 +158,11 @@ It is a reference, not a product. You can install single pieces, but nothing gua
 - [`WIRING.md`](WIRING.md)
 - [`agents/`](agents/) — 33 個檔案；內含 `advisor-seat.md`、`architecture-critic.md`、`architecture-critic.md.LICENSE`、`code-reviewer.md`、`code-reviewer.md.LICENSE`、`deep-explore.md`、`docs-lookup.md`、`docs-lookup.md.LICENSE`…（共 30 項）
 - [`cc-skill-doctor/`](cc-skill-doctor/) — 2 個檔案；內含 `scripts/`
-- [`commands/`](commands/) — 62 個檔案；內含 `advisor.md`、`advisor.overview.md`、`aside.md`、`aside.md.LICENSE`、`daily-local.md`、`docs.md`、`docs.md.LICENSE`、`git-closeout.md`…（共 37 項）
+- [`commands/`](commands/) — 64 個檔案；內含 `advisor-flow.svg`、`advisor.md`、`advisor.overview.md`、`aside.md`、`aside.md.LICENSE`、`daily-local.md`、`docs.md`、`docs.md.LICENSE`…（共 39 項）
 - [`compact-guard/`](compact-guard/) — 23 個檔案；內含 `README.md`、`bin/`、`docs/`、`package.json`、`src/`、`test/`
 - [`config/`](config/) — 1 個檔案；內含 `gpt-models.env`
 - [`examples/`](examples/) — 8 個檔案；內含 `friction/`、`memory/`、`tool-upgrade-notes/`、`trials/`、`wiki/`
-- [`folder-level/`](folder-level/) — 16 個檔案；內含 `.claude/`、`CLAUDE.md`
+- [`folder-level/`](folder-level/) — 17 個檔案；內含 `.claude/`、`CLAUDE.md`
 - [`friction/`](friction/) — 1 個檔案；內含 `PROTOCOL.md`
 - [`hooks/`](hooks/) — 110 個檔案；內含 `T1-claim-detect-local-first.llm.test.sh`、`T1-claim-detect-local-first.sh`、`T1-claim-detect-local-first.test.sh`、`T1-evidence-level-detect.sh`、`T1-evidence-level-detect.test.sh`、`T1-evidence-level-fixtures/`、`T1-evidence-level-prompt-v2.txt`、`T1-system-prompt-v5d.txt`…（共 106 項）
 - [`install/`](install/) — 44 個檔案；內含 `compact-guard/`、`folder-level/`、`hooks/`、`output-styles/`、`workflows/`
@@ -174,6 +174,6 @@ It is a reference, not a product. You can install single pieces, but nothing gua
 - [`rules/`](rules/) — 14 個檔案；內含 `common/`、`typescript/`
 - [`scripts/`](scripts/) — 100 個檔案；內含 `advisor-extract-context.py`、`agent-contract-command/`、`agent-contract-validator.definition.test.sh`、`agent-contract-validator.diagnostics.test.sh`、`agent-contract-validator.frontmatter.test.sh`、`agent-contract-validator.mcp-tools.test.sh`、`agent-contract-validator.mjs`、`agent-contract-validator.name.test.sh`…（共 86 項）
 - [`settings.json`](settings.json)
-- [`skills/`](skills/) — 206 個檔案；內含 `INVENTORY.md`、`absorb-pack/`、`agent-authoring/`、`agent-dispatch/`、`align-intent/`、`auto-choice/`、`brainstorm/`、`caveman/`…（共 43 項）
+- [`skills/`](skills/) — 211 個檔案；內含 `INVENTORY.md`、`absorb-pack/`、`agent-authoring/`、`agent-dispatch/`、`align-intent/`、`auto-choice/`、`brainstorm/`、`caveman/`…（共 43 項）
 - [`social-info/`](social-info/) — 76 個檔案；內含 `scripts/`、`tests/`
-- [`workflows/`](workflows/) — 7 個檔案；內含 `best-of-n-implement.js`、`failure-mode-daily.sh`、`local-analysis.js`、`skill-changes-daily.sh`、`skillevaluator-weekly.sh`、`tests/`
+- [`workflows/`](workflows/) — 8 個檔案；內含 `best-of-n-implement.js`、`failure-mode-daily.sh`、`local-analysis-flow.svg`、`local-analysis.js`、`skill-changes-daily.sh`、`skillevaluator-weekly.sh`、`tests/`

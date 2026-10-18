@@ -4,28 +4,29 @@
 
 ## 運作流程圖
 
+![implement 票券執行與收尾雙閘門流程](/skills/implement/implement-flow.svg)
+
+<details>
+<summary>展開查看 Mermaid 結構原始碼（供 Agent／文字搜尋對照）</summary>
+
 ```mermaid
-flowchart TD
-  Start(["開始 /implement"]) --> Preflight["1. Preflight 盤點\n讀取 spec / ADR / design / 票券依賴圖\n計算無阻塞 frontier"]
-  Preflight --> AskOnce["一次問完執行參數\n① 執行方式：Subagent-Driven 或 Inline\n② 測試路線：tdd / regression-closeout / 逐票決定"]
-  AskOnce --> Manifest["寫入 TDD 決策清單\nscripts/tdd-policy.mjs record-batch\n（hooks/matt-tdd-gate.sh 守門）"]
-  Manifest --> Frontier{"還有未完成\nfrontier 票？"}
-
-  Frontier -- "有（Inline）" --> InlineWork["主 session 逐票實作\n若該票標 required → 先跑 /tdd"]
-  Frontier -- "有（Subagent-Driven）" --> DispatchWorker["平行派 routed-impl subagent\nPrompt 必帶票檔絕對路徑\n（禁 worker 再向下派 agent）"]
-  InlineWork --> TickVerify["單票驗收＋勾選票檔\n更新 Verification Log"]
-  DispatchWorker --> TickVerify
-  TickVerify --> Frontier
-
-  Frontier -- "全部完成" --> Closeout1["3. Closeout 收尾\n步驟 1–2：共用比較器自檢＋全套測試"]
-  Closeout1 --> Closeout3["步驟 3：條件式安全假設探針\n（碰外部 API / SDK / 硬體限制時觸發）"]
-  Closeout3 --> Closeout4["步驟 4：程式碼與範圍審查\n語言 reviewer ＋ review-implement（Scope / YAGNI）"]
-  Closeout4 --> Repair{"有認證缺陷？"}
-  Repair -- "有（每根因最多 2 次）" --> FixLoop["最小修補 → 重跑全套測試\n→ 只重審受影響軸"]
-  FixLoop --> Repair
-  Repair -- "無（PASS / WAIVED）" --> VisualGate["步驟 5：架構視覺 Gate\n🔌 架構圖產生與審批（見 WIRING.md）\n核對 intent 圖 vs actual-delta 圖"]
-  VisualGate --> Done(["步驟 6：交付最終摘要\n（不自動推播或關閉終端）"])
+flowchart LR
+  subgraph S1["Stage 1 · Preflight 與 TDD 決策清單"]
+    Preflight["1. Preflight 盤點無阻塞 frontier"] --> AskOnce["一次問完執行與測試路線"] --> Manifest["寫入批次 TDD 決策清單（tdd-policy.mjs）"]
+  end
+  subgraph S2["Stage 2 · Frontier 實作與 TDD 守門閘"]
+    Gate1["GATE 1：matt-tdd-gate.sh 寫碼守門"] --> Exec["主幹票券實作與單票驗收（更新 Verification Log）"]
+    Gate1 -.-> Probe["條件式安全假設探針（Closeout Step 3）"]
+  end
+  subgraph S3["Stage 3 · 跨軸審查與架構視覺閘"]
+    Review["Step 4：語言 reviewer ＋ Scope/YAGNI 有界修補"] --> VisualGate["GATE 2：架構視覺核對（intent vs actual-delta）"]
+  end
+  Manifest --> Gate1
+  Exec --> Review
+  Probe -.-> Review
 ```
+
+</details>
 
 ## 同目錄與隨附元件對照
 

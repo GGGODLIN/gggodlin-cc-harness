@@ -4,26 +4,29 @@
 
 ## 運作流程圖
 
+![agent-dispatch 跨外殼終端 Worker 派工流程](/skills/agent-dispatch/agent-dispatch-flow.svg)
+
+<details>
+<summary>展開查看 Mermaid 結構原始碼（供 Agent／文字搜尋對照）</summary>
+
 ```mermaid
-flowchart TD
-  Start(["需要派獨立終端 worker"]) --> Step0["Step 0：取得當次派工同意\n讀 references/harness-recommendations.md\n列出任務、repo、worker 數、外殼、配方、治理差異"]
-  Step0 --> Consent{"使用者明確回覆\n「允許這次派工」？"}
-  Consent -- "未回覆 / 拒絕 / main 自做" --> Stop(["停止派工（不建 worktree、不起分頁）"])
-  Consent -- "同意（綁定當次參數）" --> Step1["Step 1：確認 Herdr 身分與開工位\n驗 HERDR_PANE_ID + HERDR_WORKSPACE_ID\n準備隔離 git worktree"]
-  Step1 --> Step2["Step 2：寫 brief 並啟動 worker\n依 assets/brief-template.md 寫檔（逐字標使用者原話）\n執行 scripts/start-worker.sh"]
-
-  subgraph Launch["scripts/start-worker.sh 依外殼分流"]
-    direction LR
-    HClaude["Claude Code（預設）\n套用 repo hook / skill / settings"]
-    HCodex["Codex CLI\n不套用 CC hook，加更新選單關閉旗標"]
-    HPi["pi\n不套用 CC hook，寫入 worktree .pi 重試設定"]
+flowchart LR
+  subgraph S1["Stage 1 · 同意門檻與隔離工位"]
+    Step0["Step 0：讀推薦表並呈現派工資訊"] --> Step1["Step 1：驗證 Herdr 身分與建 worktree"] --> Step2["Step 2A：撰寫任務 Brief 檔案"]
   end
-
-  Step2 --> Launch
-  Launch --> Step3["Step 3：背景等待與轉達\nscripts/agent-watch.sh 等 idle / blocked / done 後喚醒 main\n轉達訊息一律加 [main] 前綴"]
-  Step3 --> Step4["Step 4：收工對帳\nscripts/worker-turns.py 抽取對話紀錄\n核對 human 裁決、commit、票檔勾選與 worktree 乾淨"]
-  Step4 --> Step5["Step 5：主 session 跑 review-implement\n有缺陷則接回原 session 續修；開 PR 後關閉 worker 分頁"]
+  subgraph S2["Stage 2 · 啟動閘門與外殼分流"]
+    Gate1["GATE 1：當次明確同意與配方 dry-run 驗證"] --> HClaude["Claude Code 終端 Worker（預設）"]
+    Gate1 -.-> HExt["Codex CLI ／ pi Worker（選用）"]
+  end
+  subgraph S3["Stage 3 · 背景監看與收工對帳"]
+    Watch["Step 3：agent-watch.sh 背景等待與轉達"] --> Audit["GATE 2：worker-turns.py 對帳與主幹審查"]
+  end
+  Step2 --> Gate1
+  HClaude --> Watch
+  HExt -.-> Watch
 ```
+
+</details>
 
 ## 同目錄與隨附元件對照
 

@@ -1,0 +1,146 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg viewBox="0 0 1280 720" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="advisor-flow-title advisor-flow-desc" id="advisor-flow-root">
+        <title id="advisor-flow-title">/advisor 跨模型單次顧問外包與差異裁決流程</title>
+        <desc id="advisor-flow-desc">由左至右展示 /advisor 的三個階段：問題抽離與額度推薦、顧問席位選擇與 Fable 守門閘、原文差異對照與使用者逐條裁決。</desc>
+        <defs>
+      <style>#advisor-flow-root { --color-paper:   #f5f5f5;
+      --color-ink:     #2d3142;
+      --color-muted:   #4f5d75;
+      --color-soft:    #5a6580;
+      --color-accent:  #bf4520;
+      --color-link:    #2e5aa8;
+      --font-sans:     'Geist', 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', system-ui, sans-serif;
+      --font-serif:    'Instrument Serif', 'Noto Serif', 'Noto Serif TC', serif;
+      --font-mono:     'Geist Mono', ui-monospace, monospace; }
+      #advisor-flow-root { font-family: var(--font-sans); color: var(--color-ink); }
+      #advisor-flow-root .diagram-container { width: 100%; overflow-x: auto; }
+      #advisor-flow-root .diagram-container { overflow-x: visible; }</style>
+          <marker id="advisor-flow-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+            <polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/>
+          </marker>
+          <marker id="advisor-flow-arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+            <polygon points="0 0, 8 3, 0 6" fill="#bf4520"/>
+          </marker>
+          <marker id="advisor-flow-arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+            <polygon points="0 0, 8 3, 0 6" fill="#2e5aa8"/>
+          </marker>
+        </defs>
+
+        <rect width="100%" height="100%" fill="#f5f5f5"/>
+
+        <!-- ZONES -->
+        <rect x="40" y="56" width="340" height="544" rx="8" fill="#2d3142" stroke="#2d3142" stroke-width="0.8" fill-opacity="0.02" stroke-opacity="0.12"/>
+        <rect x="56" y="60" width="248" height="16" rx="2" fill="#f5f5f5"/>
+        <text x="180" y="72" fill="#5a6580" font-size="8" font-weight="500" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.14em">STAGE 1 · CONTEXT &amp; QUOTA CHECK</text>
+
+        <rect x="440" y="56" width="380" height="544" rx="8" fill="#2d3142" stroke="#2d3142" stroke-width="0.8" fill-opacity="0.02" stroke-opacity="0.12"/>
+        <rect x="456" y="60" width="256" height="16" rx="2" fill="#f5f5f5"/>
+        <text x="584" y="72" fill="#5a6580" font-size="8" font-weight="500" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.14em">STAGE 2 · SEAT PICK &amp; FABLE GATE</text>
+
+        <rect x="880" y="56" width="360" height="544" rx="8" fill="#2d3142" stroke="#2d3142" stroke-width="0.8" fill-opacity="0.02" stroke-opacity="0.12"/>
+        <rect x="896" y="60" width="248" height="16" rx="2" fill="#f5f5f5"/>
+        <text x="1020" y="72" fill="#5a6580" font-size="8" font-weight="500" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.14em">STAGE 3 · DIFF &amp; ADJUDICATION</text>
+
+        <!-- ARROWS -->
+        <line x1="210" y1="200" x2="210" y2="256" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#advisor-flow-arrow)"/>
+        <line x1="210" y1="360" x2="210" y2="416" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#advisor-flow-arrow)"/>
+        <path d="M 348,468 H 404 Q 412,468 412,460 V 160 Q 412,152 420,152 H 472" fill="none" stroke="#bf4520" stroke-width="1.4" marker-end="url(#advisor-flow-arrow-accent)"/>
+        <line x1="630" y1="208" x2="630" y2="272" stroke="#bf4520" stroke-width="1.4" marker-end="url(#advisor-flow-arrow-accent)"/>
+        <rect x="640" y="232" width="88" height="16" rx="2" fill="#f5f5f5"/>
+        <text x="684" y="243" fill="#bf4520" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.06em">FABLE SEAT</text>
+        <path d="M 472,184 H 464 Q 456,184 456,192 V 476 Q 456,484 464,484 H 472" fill="none" stroke="#2e5aa8" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#advisor-flow-arrow-link)"/>
+        <path d="M 788,324 H 840 Q 848,324 848,316 V 224 Q 848,216 856,216 H 912" fill="none" stroke="#bf4520" stroke-width="1.4" marker-end="url(#advisor-flow-arrow-accent)"/>
+        <path d="M 788,484 H 856 Q 864,484 864,476 V 264 Q 864,256 872,256 H 912" fill="none" stroke="#2e5aa8" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#advisor-flow-arrow-link)"/>
+        <line x1="1060" y1="288" x2="1060" y2="384" stroke="#bf4520" stroke-width="1.4" marker-end="url(#advisor-flow-arrow-accent)"/>
+        <rect x="1072" y="328" width="96" height="16" rx="2" fill="#f5f5f5"/>
+        <text x="1120" y="339" fill="#5a6580" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.06em">RAW ANSWER</text>
+
+        <!-- NODES -->
+        <!-- Node 1 -->
+        <rect x="72" y="96" width="276" height="104" rx="6" fill="#f5f5f5"/>
+        <rect x="72" y="96" width="276" height="104" rx="6" fill="#ffffff" stroke="#4f5d75" stroke-width="1"/>
+        <rect x="84" y="108" width="76" height="14" rx="2" fill="none" stroke="#4f5d75" stroke-width="0.8" stroke-opacity="0.45"/>
+        <text x="122" y="118" fill="#4f5d75" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">STEP 0–1</text>
+        <text x="210" y="144" fill="#2d3142" font-size="14" font-weight="600" font-family="'Geist', 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif" text-anchor="middle">整理任務目的與材料策略</text>
+        <text x="210" y="166" fill="#4f5d75" font-size="12" font-weight="500" font-family="'Geist', 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif" text-anchor="middle">從當前對話抽離問題背景與候選方案</text>
+        <text x="210" y="186" fill="#5a6580" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">scripts/advisor-extract-context.py</text>
+
+        <!-- Node 2 -->
+        <rect x="72" y="256" width="276" height="104" rx="6" fill="#f5f5f5"/>
+        <rect x="72" y="256" width="276" height="104" rx="6" fill="#ffffff" stroke="#4f5d75" stroke-width="1"/>
+        <rect x="84" y="268" width="76" height="14" rx="2" fill="none" stroke="#4f5d75" stroke-width="0.8" stroke-opacity="0.45"/>
+        <text x="122" y="278" fill="#4f5d75" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">STEP 2</text>
+        <text x="210" y="304" fill="#2d3142" font-size="14" font-weight="600" font-family="'Geist', 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif" text-anchor="middle">讀取額度狀態並產生推薦</text>
+        <text x="210" y="326" fill="#4f5d75" font-size="12" font-weight="500" font-family="'Geist', 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif" text-anchor="middle">檢查主模型身分與 Fable 額度</text>
+        <text x="210" y="346" fill="#5a6580" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">WIRING.md 額度資料來源</text>
+
+        <!-- Node 3 -->
+        <rect x="72" y="416" width="276" height="104" rx="6" fill="#f5f5f5"/>
+        <rect x="72" y="416" width="276" height="104" rx="6" fill="#ffffff" stroke="#4f5d75" stroke-width="1"/>
+        <rect x="84" y="428" width="76" height="14" rx="2" fill="none" stroke="#4f5d75" stroke-width="0.8" stroke-opacity="0.45"/>
+        <text x="122" y="438" fill="#4f5d75" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">STEP 4</text>
+        <text x="210" y="464" fill="#2d3142" font-size="14" font-weight="600" font-family="'Geist', 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif" text-anchor="middle">組裝四段式顧問 Prompt</text>
+        <text x="210" y="486" fill="#4f5d75" font-size="12" font-weight="500" font-family="'Geist', 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif" text-anchor="middle">內嵌必要原碼與脈絡・不承諾遠端探索</text>
+        <text x="210" y="506" fill="#5a6580" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">背景・現況・問題・限制</text>
+
+        <!-- Node 4 (FOCAL 1) -->
+        <rect x="472" y="96" width="316" height="112" rx="6" fill="#f5f5f5"/>
+        <rect x="472" y="96" width="316" height="112" rx="6" fill="#bf4520" stroke="#bf4520" stroke-width="1.5" fill-opacity="0.08"/>
+        <rect x="484" y="108" width="92" height="14" rx="2" fill="none" stroke="#bf4520" stroke-width="0.8" stroke-opacity="0.55"/>
+        <text x="530" y="118" fill="#bf4520" font-size="7" font-weight="600" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">GATE 1 · PICK</text>
+        <text x="630" y="144" fill="#2d3142" font-size="14" font-weight="600" font-family="'Geist', 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif" text-anchor="middle">顧問席位選單與 Fable 守門閘</text>
+        <text x="630" y="168" fill="#4f5d75" font-size="12" font-weight="500" font-family="'Geist', 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif" text-anchor="middle">使用者選定才派工；Fable 驗 &lt;fable-ok&gt;</text>
+        <text x="630" y="190" fill="#bf4520" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">hooks/fable-gate.sh</text>
+
+        <!-- Node 5 -->
+        <rect x="472" y="272" width="316" height="104" rx="6" fill="#f5f5f5"/>
+        <rect x="472" y="272" width="316" height="104" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+        <rect x="484" y="284" width="84" height="14" rx="2" fill="none" stroke="#2d3142" stroke-width="0.8" stroke-opacity="0.45"/>
+        <text x="526" y="294" fill="#2d3142" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">CLAUDE FABLE</text>
+        <text x="630" y="320" fill="#2d3142" font-size="14" font-weight="600" font-family="'Geist', 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif" text-anchor="middle">選項 1：Claude Fable 唯讀顧問席</text>
+        <text x="630" y="342" fill="#4f5d75" font-size="12" font-weight="500" font-family="'Geist', 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif" text-anchor="middle">獨立高階推理・零改檔權限</text>
+        <text x="630" y="362" fill="#5a6580" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">agents/advisor-seat.md</text>
+
+        <!-- Node 6 (Optional / Alternate) -->
+        <rect x="472" y="432" width="316" height="104" rx="6" fill="#f5f5f5"/>
+        <rect x="472" y="432" width="316" height="104" rx="6" fill="#ffffff" stroke="#2e5aa8" stroke-width="1" stroke-dasharray="5,4"/>
+        <rect x="484" y="444" width="84" height="14" rx="2" fill="none" stroke="#2e5aa8" stroke-width="0.8" stroke-opacity="0.45"/>
+        <text x="526" y="454" fill="#2e5aa8" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">EXTERNAL</text>
+        <text x="630" y="480" fill="#2d3142" font-size="14" font-weight="600" font-family="'Geist', 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif" text-anchor="middle">選項 2/3：Web GPT Pro ／ Codex</text>
+        <text x="630" y="502" fill="#4f5d75" font-size="12" font-weight="500" font-family="'Geist', 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif" text-anchor="middle">核驗收據欄位與唯讀 rollout 設定</text>
+        <text x="630" y="522" fill="#2e5aa8" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">config/gpt-models.env · WIRING.md</text>
+
+        <!-- Node 7 -->
+        <rect x="912" y="176" width="296" height="112" rx="6" fill="#f5f5f5"/>
+        <rect x="912" y="176" width="296" height="112" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+        <rect x="924" y="188" width="76" height="14" rx="2" fill="none" stroke="#2d3142" stroke-width="0.8" stroke-opacity="0.45"/>
+        <text x="962" y="198" fill="#2d3142" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">STEP 5</text>
+        <text x="1060" y="224" fill="#2d3142" font-size="14" font-weight="600" font-family="'Geist', 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif" text-anchor="middle">原文呈現顧問回答與差異標註</text>
+        <text x="1060" y="246" fill="#4f5d75" font-size="12" font-weight="500" font-family="'Geist', 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif" text-anchor="middle">不摘要過濾・一句話點出與 main 差異</text>
+        <text x="1060" y="268" fill="#5a6580" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">標明僅依提供材料判斷</text>
+
+        <!-- Node 8 (FOCAL 2) -->
+        <rect x="912" y="384" width="296" height="112" rx="6" fill="#f5f5f5"/>
+        <rect x="912" y="384" width="296" height="112" rx="6" fill="#bf4520" stroke="#bf4520" stroke-width="1.5" fill-opacity="0.08"/>
+        <rect x="924" y="396" width="92" height="14" rx="2" fill="none" stroke="#bf4520" stroke-width="0.8" stroke-opacity="0.55"/>
+        <text x="970" y="406" fill="#bf4520" font-size="7" font-weight="600" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">GATE 2 · DECIDE</text>
+        <text x="1060" y="432" fill="#2d3142" font-size="14" font-weight="600" font-family="'Geist', 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif" text-anchor="middle">列出分歧點供使用者逐條裁決</text>
+        <text x="1060" y="454" fill="#4f5d75" font-size="12" font-weight="500" font-family="'Geist', 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif" text-anchor="middle">顧問意見不自動構成修改授權</text>
+        <text x="1060" y="476" fill="#bf4520" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">拍板後才交由主流程執行</text>
+
+        <!-- LEGEND STRIP -->
+        <line x1="40" y1="636" x2="1240" y2="636" stroke="#2d3142" stroke-width="0.8" stroke-opacity="0.15"/>
+        <text x="40" y="664" fill="#4f5d75" font-size="8" font-weight="500" font-family="'Geist Mono', ui-monospace, monospace" letter-spacing="0.14em">LEGEND</text>
+
+        <rect x="128" y="652" width="16" height="16" rx="3" fill="#bf4520" stroke="#bf4520" stroke-width="1.5" fill-opacity="0.08"/>
+        <text x="152" y="664" fill="#2d3142" font-size="12" font-weight="500" font-family="'Geist', 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif">關鍵守門閘／拍板點（Focal Gate）</text>
+
+        <rect x="408" y="652" width="16" height="16" rx="3" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+        <text x="432" y="664" fill="#2d3142" font-size="12" font-weight="500" font-family="'Geist', 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif">主幹必跑步驟（Primary Step）</text>
+
+        <rect x="656" y="652" width="16" height="16" rx="3" fill="#ffffff" stroke="#2e5aa8" stroke-width="1" stroke-dasharray="4,3"/>
+        <text x="680" y="664" fill="#2d3142" font-size="12" font-weight="500" font-family="'Geist', 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif">條件分支／選用路線（Conditional）</text>
+
+        <line x1="920" y1="660" x2="956" y2="660" stroke="#bf4520" stroke-width="1.4" marker-end="url(#advisor-flow-arrow-accent)"/>
+        <text x="968" y="664" fill="#2d3142" font-size="12" font-weight="500" font-family="'Geist', 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif">主幹資料流（Headline Path）</text>
+      </svg>

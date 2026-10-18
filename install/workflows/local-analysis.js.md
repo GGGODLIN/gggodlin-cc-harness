@@ -4,22 +4,29 @@
 
 ## 運作流程圖
 
+![local-analysis（/daily-local）30 頻道本機治理分析流程](/workflows/local-analysis-flow.svg)
+
+<details>
+<summary>展開查看 Mermaid 結構原始碼（供 Agent／文字搜尋對照）</summary>
+
 ```mermaid
-flowchart TD
-  Trigger(["Session 啟動或手動跑 /daily-local\nhooks/daily-local-analysis-trigger.sh 檢查當日是否已跑"]) --> StartWf["啟動 workflows/local-analysis.js\n傳入 date 與 weekday"]
-
-  StartWf --> Filter["Phase 1：Scan（依頻率篩選到期頻道）\ndaily 每天跑 ／ weekly-tue 週二跑 ／ interval-7d 滿 7 天跑"]
-
-  subgraph Channels["平行執行 30 個本機分析頻道"]
-    direction LR
-    ShellCh["Shell 頻道（直接寫報告或靜默 __SILENT__）\n• agnix-daily / skill-collision-daily\n• hash-reflow / free-pool / codex-cdp\n• rules-size-weekly / skill-upstream-check\n• failure-mode-daily / skill-changes-daily"]
-    LlmCh["LLM 頻道（回傳結構化報告文字供 main 落檔）\n• recap-daily（挖掘規則糾正與違規）\n• memory-audit（記憶健康度 A–F 維度）\n• distill-weekly（提煉重複模式）"]
+flowchart LR
+  subgraph S1["Stage 1 · 觸發與 Shell 頻道掃描"]
+    Trigger["Session 啟動或手動 /daily-local"] --> Phase1["Phase 1：依頻率篩選當日到期頻道"] --> ShellCh["平行執行確定性 Shell 掃描頻道"]
   end
-
-  Filter --> Channels
-  Channels --> Phase2["Phase 2：EvidenceBatchAudit\n抽樣回答紀錄 → 平行派 4 位 evidence-level-auditor\n核對宣稱是否附齊同句證據"]
-  Phase2 --> Reconcile["交回主 Session 收尾與對帳\n① 寫入 pending_reports\n② 跑 ledger-reconcile.py 更新 pending-actions.jsonl（count≥3 升高等級）\n③ 產出當日 Digest（只推最需拍板的 Top 項目）"]
+  subgraph S2["Stage 2 · LLM 頻道與證據審計"]
+    Gate1["GATE 1：Phase 2 宣稱證據層級抽樣審計"] --> LlmCh["執行高判斷力 LLM 分析頻道"]
+    Gate1 -.-> Weekly["每週發布候選與上游漂移巡檢"]
+  end
+  subgraph S3["Stage 3 · 帳本對帳與 Digest"]
+    Reconcile["ledger-reconcile.py 待辦帳本對帳升級"] --> Digest["GATE 2：主 Session 落檔與 Top 拍板摘要"]
+  end
+  ShellCh --> Gate1
+  LlmCh --> Reconcile
+  Weekly -.-> Reconcile
 ```
+
+</details>
 
 ## 核心隨附檔案
 

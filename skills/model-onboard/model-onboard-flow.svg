@@ -1,0 +1,146 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg viewBox="0 0 1280 720" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="model-onboard-flow-title model-onboard-flow-desc" id="model-onboard-flow-root">
+        <title id="model-onboard-flow-title">model-onboard 第三方模型接入與五階段評估流程</title>
+        <desc id="model-onboard-flow-desc">由左至右展示 model-onboard 的三個階段：WIRE 登記與 SMOKE 三態探針、能力評估分流與真 CC 測試、三段入鏈回歸關卡與裁決。</desc>
+        <defs>
+      <style>#model-onboard-flow-root { --color-paper:   #f5f5f5;
+      --color-ink:     #2d3142;
+      --color-muted:   #4f5d75;
+      --color-soft:    #5a6580;
+      --color-accent:  #bf4520;
+      --color-link:    #2e5aa8;
+      --font-sans:     'Geist', 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', system-ui, sans-serif;
+      --font-serif:    'Instrument Serif', 'Noto Serif', 'Noto Serif TC', serif;
+      --font-mono:     'Geist Mono', ui-monospace, monospace; }
+      #model-onboard-flow-root { font-family: var(--font-sans); color: var(--color-ink); }
+      #model-onboard-flow-root .diagram-container { width: 100%; overflow-x: auto; }
+      #model-onboard-flow-root .diagram-container { overflow-x: visible; }</style>
+          <marker id="model-onboard-flow-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+            <polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/>
+          </marker>
+          <marker id="model-onboard-flow-arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+            <polygon points="0 0, 8 3, 0 6" fill="#bf4520"/>
+          </marker>
+          <marker id="model-onboard-flow-arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+            <polygon points="0 0, 8 3, 0 6" fill="#2e5aa8"/>
+          </marker>
+        </defs>
+
+        <rect width="100%" height="100%" fill="#f5f5f5"/>
+
+        <!-- ZONES -->
+        <rect x="40" y="56" width="340" height="544" rx="8" fill="#2d3142" stroke="#2d3142" stroke-width="0.8" fill-opacity="0.02" stroke-opacity="0.12"/>
+        <rect x="56" y="60" width="248" height="16" rx="2" fill="#f5f5f5"/>
+        <text x="180" y="72" fill="#5a6580" font-size="8" font-weight="500" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.14em">STAGE 1 · WIRE &amp; SMOKE PROBES</text>
+
+        <rect x="440" y="56" width="380" height="544" rx="8" fill="#2d3142" stroke="#2d3142" stroke-width="0.8" fill-opacity="0.02" stroke-opacity="0.12"/>
+        <rect x="456" y="60" width="256" height="16" rx="2" fill="#f5f5f5"/>
+        <text x="584" y="72" fill="#5a6580" font-size="8" font-weight="500" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.14em">STAGE 2 · CAPABILITY &amp; LIVE CC</text>
+
+        <rect x="880" y="56" width="360" height="544" rx="8" fill="#2d3142" stroke="#2d3142" stroke-width="0.8" fill-opacity="0.02" stroke-opacity="0.12"/>
+        <rect x="896" y="60" width="248" height="16" rx="2" fill="#f5f5f5"/>
+        <text x="1020" y="72" fill="#5a6580" font-size="8" font-weight="500" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.14em">STAGE 3 · REGRESS GATE &amp; VERDICT</text>
+
+        <!-- ARROWS -->
+        <line x1="210" y1="200" x2="210" y2="256" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#model-onboard-flow-arrow)"/>
+        <line x1="210" y1="360" x2="210" y2="416" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#model-onboard-flow-arrow)"/>
+        <path d="M 348,468 H 404 Q 412,468 412,460 V 160 Q 412,152 420,152 H 472" fill="none" stroke="#bf4520" stroke-width="1.4" marker-end="url(#model-onboard-flow-arrow-accent)"/>
+        <line x1="630" y1="208" x2="630" y2="272" stroke="#bf4520" stroke-width="1.4" marker-end="url(#model-onboard-flow-arrow-accent)"/>
+        <rect x="640" y="232" width="88" height="16" rx="2" fill="#f5f5f5"/>
+        <text x="684" y="243" fill="#bf4520" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.06em">SMOKE GREEN</text>
+        <path d="M 472,184 H 464 Q 456,184 456,192 V 476 Q 456,484 464,484 H 472" fill="none" stroke="#2e5aa8" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#model-onboard-flow-arrow-link)"/>
+        <path d="M 788,324 H 840 Q 848,324 848,316 V 224 Q 848,216 856,216 H 912" fill="none" stroke="#bf4520" stroke-width="1.4" marker-end="url(#model-onboard-flow-arrow-accent)"/>
+        <path d="M 788,484 H 856 Q 864,484 864,476 V 264 Q 864,256 872,256 H 912" fill="none" stroke="#2e5aa8" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#model-onboard-flow-arrow-link)"/>
+        <line x1="1060" y1="288" x2="1060" y2="384" stroke="#bf4520" stroke-width="1.4" marker-end="url(#model-onboard-flow-arrow-accent)"/>
+        <rect x="1072" y="328" width="96" height="16" rx="2" fill="#f5f5f5"/>
+        <text x="1120" y="339" fill="#5a6580" font-size="8" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.06em">REGRESS OK</text>
+
+        <!-- NODES -->
+        <!-- Node 1 -->
+        <rect x="72" y="96" width="276" height="104" rx="6" fill="#f5f5f5"/>
+        <rect x="72" y="96" width="276" height="104" rx="6" fill="#ffffff" stroke="#4f5d75" stroke-width="1"/>
+        <rect x="84" y="108" width="76" height="14" rx="2" fill="none" stroke="#4f5d75" stroke-width="0.8" stroke-opacity="0.45"/>
+        <text x="122" y="118" fill="#4f5d75" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">STAGE 1</text>
+        <text x="210" y="144" fill="#2d3142" font-size="14" font-weight="600" font-family="'Geist', 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif" text-anchor="middle">WIRE 登記端點與盤點額度</text>
+        <text x="210" y="166" fill="#4f5d75" font-size="12" font-weight="500" font-family="'Geist', 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif" text-anchor="middle">實打 /v1/models 確認 model ID</text>
+        <text x="210" y="186" fill="#5a6580" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">記錄額度來源與共用對象</text>
+
+        <!-- Node 2 -->
+        <rect x="72" y="256" width="276" height="104" rx="6" fill="#f5f5f5"/>
+        <rect x="72" y="256" width="276" height="104" rx="6" fill="#ffffff" stroke="#4f5d75" stroke-width="1"/>
+        <rect x="84" y="268" width="76" height="14" rx="2" fill="none" stroke="#4f5d75" stroke-width="0.8" stroke-opacity="0.45"/>
+        <text x="122" y="278" fill="#4f5d75" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">BUDGET</text>
+        <text x="210" y="304" fill="#2d3142" font-size="14" font-weight="600" font-family="'Geist', 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif" text-anchor="middle">核實來源可用輸出上限</text>
+        <text x="210" y="326" fill="#4f5d75" font-size="12" font-weight="500" font-family="'Geist', 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif" text-anchor="middle">分離正常輸出上限與小預算診斷</text>
+        <text x="210" y="346" fill="#5a6580" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">避免推理耗盡預算誤判失敗</text>
+
+        <!-- Node 3 -->
+        <rect x="72" y="416" width="276" height="104" rx="6" fill="#f5f5f5"/>
+        <rect x="72" y="416" width="276" height="104" rx="6" fill="#ffffff" stroke="#4f5d75" stroke-width="1"/>
+        <rect x="84" y="428" width="76" height="14" rx="2" fill="none" stroke="#4f5d75" stroke-width="0.8" stroke-opacity="0.45"/>
+        <text x="122" y="438" fill="#4f5d75" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">STAGE 2</text>
+        <text x="210" y="464" fill="#2d3142" font-size="14" font-weight="600" font-family="'Geist', 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif" text-anchor="middle">SMOKE 十二道接線探針（必跑）</text>
+        <text x="210" y="486" fill="#4f5d75" font-size="12" font-weight="500" font-family="'Geist', 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif" text-anchor="middle">每道 3 次三態：PASS / FAIL / N/A</text>
+        <text x="210" y="506" fill="#5a6580" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">429 與 5xx 記請求層 N/A</text>
+
+        <!-- Node 4 (FOCAL 1) -->
+        <rect x="472" y="96" width="316" height="112" rx="6" fill="#f5f5f5"/>
+        <rect x="472" y="96" width="316" height="112" rx="6" fill="#bf4520" stroke="#bf4520" stroke-width="1.5" fill-opacity="0.08"/>
+        <rect x="484" y="108" width="92" height="14" rx="2" fill="none" stroke="#bf4520" stroke-width="0.8" stroke-opacity="0.55"/>
+        <text x="530" y="118" fill="#bf4520" font-size="7" font-weight="600" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">GATE 1 · STOP 1</text>
+        <text x="630" y="144" fill="#2d3142" font-size="14" font-weight="600" font-family="'Geist', 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif" text-anchor="middle">能力定位分流與真 CC 整合閘</text>
+        <text x="630" y="168" fill="#4f5d75" font-size="12" font-weight="500" font-family="'Geist', 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif" text-anchor="middle">決定是否需 agentic 多步工具證據</text>
+        <text x="630" y="190" fill="#bf4520" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">分離 API 綠燈與 CC 整合退化</text>
+
+        <!-- Node 5 -->
+        <rect x="472" y="272" width="316" height="104" rx="6" fill="#f5f5f5"/>
+        <rect x="472" y="272" width="316" height="104" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+        <rect x="484" y="284" width="84" height="14" rx="2" fill="none" stroke="#2d3142" stroke-width="0.8" stroke-opacity="0.45"/>
+        <text x="526" y="294" fill="#2d3142" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">STAGE 4 · LIVE</text>
+        <text x="630" y="320" fill="#2d3142" font-size="14" font-weight="600" font-family="'Geist', 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif" text-anchor="middle">真實 Claude Code Session 驗證</text>
+        <text x="630" y="342" fill="#4f5d75" font-size="12" font-weight="500" font-family="'Geist', 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif" text-anchor="middle">測 ToolSearch・stop hook・風格遵從</text>
+        <text x="630" y="362" fill="#5a6580" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">references/live-session.md</text>
+
+        <!-- Node 6 (Optional / Alternate) -->
+        <rect x="472" y="432" width="316" height="104" rx="6" fill="#f5f5f5"/>
+        <rect x="472" y="432" width="316" height="104" rx="6" fill="#ffffff" stroke="#2e5aa8" stroke-width="1" stroke-dasharray="5,4"/>
+        <rect x="484" y="444" width="84" height="14" rx="2" fill="none" stroke="#2e5aa8" stroke-width="0.8" stroke-opacity="0.45"/>
+        <text x="526" y="454" fill="#2e5aa8" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">STAGE 3 · BENCH</text>
+        <text x="630" y="480" fill="#2d3142" font-size="14" font-weight="600" font-family="'Geist', 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif" text-anchor="middle">多步工具鏈與工作量題組（選用）</text>
+        <text x="630" y="502" fill="#4f5d75" font-size="12" font-weight="500" font-family="'Geist', 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif" text-anchor="middle">僅單次來回模型可跳過並標註定位</text>
+        <text x="630" y="522" fill="#2e5aa8" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">references/bench-suite.md</text>
+
+        <!-- Node 7 -->
+        <rect x="912" y="176" width="296" height="112" rx="6" fill="#f5f5f5"/>
+        <rect x="912" y="176" width="296" height="112" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+        <rect x="924" y="188" width="76" height="14" rx="2" fill="none" stroke="#2d3142" stroke-width="0.8" stroke-opacity="0.45"/>
+        <text x="962" y="198" fill="#2d3142" font-size="7" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">REGRESS</text>
+        <text x="1060" y="224" fill="#2d3142" font-size="14" font-weight="600" font-family="'Geist', 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif" text-anchor="middle">入鏈三段回歸題組（v1 / v3 / 工作量）</text>
+        <text x="1060" y="246" fill="#4f5d75" font-size="12" font-weight="500" font-family="'Geist', 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif" text-anchor="middle">對照凍結基準與盲評・確認無退步</text>
+        <text x="1060" y="268" fill="#5a6580" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">references/regress-gate.md</text>
+
+        <!-- Node 8 (FOCAL 2) -->
+        <rect x="912" y="384" width="296" height="112" rx="6" fill="#f5f5f5"/>
+        <rect x="912" y="384" width="296" height="112" rx="6" fill="#bf4520" stroke="#bf4520" stroke-width="1.5" fill-opacity="0.08"/>
+        <rect x="924" y="396" width="92" height="14" rx="2" fill="none" stroke="#bf4520" stroke-width="0.8" stroke-opacity="0.55"/>
+        <text x="970" y="406" fill="#bf4520" font-size="7" font-weight="600" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">GATE 2 · VERDICT</text>
+        <text x="1060" y="432" fill="#2d3142" font-size="14" font-weight="600" font-family="'Geist', 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif" text-anchor="middle">拍板 Chain Priority 與裁決審計</text>
+        <text x="1060" y="454" fill="#4f5d75" font-size="12" font-weight="500" font-family="'Geist', 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif" text-anchor="middle">填寫固定裁決表並過獨立 auditor</text>
+        <text x="1060" y="476" fill="#bf4520" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">references/verdict-template.md</text>
+
+        <!-- LEGEND STRIP -->
+        <line x1="40" y1="636" x2="1240" y2="636" stroke="#2d3142" stroke-width="0.8" stroke-opacity="0.15"/>
+        <text x="40" y="664" fill="#4f5d75" font-size="8" font-weight="500" font-family="'Geist Mono', ui-monospace, monospace" letter-spacing="0.14em">LEGEND</text>
+
+        <rect x="128" y="652" width="16" height="16" rx="3" fill="#bf4520" stroke="#bf4520" stroke-width="1.5" fill-opacity="0.08"/>
+        <text x="152" y="664" fill="#2d3142" font-size="12" font-weight="500" font-family="'Geist', 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif">關鍵守門閘／拍板點（Focal Gate）</text>
+
+        <rect x="408" y="652" width="16" height="16" rx="3" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+        <text x="432" y="664" fill="#2d3142" font-size="12" font-weight="500" font-family="'Geist', 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif">主幹必跑步驟（Primary Step）</text>
+
+        <rect x="656" y="652" width="16" height="16" rx="3" fill="#ffffff" stroke="#2e5aa8" stroke-width="1" stroke-dasharray="4,3"/>
+        <text x="680" y="664" fill="#2d3142" font-size="12" font-weight="500" font-family="'Geist', 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif">條件分支／選用路線（Conditional）</text>
+
+        <line x1="920" y1="660" x2="956" y2="660" stroke="#bf4520" stroke-width="1.4" marker-end="url(#model-onboard-flow-arrow-accent)"/>
+        <text x="968" y="664" fill="#2d3142" font-size="12" font-weight="500" font-family="'Geist', 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif">主幹資料流（Headline Path）</text>
+      </svg>

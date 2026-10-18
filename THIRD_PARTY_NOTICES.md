@@ -99,6 +99,7 @@ Unless listed below, the contents of this repository are licensed under the MIT 
 - Paths: `skills/skill-creator`
 - License text: `skills/skill-creator/LICENSE.txt`
 - Modified files carry a modification notice at the top of the file.
+- Modified files without an in-file notice (no comment syntax or not text): `skills/skill-creator/skill-creator-flow.svg`
 
 ### dzhng/skills
 
