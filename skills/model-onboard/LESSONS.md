@@ -67,10 +67,10 @@ MiMo flash 對「要求輸出含大括號的 JSON」穩定回 502，追到上游
 
 由此改出：SKILL.md 加「入鏈關卡」段與 `references/regress-gate.md`，chain priority 停點改到關卡之後，verdict-template 加關卡表。
 
-## 2026-10-16 接 Gemini 4 Argon（網友提供的付費 key）
+## 2026-10-16 接 Gemini 4 Argon
 
 **照過時的接線圖改了已停用的 CPA**。10-15 遷到 Magpie 後 wiring-layers.md 沒更新，我先往 `~/.cli-proxy-api/config.yaml` 加 provider，才發現 8317 已轉給 Magpie、CPA 與一般 LiteLLM 都沒在跑。改成 Magpie CLI `provider add` 後當下生效，不用重啟。
 
 **Gemini 經 litellm 進 CC 會壞在第二輪**。litellm 1.89.3 的 `/v1/messages` 轉換丟掉 Gemini 的 thought_signature，CC 第二輪帶 tool 結果時 Google 回 400「Function call is missing a thought_signature」；`openai/` provider 還會把 `/v1/messages` 轉去打不存在的 `/responses`。原生 `gemini/` provider 一樣丟簽章，且把 `reasoning_effort: high` 換成 `thinkingBudget: 4096`。Magpie 的 google preset 把簽章編進 tool_use id 帶回去，usage.jsonl 記 `effort: high`。RED 沒能重現這條（當時 litellm 沒在跑，runner 直接選 Magpie），所以只記在這裡、沒寫成 traps 規則。
 
-**入鏈關卡把 mimo26 現場重跑當成必要步驟**。現場對照的規則出處是 GPT-6 Pro 審查，不是使用者原話；使用者要的一直是「跟 mimo26 當初的成績比」。改成 v1 只跑受測腿、對凍結基準比，比較器的追加確認也改成只看受測腿（local-llm-gateway ce8a0d5）。
+**入鏈關卡把 mimo26 現場重跑當成必要步驟**。現場對照的規則出處是外部審查建議，不是原需求；原需求一直是「跟 mimo26 的凍結基準比」。改成 v1 只跑受測腿、對凍結基準比，比較器的追加確認也改成只看受測腿（local-llm-gateway ce8a0d5）。
