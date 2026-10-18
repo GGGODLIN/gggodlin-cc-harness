@@ -77,6 +77,8 @@ Main session 預設只做三件事：
 - 每個完成宣稱先點名用的是哪一級：V0 不驗（純讀、未改動）／V1 語法・靜態檢查／V2 最近的單一測試／V3 型別・build・套件級／V4 全套件・e2e。選能直接觀察到該宣稱的最低一級；任何檔案改動至少 V1，改動後的行為宣稱要有新鮮證據
 - 只有五種情況准往上升：改動跨套件・服務・持久化邊界或公開契約；涉及安全・授權・migration・資料遺失・併發・release；窄檢查結果模糊或暴露更大影響面；窄檢查觀察不到宣稱的關鍵部分；使用者或 repo 明文要求。其餘不因「有全套件可跑」就跑（implement 收尾固定跑一次全套件是既有規則，不受本條影響）
 - 選 V0 就在宣稱旁寫「Not verified」，不讓「完成」暗示有驗過；證據比宣稱窄時，把宣稱縮到已驗證的邊界
+- agent 自己有工具驗得到的項目，不得以「未驗」結案；真的驗不到的，逐項寫出原因
+- 宣稱測試失敗「本來就有」或「跟本次無關」前，先在改動前的版本（合併上游時用上游原版）開臨時 worktree 重跑同一組，逐條比對失敗名稱；只比數量不算數
 
 描述某機制「會擋／會保證 X」時，同句寫出它明文**不**保證的相鄰情況（例：「T2 gate 擋沒帶 token 的派工，不擋帶 token 但內容空洞的」）；只講會擋什麼、不講擋不住什麼，讀者會高估它。
 
@@ -100,7 +102,7 @@ Main session 預設只做三件事：
 
 1. **不可逆 / 破壞性動作且未被既有授權涵蓋**：對照 `~/Desktop/projects/CLAUDE.md`「仍要 confirm」清單（force push / reset --hard / 刪 branch / rebase / repo delete / pr merge…）；工作 repo 無 vibe coding 授權、範圍更窄
 2. **解法需要動使用者沒提到的系統邊界（scope 變更）**；同 repo 內順著原請求影響面的呼叫端不算
-3. **goal-gen 五類 human blocker**：sudo / GUI 操作 / 互動式 auth / sensitive credential 設定 / 系統升級 → Claude 結構性做不到、列出具體動作（含命令 / 路徑）等使用者。有非互動 setter 的 config 變更 → 先查三點再說做不到（[[feedback_dont_overapply_interactive_cli_rule]]）
+3. **goal-gen 五類 human blocker**：sudo / 需要使用者本人在場的動作（macOS 權限視窗、鎖手機、實體接線）/ 互動式 auth / sensitive credential 設定 / 系統升級 → Claude 結構性做不到、列出具體動作（含命令 / 路徑）等使用者。有工具可操作的 GUI（LCU、iPhone 鏡像）不算 blocker：agent 自己操作、自己驗，不推回使用者；例外是使用者要親自體驗的 UX 項目（trial global-gui-not-a-blocker，2026-10-21 review）。有非互動 setter 的 config 變更 → 先查三點再說做不到（[[feedback_dont_overapply_interactive_cli_rule]]）
 4. **修正額度用盡 + 換路仍不過**：接 subagent-routing.md「額度用盡四選一」的出口 4 → 帶完整失敗軌跡問（試過什麼、為什麼排除、剩什麼選項），不要只丟「做不出來」
 
 反例通則（不問直接做）：動作可逆（git 可回復 / 檔案可還原）且是順著原請求的下一步 → 不問。「要不要我繼續？」「我可以開始了嗎？」這類問句一律禁止。

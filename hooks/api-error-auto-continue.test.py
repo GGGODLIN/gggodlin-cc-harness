@@ -94,8 +94,28 @@ class Classify(Base):
   def test_non_retryable_types_ignored(self):
     for err in ("rate_limit", "authentication_failed", "billing_error", "invalid_request", "max_output_tokens"):
       self.hook.on_failure(self.payload(error=err, message="API Error: whatever"))
+    # Claude 訂閱本身的 5h/7d 額度牆也是 error=rate_limit，由 cc-seat-swap 處理，本 hook 不打字
+    self.hook.on_failure(self.payload(error="rate_limit", message="You've hit your session limit · resets 8:30pm (Asia/Taipei)"))
     self.assertEqual(self.spawned, [])
     self.assertFalse(self.hook.counter_path(SESSION).exists())
+
+  def test_rate_limit_429_schedules_continue_after_30s(self):
+    msg = 'API Error: Request rejected (429) · Google Gemini: 429 Too Many Requests: [{"error":{"code":429}}]'
+    self.hook.on_failure(self.payload(error="rate_limit", message=msg))
+    self.assertEqual(self.spawned, [["--send", "w9:p1", SESSION, self.transcript(), "30"]])
+    self.assertEqual(self.hook.read_count(SESSION), 1)
+    self.assertEqual(self.actions(), ["continue_scheduled"])
+
+  def test_rate_limit_delay_honors_magpie_held_until_clock(self):
+    from datetime import datetime, timezone, timedelta
+    tz8 = timezone(timedelta(hours=8))
+    now = datetime(2026, 10, 17, 2, 43, 20, tzinfo=tz8)
+    msg = "API Error: Request rejected (429) · Google Gemini: 429 ... (out of its allowance: not asked again before 02:45 UTC+8)"
+    # 02:45:00 - 02:43:20 = 100s, + 2s buffer = 102s
+    self.assertEqual(self.hook.rate_limit_delay(msg, now=now), 102)
+    # 剩不到 30 秒時保底等 30 秒
+    near = datetime(2026, 10, 17, 2, 44, 50, tzinfo=tz8)
+    self.assertEqual(self.hook.rate_limit_delay(msg, now=near), 30)
 
   # 邊界：同樣是 unknown，但不是串流斷線那句
   def test_unknown_without_marker_ignored(self):
@@ -146,6 +166,12 @@ class Send(Base):
     self.hook.send("w9:p1", SESSION, self.transcript())
     calls = self.herdr_calls()
     self.assertIn("agent get w9:p1", calls)
+    self.assertIn(f"agent prompt w9:p1 {self.hook.CONTINUE_TEXT}", calls)
+    self.assertEqual(self.actions(), ["sent"])
+
+  def test_main_send_accepts_explicit_delay_arg(self):
+    self.hook.main(["--send", "w9:p1", SESSION, self.transcript(), "0"])
+    calls = self.herdr_calls()
     self.assertIn(f"agent prompt w9:p1 {self.hook.CONTINUE_TEXT}", calls)
     self.assertEqual(self.actions(), ["sent"])
 

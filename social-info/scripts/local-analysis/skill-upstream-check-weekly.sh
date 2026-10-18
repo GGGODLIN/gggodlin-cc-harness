@@ -168,7 +168,7 @@ PY
       continue
     fi
     up_branch="${up_branch:-main}"
-    if [ -z "$up_path" ] || [ -z "$up_pin" ]; then
+    if [ -z "$up_path" ]; then
       echo "- ⚠️ **${sk_name}** — frontmatter 線索不完整（缺 upstream-path 或 upstream-pinned）" >> "$LOG_FILE"
       fm_behind=$((fm_behind + 1))
       continue
@@ -185,6 +185,12 @@ PY
       continue
     fi
     rm -f "$contents_error"
+    if [ -z "$up_pin" ]; then
+      # 已登記來源不等於已對帳。空 pin 拿最新 commit 比較會把「沒有基線」說成已更新。
+      echo "- ⚠️ **${sk_name}** — 已登記上游來源；基線待對帳（缺 upstream-pinned），不能判定已安裝版本與上游差異" >> "$LOG_FILE"
+      fm_behind=$((fm_behind + 1))
+      continue
+    fi
     cmp_files=$(gh api "repos/$up_repo/compare/$up_pin...$up_branch" --jq '.files[].filename' 2>/dev/null) || cmp_files="__CMP_FAIL__"
     if [ "$cmp_files" = "__CMP_FAIL__" ]; then
       echo "- ⚠️ **${sk_name}** — compare 失敗（pinned \`${up_pin}\` 可能已不在上游、或 API 失敗），人工確認" >> "$LOG_FILE"

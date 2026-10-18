@@ -1,8 +1,8 @@
 #!/bin/bash
 set -euo pipefail
 
-FILE="${RBA_SKILL_FILE:-/Users/you/.claude/skills/research-before-answer/SKILL.md}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+FILE="${RBA_SKILL_FILE:-$(cd "$SCRIPT_DIR/../.." && pwd)/SKILL.md}"
 
 python3 - "$FILE" <<'PY'
 import re

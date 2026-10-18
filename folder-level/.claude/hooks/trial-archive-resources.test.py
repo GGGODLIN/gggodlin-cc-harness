@@ -7,9 +7,9 @@ import subprocess
 import sys
 import tempfile
 
-ROOT = Path('~/Desktop/projects/.claude')
+ROOT = Path(__file__).resolve().parent.parent
 HELPER = ROOT / 'hooks/trial-archive-resources.py'
-ACTIVE = ROOT / 'trials/active.md'
+ACTIVE = ROOT.parents[1] / 'examples/trials/active.md'
 PASS = 0
 
 

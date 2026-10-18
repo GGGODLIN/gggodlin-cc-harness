@@ -35,10 +35,18 @@ check "共用集合不看作者" "co_written\`、\`codex_touched\`、寫入工�
 check "共用集合列出五類" "references/failure-mode-taxonomy.md"
 check "vendor 產物保留不收" "skills/.trash/"
 check "同檔暫存與工作樹不同版就保留" "staged_differs: true"
-check "staged_foreign 不再停整個 repo" "不再讓整個 repo 停下"
+check "外來暫存保留該 repo 提交" "先保留該 repo 的提交，繼續處理其他 repo"
+check "不碰他人暫存" "不要取消別人的暫存"
 check "不用 mtime 推歸屬" "不用檔案 mtime 或工具呼叫時間窗推歸屬"
 check "點名 add" "git -C <repo> add -- <白名單每個路徑>"
-check "限定路徑 commit" "git -C <repo> commit --only -m"
+check "提交前核對暫存區" "git -C <repo> diff --cached --name-only"
+check "只用普通 commit" 'git -C <repo> commit -m "<訊息>"'
+check "暫存區必須等於白名單" "只有暫存區路徑與本顆白名單完全相等時才 commit"
+if grep -qE -- 'commit --only|commit -m.*-- <白名單' "$COMMAND"; then
+  FAIL=$((FAIL + 1)); printf '  FAIL 不得回到 gate 拒絕的提交寫法\n'
+else
+  PASS=$((PASS + 1)); printf '  ok   未使用 --only 或 pathspec commit\n'
+fi
 check "commit 後核對內容" "git -C <repo> show --stat --format= HEAD"
 check "共用 checkpoint 固定訊息" "chore(closeout): checkpoint shared ledgers"
 check "禁用整包 add" "禁用 \`git add -A\`、\`git add .\`、\`git commit -a\`"
@@ -54,6 +62,12 @@ check "已推欄" "已推："
 check "保留欄" "保留："
 check "未收欄" "未收："
 check "保留非零不寫乾淨" "仍有 N 檔保留／未收"
+check "收尾前先回看記憶" "0. **記憶回看**"
+check "記憶回看只看上次 self-closeout 之後" "上一次 self-closeout 回報之後"
+check "記憶回看先找既有檔再新建" "主題相同就併進去，沒有才新建"
+check "記憶回看接回第 1 步" "完成後接第 1 步"
+check "回報有記憶欄" "記憶：新增 N、併入 M"
+check "記憶欄不跳過" "「記憶」整份回報一行，不跳過"
 
 if [[ -x "$SCRIPT" ]] && python3 "$SCRIPT" --help >/dev/null 2>&1; then
   PASS=$((PASS + 1)); printf '  ok   provenance script 可執行\n'
@@ -62,7 +76,7 @@ else
 fi
 
 SELF_REPOS=$(CLAUDE_CODE_SESSION_ID=contract-test-no-such-session python3 "$SCRIPT" --self-repos 2>/dev/null || true)
-if printf '%s\n' "$SELF_REPOS" | grep -qx "$ROOT"; then
+if printf '%s\n' "$SELF_REPOS" | grep -qx "$HOME/.claude" && printf '%s\n' "$SELF_REPOS" | grep -qx "$HOME/Desktop/projects/.claude"; then
   PASS=$((PASS + 1)); printf '  ok   --self-repos 永遠含固定共用 repo\n'
 else
   FAIL=$((FAIL + 1)); printf '  FAIL --self-repos 永遠含固定共用 repo\n'

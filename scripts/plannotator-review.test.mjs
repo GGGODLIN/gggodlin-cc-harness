@@ -19,12 +19,12 @@ const replaceUnique = (source, marker, replacement) => {
 
 const createAdapterCopy = async (home, trialRoot, archifyTrialRoot, identity, timeoutMs) => {
   let source = await readFile(scriptPath, 'utf8')
-  source = replaceUnique(source, "'~/Desktop/projects/.claude/trials/plannotator-visual-gate'", JSON.stringify(trialRoot))
-  source = replaceUnique(source, "'~/Desktop/projects/.claude/trials/archify-visual-gate'", JSON.stringify(archifyTrialRoot))
+  source = replaceUnique(source, "join(homedir(), 'Desktop/projects/.claude/trials/plannotator-visual-gate')", JSON.stringify(trialRoot))
+  source = replaceUnique(source, "join(homedir(), 'Desktop/projects/.claude/trials/archify-visual-gate')", JSON.stringify(archifyTrialRoot))
   source = replaceUnique(source, "'v0.27.8'", JSON.stringify(identity.release))
   source = replaceUnique(source, "'b381ecbe1200b07db8c050715c0f2c035a44b73a'", JSON.stringify(identity.tagCommit))
   source = replaceUnique(source, "'plannotator 0.27.8'", JSON.stringify(identity.versionOutput))
-  source = replaceUnique(source, "'e1ac748f19cf805e44bf74fb93c796662152e273'", JSON.stringify('a'.repeat(40)))
+  source = replaceUnique(source, "'1c2b42d660e4a7571813fb43839c79e3e9ca7720'", JSON.stringify('a'.repeat(40)))
   if (timeoutMs !== undefined) source = replaceUnique(source, '30 * 60 * 1000', String(timeoutMs))
   const adapterPath = join(home, 'adapter-copy.mjs')
   await writeFile(adapterPath, source, { mode: 0o700, flag: 'wx' })
@@ -34,9 +34,9 @@ const createAdapterCopy = async (home, trialRoot, archifyTrialRoot, identity, ti
 
 const createProductionBoundaryCopy = async (home, trialRoot, archifyTrialRoot) => {
   let source = await readFile(scriptPath, 'utf8')
-  source = replaceUnique(source, "'~/Desktop/projects/.claude/trials/plannotator-visual-gate'", JSON.stringify(trialRoot))
-  source = replaceUnique(source, "'~/Desktop/projects/.claude/trials/archify-visual-gate'", JSON.stringify(archifyTrialRoot))
-  source = replaceUnique(source, "'e1ac748f19cf805e44bf74fb93c796662152e273'", JSON.stringify('a'.repeat(40)))
+  source = replaceUnique(source, "join(homedir(), 'Desktop/projects/.claude/trials/plannotator-visual-gate')", JSON.stringify(trialRoot))
+  source = replaceUnique(source, "join(homedir(), 'Desktop/projects/.claude/trials/archify-visual-gate')", JSON.stringify(archifyTrialRoot))
+  source = replaceUnique(source, "'1c2b42d660e4a7571813fb43839c79e3e9ca7720'", JSON.stringify('a'.repeat(40)))
   const adapterPath = join(home, 'production-boundary-copy.mjs')
   await writeFile(adapterPath, source, { mode: 0o700, flag: 'wx' })
   await chmod(adapterPath, 0o700)

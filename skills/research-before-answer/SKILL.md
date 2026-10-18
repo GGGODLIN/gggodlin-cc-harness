@@ -50,7 +50,7 @@ description: Use when answering a factual question about a named repo, package, 
 | 市場 / 人物 / 公司動態 | WebSearch、Exa |
 | 深度多輪研究 | `Skill(deep-research)` 或 `Workflow({name:"deep-research-paced"})` |
 
-分流後，如果使用者要補查社群評價、實際使用經驗或跨平台評論，或明確指定 Monid，就在任何 Monid 呼叫前讀 [Monid 當次選用](references/monid-opt-in.md)，照其中步驟提出選項與核對當次授權；一般文件查詢不加問。沒有選用時沿原路查證，不把 Monid 當自動 fallback。下方搜尋配對、正文抓取與來源核對規則照常適用。
+分流後，如果本次研究需要社群評價、實際使用經驗、跨平台評論或公開網頁資料，且 Monid 能補上資料缺口，就在任何 Monid 呼叫前讀 [Monid 贈額試用](references/monid-opt-in.md)。使用者已批准在剩餘原始贈額內跨任務直接使用，不逐次詢問；照 reference 查價、核餘額，贈額不足就退出並移除入口。不為耗贈額增加查詢；當次拒用、資料已足或不需外查時沿原路。下方搜尋配對、正文抓取與來源核對規則照常適用。
 
 ### 搜尋 layer：同 query 一輪 nav + WS（2026-06-01 結案保留，agent_type 範圍化）
 
@@ -82,13 +82,27 @@ SERP 抽取 JS pattern 跟試用背景見 `~/.claude/memory/reference_search_too
 
 先看這次抓頁面要拿來做什麼，再選工具。`WebFetch` 回的不是原文：頁面先交給小模型照你的 prompt 改寫成回答。它回 200、讀起來通順，細節卻可能被改掉或漏掉（實例：從相對日期推錯年份、讀錯表格欄位、憑空加一段「官方回應」），而且這種錯不會命中下面任何退路條件——「回傳看起來完整」不是判斷依據。
 
+**先判斷是否為使用者直接交付的 X／Twitter 研究連結**（`/status/` 貼文或 X 長文；不是日報／workflow 批次來源）。如果是，就走以下路線，不套用下方「exit 75/1 才升瀏覽器」的退路條件：
+
+1. 以 LCU MCP（`mcp__lcu__js`）開啟指定連結，等待實際內容載入，讀回貼文、附帶或連到的 X 長文、程式碼與外部連結；只操作任務指定或自己建立的分頁。`x-fetch` 回成功仍可能只有長文入口，所以不先跑腳本來決定是否開瀏覽器。
+2. 如果研究需要留言、作者串文或引用，就補跑 X／Twitter 抓取退路（見 WIRING.md「非官方內容抓取」），把回件當補充，不當全量討論。
+3. 對照研究問題確認所需正文、程式碼與來源連結已讀到；缺少的項目明寫缺口，不以 exit 0 或頁面載入成功當作完整。LCU 不可用時停止並回報；登入、CAPTCHA 與核准照既有權限邊界處理。取得內容後接來源查證，答案成稿後接「交付前 inline 自查（R1–R3）」。
+
+**公開 HTML 研究頁（文章、產品官網、HTML 文件／表格）預設先用 Firecrawl**，取得 Markdown 後再查證與分析。先分流：需要本人登入狀態、庫存或視覺／互動的頁面走正式 LCU；Reddit 沿用專用腳本；官方原生 Markdown 直接讀；直接交付的 X 研究連結走上方路線。日報／workflow 的既有批次腳本不因這條研究規則自動改接服務。
+
+1. 用正式 LCU MCP 開啟 https://www.firecrawl.dev/app/playground?endpoint=scrape，使用既有帳號的 Scrape 與 Markdown 格式。需要現況時把 Max age 設為 0；回件未提供快取證據時，不宣稱已證明即時抓取。只送指定公開 URL，不傳登入 cookies、私人檔案或憑證；不選 Summary、Query 或模型 JSON extraction。新登入／權限、額外 premium 或付款確認依既有核准邊界處理。
+2. 確認結果的 sourceURL 對應本次 URL（允許已確認的官方重新導向），讀回 Markdown 與 statusCode／creditsUsed，存至 scratchpad 再 Read；不要為取得內容反覆下載到 Downloads，也不要把前一頁殘留的 Success 當本次成功。核對研究所需正文、程式碼、表格條件與來源連結；缺項仍須補讀。
+3. 如果 Firecrawl 拒絕、沒有自己的結果、額度不足或缺研究所需內容，就接下方網址抓取退路（見 WIRING.md「非官方內容抓取」）；把 Firecrawl 缺口記清楚，不重複扣額重試。LCU 未連線時回報這個阻塞，公開頁仍可用既有腳本取得內容；不得啟動其他瀏覽器後端。腳本也失敗時，沿下方正式 LCU 升級規則處理。取得內容後接來源查證與「交付前 inline 自查（R1–R3）」。
+
+Firecrawl 的 fallback、Reddit 與既有日報／workflow 批次來源沿用以下路線：
+
 - **要讀整篇、研究一篇文章，或要引用頁面上的數字／日期／原句** → 不用 WebFetch。用網址抓取退路（見 WIRING.md「非官方內容抓取」）把正文存到 `<scratchpad>/<名稱>.md`（輸出已是正文 markdown；不要印到畫面上，長頁會吃掉 context），再用 Read 讀。長文先 `grep -n '^#'` 看標題，按段落範圍讀。寫給使用者的數字、日期、引文都從這個檔取，附行號。
 - **只是導航**（找連結、確認頁面還在、判斷該讀哪一頁哪一段）→ 可用 `WebFetch`（快、省 token）。它的回答只用來決定下一步；要寫成事實就回上一條抓原文。
 
 **WebFetch 拿 4xx/5xx 或內容明顯不夠（403 body / "Forbidden" / 亂碼 / < 200 字模板 / "Please enable JavaScript"）→ 必須立刻 fallback，不要回覆「官網沒爬到」「403 抓不到」就跳過——fallback 是 mandatory 不是 optional（踩坑紀錄 [[feedback_webfetch_fallback_must_trigger]]）。** 兩段退路階梯：
 
 🔌 接線點：非官方內容抓取 — 見 WIRING.md
-2. exit 75/1 才升 LCU MCP（`mcp__lcu__js`）— 建立自己的任務分頁，導航指定 URL 並讀回實際內容；如果遇到 CAPTCHA、登入或核准，就按既有權限邊界回報。LCU 不可用時停止，不改走 OBU／Agent Chrome，也不把連線失敗當內容不存在。
+2. 如果腳本 exit 75/1 或仍缺研究所需內容，就升 LCU MCP（`mcp__lcu__js`）— 建立自己的任務分頁，導航指定 URL 並讀回實際內容；如果遇到 CAPTCHA、登入或核准，就按既有權限邊界回報。LCU 不可用時停止，不改走 OBU／Agent Chrome，也不把連線失敗當內容不存在。
 
 常見觸發：
 
@@ -99,11 +113,11 @@ SERP 抽取 JS pattern 跟試用背景見 `~/.claude/memory/reference_search_too
 
 如果頁面是 SPA，就在抽取前依 LCU 的當次 API 說明等待實際內容，再讀回；不拿傳輸成功代替頁面就緒。
 
-讀內容走網址抓取退路（見 WIRING.md「非官方內容抓取」）；只在它 exit 75/1 時啟用 LCU browser，不額外開重複分頁。
+公開 HTML 研究頁先走上方 Firecrawl；如果失敗或缺內容，就接網址抓取退路（見 WIRING.md「非官方內容抓取」），exit 75/1 或仍缺關鍵內容時以正式 LCU 補讀。需要本人登入狀態、視覺／互動或直接交付 X 研究連結時已先分流；既有批次腳本維持原路。
 
 ### 執行模式
 
-- **淺題**（單次查）：沿「來源選路」直接查選定來源；最新外部題不額外讀 wiki index。
+- **淺題**（單次查）：沿「來源選路」直接查選定來源；最新外部題不額外讀 wiki index。搜尋層只負責找到候選 URL，找到後接「URL 內容抓取」讀過原頁再作答；LCU 不可用時直接走網址抓取退路（見 WIRING.md「非官方內容抓取」）／`gh`／registry，不要退成只剩 WebSearch——SERP 摘要不是頁面（2026-10-15 skill-up：LCU 失敗後 7 個線上題全部停在 WebSearch、0 次抓頁，全 FAIL）。
 - **深題**（多輪研究）：派**背景 subagent**（`run_in_background: true`），**main session 繼續做其他工作、不要用 `sleep` 空轉輪詢**；背景 agent 完成會自動送 task-notification，收到才 merge（禁止 `Bash sleep 60` 類 poll、也不要 Read 未完成的 output 檔）
 - **個人歷史**：查 wiki／memory；如果要找對話原文，就走 session 檢索路由。
 - **外部搜尋受阻或沒答案**：如果已有原文 URL，就接「URL 內容抓取」；否則依既有授權換已配置的外部來源類型。仍受阻時回報具體缺口，不改查本機歷史收錄，也不把未找到當成不存在。
@@ -115,12 +129,12 @@ SERP 抽取 JS pattern 跟試用背景見 `~/.claude/memory/reference_search_too
 
 答案寫完、送出前逐條自查（與 rba-verify 每週離線抽驗同一套 rubric——那邊每週抽 3 個 session 事後重判，這裡是交付當下的第一道防線；2026-08-12 因連兩週抽驗有真 FAIL 而加入）：
 
-- **R1 有真的查**：本回合有至少一次真實第一手查證 tool call。外部題可用 WebSearch / WebFetch / chrome / gh / registry / Context7；個人或本地現況可用權威檔案的 Read、git／CLI 原始輸出。nested agent 只有把實際 tool evidence 帶回 transcript 才算，agent 自述不算。invoke 完直接憑訓練資料作答＝違規。
-- **R2 答案附出處**：先盤點答案內每個會改變決策或直接回答問題的 claim；推薦、排除、排序理由、decision table 每一列與「X 會增加成本／風險」這類方案取捨句都各算一條。每條都要有可追溯指針（URL / 文件名 / 指令輸出），表格逐列同列放；表格外的共用來源不能替未對應的列補證。沒有指針的 claim 必須刪除或原位標「未驗證」，且不得拿來推薦或排除方案。
+- **R1 有真的查**：本回合有至少一次真實第一手查證 tool call。外部題可用 WebFetch / 網址抓取退路（見 WIRING.md「非官方內容抓取」）→Read / chrome（LCU）/ gh / registry / Context7；**WebSearch 與 Google SERP 只算「找到 URL」，不算查證**——那是搜尋引擎的摘要、不是頁面本身，寫進答案的發布日、價格、規格、數字或「有沒有出」都要來自實際讀到的頁面或指令輸出；只有 SERP 摘要時，該句前置 ⚠️ 並註「僅搜尋摘要（來源：<URL>）」，不能寫成讀過該頁；個人或本地現況可用權威檔案的 Read、git／CLI 原始輸出。nested agent 只有把實際 tool evidence 帶回 transcript 才算，agent 自述不算。invoke 完直接憑訓練資料作答＝違規。
+- **R2 答案附出處**：先盤點答案內每個會改變決策或直接回答問題的 claim；推薦、排除、排序理由、decision table 每一列與「X 會增加成本／風險」這類方案取捨句都各算一條。每條都要有可追溯指針（URL / 文件名 / 指令輸出），表格逐列同列放；表格外的共用來源不能替未對應的列補證。沒有指針的 claim 必須刪除或原位標「未驗證」，且不得拿來推薦或排除方案。出處放在 claim 同句或緊鄰行，文末統一的「來源：」清單只是補充、不能替代（讀者與審查員都只看同句）。anchor：❌「**發布了**。兩款都在 9 月 22 日推出。…（文末）來源：MacRumors、DataNorth」／✅「gpt-6-sol 2026-09-22 發布（⚠️ 僅第三方轉述：MacRumors https://…，未見 OpenAI 官方頁）；gpt-6-luna 同日（同上）」。「漲多少／差多少」這類比較題，新舊兩個數與算式都是 claim：只拿到一邊時先算頁內能算的（如「空閒＝高峰一半」），再明說缺哪一邊，不以反問代替計算。
 - **Decision table 固定形狀**：只要表格會推薦或排除方案，就必須含欄名逐字為 `來源` 的獨立欄；每列在 `來源` 欄用「取捨 claim → URL／文件／指令輸出」逐項對應。若該列含未驗證項，就在同列原位標「未驗證（不得影響判斷）」。表格後的證據清單只能補充，不能代替該列來源；任一決策列的 `來源` 欄空白就不得交付推薦。
 - **未知不是反證**：「沒有證據證明 X 安全／便宜／相容」仍是未驗證，不能改寫成「因此不選 X」；只能在同列原位標「未驗證（不得影響判斷）」。若一句話混合已驗證機制與未驗證影響，拆成兩格或兩句，判斷只引用已驗證部分。
-- **R3 查答一致**：主張與查到的內容一致；查證未覆蓋的區間不得當成推薦理由；跨來源合併身分（帳號 / 方案 / 額度池 / 版本）要有共同 identifier——無版號的成績不得掛到具體版號上。機制／trial verdict 另逐項對照 `observed metric → target outcome → attribution`：只有 proxy metric、未直接量到 target 時，只能寫「目前無法判定」，不得斷言已解決或未解決。
-- **信心標記是輸出的一部分**：一個數字的來源只有第三方轉述、官方頁 4xx／內容截斷、僅 SERP 摘要、或對象自稱（README／官網自述且無公開方法論）→ **寫下該數字的當下**就前置 ⚠️ 並在同一行註「未經官方確認（來源：<名＋URL 或指令>）」——來源要是可點的 URL 或可重跑的指令，只寫來源名字不算。比較語（「100% working」「higher quality than X」）與倍數同樣算數字；先平述、打算文末補標的路徑不存在。
+- **R3 查答一致**：主張與查到的內容一致；查證未覆蓋的區間不得當成推薦理由；跨來源合併身分（帳號 / 方案 / 額度池 / 版本）要有共同 identifier——無版號的成績不得掛到具體版號上。機制／trial verdict 另逐項對照 `observed metric → target outcome → attribution`：只有 proxy metric、未直接量到 target 時，只能寫「目前無法判定」，不得斷言已解決或未解決。nested agent 回報的「找不到／未能確認／只適用於 X」是查證結果的一部分，合成時逐條原樣進答案，不得刪掉或把限定範圍放大（2026-10-15 skill-up：子 agent 寫 could not find in the docs，final 整段消失，FAIL）。
+- **信心標記是輸出的一部分**：一個數字，或「已發布／免費／支援／存在」這類是非判斷，其來源只有第三方轉述、官方頁 4xx／內容截斷、僅 SERP 摘要、或對象自稱（README／官網自述且無公開方法論）→ **寫下該數字的當下**就前置 ⚠️ 並在同一行註「未經官方確認（來源：<名＋URL 或指令>）」——來源要是可點的 URL 或可重跑的指令，只寫來源名字不算。比較語（「100% working」「higher quality than X」）與倍數同樣算數字；先平述、打算文末補標的路徑不存在。
   - anchor（兩段只差 ⚠️＋同行來源註這一件事；審查員對著放位置、不按比例）：❌「從一次提示（宣稱 60–80%）到 spec + 人審（99%）」／✅「從一次提示（⚠️ 60–80%，未經官方確認，來源：README https://github.com/NeoLabHQ/context-engineering-kit#readme）到 spec + 人審（⚠️ 99%，同上來源）」。「宣稱」「自稱」字樣本身不算標記；第一手指令輸出（`gh api`、本機 grep）的數字不在此列、不要補 ⚠️
 - 任一條過不了 → 修答案（補查 / 補指針 / 收斂宣稱範圍）再送出；修不了就在答案裡明寫「未驗證」「低信心」，不得靜默放行。
 
@@ -142,7 +156,7 @@ SERP 抽取 JS pattern 跟試用背景見 `~/.claude/memory/reference_search_too
 - 任一 FAIL 且修不掉 → 停止推薦式結論，**把不實或佐證不足的主張從 draft 刪除或收窄**，只交付已驗證事實、未解決問題與「🔎 self-verify: FAILED（R#）」
 - auditor error / timeout / 空輸出 / 格式錯誤 → 照發、標「🔎 self-verify: SKIPPED (agent error)」
 
-audit 後不得新增或改寫推薦理由，交付文字須等於修正後的 draft。沒有命中高風險形狀時，上段 inline 自查即為終點。
+audit 後不得新增或改寫推薦理由，交付文字須等於修正後的 draft。沒有命中高風險形狀時，上段 inline 自查即為終點；沒派 auditor 就不寫 `🔎 self-verify` 行——那一行轉述的是 auditor 的 verdict，自己填 COMPLIANT 等於偽造稽查（2026-10-15 skill-up 4 題自填 COMPLIANT、全 FAIL）。
 
 ## 記憶升級
 
@@ -164,3 +178,4 @@ audit 後不得新增或改寫推薦理由，交付文字須等於修正後的 d
 - 查證做得再全、交付端仍會丟資訊：低信心標記被平述、來源限制被整條省略、無版號成績掛到具體版號（rba-verify 離線抽驗連兩週抓到真 FAIL）→ 2026-08-12 加「交付前 inline 自查」段；抽驗 verdict 見 trials archived.md rba-verify 段
 - 2026-08-25 抽驗抓到三種漏網：decision table 的取捨列沒逐列出處、proxy metric 被外推成 target verdict、未查證的 cleanup／成本理由被拿來排除方案；另有 auditor 回 `R2 FAIL` 卻同時寫 `VERDICT: COMPLIANT`。修法是 claim inventory、metric→target→attribution、替代方案理由納入 R2/R3，以及互斥 verdict＋final draft 重驗。
 - 2026-08-29 同一份 draft、同一條「信心標記」規則，auditor 兩輪各自解讀（第一輪抓 2 處漏 token 倍數、第二輪只抓 token 倍數）：規則只寫判準沒給實例，「宣稱」兩字被當成標記、對象自稱沒列進來源清單。修法＝來源清單補「對象自稱」、附一對只差 ⚠️＋來源註的 ❌／✅ anchor、第一手指令數字明文排除；同稿加 anchor 後 2/2 抓全，壓力場景 4 FAIL／1 PASS／3 N-A 零誤標。機制借自 NeoLabHQ/context-engineering-kit meta-judge（改寫不抄）；trial `cek-anchor-rubric` review 2026-09-05
+- 2026-10-15 skill-up 在 Claude runtime（sonnet-4-6）16 題 5 PASS／10 FAIL／1 ERROR，同題 GPT runtime 11/5：LCU 在 eval 環境失敗後，GPT 轉走 fetch-fallback／gh 抓原頁，Claude 停在 WebSearch 摘要作答、出處堆文末、自填 self-verify: COMPLIANT、刪子 agent 的「找不到」。修法＝R1 把 SERP 降為找 URL、淺題接抓取層、R2 同句出處 anchor、R3 子 agent 限定句原樣保留、未派 auditor 不寫 self-verify 行；GREEN 看 skill-up iteration-12

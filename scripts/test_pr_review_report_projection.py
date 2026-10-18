@@ -1163,6 +1163,14 @@ FIRST_PAYLOAD
     self.assertIn("**Comment**: 欄位格式未驗證。", main)
 
   @unittest.skipUnless(MODULE_PATH.is_file(), "projection helper not implemented")
+  def test_review_scope_section_stays_in_the_main_report(self):
+    module = load_module()
+    source = minimal_report() + "\n## 這次審查範圍\n\n- 底線未完成：typescript-reviewer 停審（CI 紅燈）\n"
+    main = module.project_report(source, "pr-1-review.audit.md", require_schema=True)
+    self.assertIn("## 這次審查範圍", main)
+    self.assertIn("底線未完成：typescript-reviewer 停審（CI 紅燈）", main)
+
+  @unittest.skipUnless(MODULE_PATH.is_file(), "projection helper not implemented")
   def test_zero_finding_report_projects_successfully(self):
     module = load_module()
     source = """# PR #1 Code Review

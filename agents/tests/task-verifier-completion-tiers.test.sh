@@ -1,7 +1,8 @@
 #!/bin/bash
 set -u
 
-AGENT="$HOME/.claude/agents/task-verifier.md"
+# 預設行為不變（$HOME/.claude）；測 worktree 或隔離副本時用 REVIEW_STANDARDS_ROOT 指定，不必寫死使用者路徑。
+AGENT="${REVIEW_STANDARDS_ROOT:-$HOME/.claude}/agents/task-verifier.md"
 PASS=0
 FAIL=0
 

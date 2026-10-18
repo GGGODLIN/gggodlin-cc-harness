@@ -55,7 +55,12 @@ done
   printf 'subagent=%s\n' "${CLAUDE_CODE_SUBAGENT_MODEL-}"
   printf 'go_available=%s\n' "$(go version >/dev/null 2>&1 && printf yes || printf no)"
 } > "$RECAP_CAPTURE_FILE"
-printf '# Daily Recap fixture\n'
+if [[ -n "${RECAP_STREAM_FILE:-}" ]]; then
+  cat "$RECAP_STREAM_FILE"
+else
+  printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"# Daily Recap fixture\n\n3 session / 2 commit / 1 個新 memory / 跨 2 個 repo\n\n## 2026-09-08\n\n### 路由測試用的匿名主題\n這一段只證明正文有日期分組與主題。"}]}}'
+  printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"# Daily Recap fixture\n\n3 session / 2 commit / 1 個新 memory / 跨 2 個 repo\n\n## 2026-09-08\n\n### 路由測試用的匿名主題\n這一段只證明正文有日期分組與主題。"}'
+fi
 EOF
 chmod +x "$fake"
 
@@ -165,6 +170,249 @@ if ((nomodels_status == 0)) || [[ -e "$fixture/nomodels.capture" ]]; then
   print -ru2 -- 'missing GPT version table did not fail closed'
   ((++failures))
 fi
+
+# 輸出完整性。假 claude 只吐 NDJSON、不呼叫模型；報告形狀取自真實日報的匿名骨架，
+# 失敗樣本取自 2026-10-18 那份被當成功收下的 compaction summary。
+stream_line() {
+  python3 -I -c 'import json,sys; sys.stdout.write(json.dumps(json.loads(sys.stdin.read()), ensure_ascii=False) + "\n")'
+}
+
+assistant_event() {
+  ASSISTANT_TEXT="$1" python3 -I -c '
+import json, os, sys
+sys.stdout.write(json.dumps({
+    "type": "assistant",
+    "message": {"content": [{"type": "text", "text": os.environ["ASSISTANT_TEXT"]}]},
+}, ensure_ascii=False) + "\n")
+'
+}
+
+result_event() {
+  local subtype="$1" is_error="$2" result_text="$3"
+  RESULT_SUBTYPE="$subtype" RESULT_IS_ERROR="$is_error" RESULT_TEXT="$result_text" python3 -I -c '
+import json, os, sys
+sys.stdout.write(json.dumps({
+    "type": "result",
+    "subtype": os.environ["RESULT_SUBTYPE"],
+    "is_error": os.environ["RESULT_IS_ERROR"] == "yes",
+    "result": os.environ["RESULT_TEXT"],
+}, ensure_ascii=False) + "\n")
+'
+}
+
+GOOD_REPORT='# Daily Recap fixture
+
+3 session / 2 commit / 1 個新 memory / 跨 2 個 repo
+
+## 2026-09-08
+
+### 路由測試用的匿名主題
+這一段只證明正文有日期分組與主題，數字不代表任何真實活動。
+
+## 2026-09-07
+
+### 前一日的匿名主題
+正文第二個日期分組，避免只靠標題過關。'
+
+OVERVIEW_REPORT='3 session / 2 commit / 1 個新 memory / 跨 2 個 repo
+
+## 2026-09-08
+
+### 數字總覽開頭的匿名主題
+這一種真實日報沒有井號標題，第一行就是數字總覽。
+
+## 2026-09-07
+
+### 前一日的匿名主題
+正文要留在報告裡，不能被前言蓋掉。'
+
+PREFACE='先整理四條來源，完成後再輸出報告。'
+CLOSING='以上是今日整理。'
+PROGRESS='正在核對來源，報告還沒寫。'
+HEADING_ONLY='# Daily Recap fixture'
+COMPACTION='<summary>
+1. Primary Request and Intent
+原 daily recap 尚未完成，目前只輸出這段 summary。
+7. Pending Tasks
+正式 Markdown 報告尚未輸出。
+</summary>'
+
+assert_status() {
+  local label="$1" got="$2" want="$3"
+  ((++checks))
+  if ((got != want)); then
+    print -ru2 -- "$label exited $got, want $want"
+    ((++failures))
+  fi
+}
+
+assert_file_has() {
+  local file="$1" text="$2"
+  ((++checks))
+  if ! grep -Fq -- "$text" "$file"; then
+    print -ru2 -- "report missing: $text"
+    ((++failures))
+  fi
+}
+
+assert_file_lacks() {
+  local file="$1" text="$2"
+  ((++checks))
+  if grep -Fq -- "$text" "$file"; then
+    print -ru2 -- "report kept rejected text: $text"
+    ((++failures))
+  fi
+}
+
+assert_log_has() {
+  local file="$1" text="$2"
+  ((++checks))
+  if ! grep -Fq -- "$text" "$file"; then
+    print -ru2 -- "stderr/log missing: $text"
+    ((++failures))
+  fi
+}
+
+run_stream_case() {
+  local label="$1"
+  shift
+  local out="$fixture/$label.out" log="$fixture/$label.log" err="$fixture/$label.err"
+  mkdir -p "$out" "$log"
+  if [[ -n "$1" ]]; then
+    cp "$1" "$out/2026-09-08-recap.md"
+  fi
+  shift
+  local prior_file=""
+  if [[ -f "$out/2026-09-08-recap.md" ]]; then
+    prior_file="$fixture/$label.prior"
+    cp "$out/2026-09-08-recap.md" "$prior_file"
+  fi
+  local payload="$fixture/$label.ndjson"
+  : > "$payload"
+  local item
+  for item in "$@"; do
+    printf '%s\n' "$item" >> "$payload"
+  done
+  local run_status
+  set +e
+  env -i HOME="$HOME" PATH="$PATH" RECAP_CLAUDE_BIN="$fake" RECAP_KEYS_FILE="$keys" RECAP_GPT_MODELS_FILE="$models" RECAP_OUT_DIR="$out" RECAP_LOG_DIR="$log" RECAP_DATE=2026-09-08 RECAP_CAPTURE_FILE="$fixture/$label.capture" EXPECTED_RELAY_TOKEN="$relay_token" RECAP_STREAM_FILE="$payload" CC_VENDOR=gpt ANTHROPIC_BASE_URL='https://parent.invalid/gpt' bash "$script" >/dev/null 2>"$err"
+  run_status=$?
+  set -e
+  STREAM_STATUS="$run_status"
+  STREAM_OUT="$out/2026-09-08-recap.md"
+  STREAM_ERR="$err"
+  STREAM_LOG="$log/local-analysis-recap-2026-09-08.log"
+  STREAM_PRIOR="$prior_file"
+}
+
+good_block="$(assistant_event "$GOOD_REPORT")"
+closing_result="$(result_event success no "$CLOSING")"
+preface_block="$(assistant_event "$PREFACE")"
+closing_block="$(assistant_event "$CLOSING")"
+overview_block="$(assistant_event "$OVERVIEW_REPORT")"
+progress_block="$(assistant_event "$PROGRESS")"
+heading_block="$(assistant_event "$HEADING_ONLY")"
+compaction_block="$(assistant_event "$COMPACTION")"
+late_error="$(result_event error_during_execution yes "")"
+
+run_stream_case good "" "$good_block" "$closing_result"
+assert_status good "$STREAM_STATUS" 0
+assert_file_has "$STREAM_OUT" '# Daily Recap fixture'
+assert_file_has "$STREAM_OUT" '## 2026-09-08'
+assert_file_has "$STREAM_OUT" '路由測試用的匿名主題'
+
+run_stream_case preface-then-report "" "$preface_block" "$good_block" "$closing_block" "$closing_result"
+assert_status preface-then-report "$STREAM_STATUS" 0
+assert_file_has "$STREAM_OUT" '路由測試用的匿名主題'
+assert_file_lacks "$STREAM_OUT" '先整理四條來源'
+assert_file_lacks "$STREAM_OUT" '以上是今日整理。'
+
+run_stream_case overview-opening "" "$preface_block" "$overview_block" "$closing_block" "$closing_result"
+assert_status overview-opening "$STREAM_STATUS" 0
+assert_file_has "$STREAM_OUT" '3 session / 2 commit / 1 個新 memory / 跨 2 個 repo'
+assert_file_has "$STREAM_OUT" '數字總覽開頭的匿名主題'
+assert_file_lacks "$STREAM_OUT" '先整理四條來源'
+
+run_stream_case compaction "" "$progress_block" "$compaction_block" "$closing_result"
+assert_status compaction "$STREAM_STATUS" 1
+assert_log_has "$STREAM_ERR" 'recap rejected'
+[[ -e "$STREAM_OUT" ]] && { print -ru2 -- 'compaction left a success-looking report'; ((++failures)); }
+((++checks))
+
+run_stream_case blank "" "$closing_result"
+assert_status blank "$STREAM_STATUS" 1
+assert_log_has "$STREAM_ERR" 'recap rejected'
+((++checks))
+[[ ! -e "$STREAM_OUT" ]] || { print -ru2 -- 'blank result left a report'; ((++failures)); }
+
+run_stream_case progress-only "" "$progress_block" "$closing_result"
+assert_status progress-only "$STREAM_STATUS" 1
+assert_log_has "$STREAM_ERR" 'recap rejected'
+
+run_stream_case heading-only "" "$heading_block" "$closing_result"
+assert_status heading-only "$STREAM_STATUS" 1
+assert_log_has "$STREAM_ERR" 'recap rejected'
+
+run_stream_case result-error "" "$good_block" "$(result_event error_during_execution yes "")"
+assert_status result-error "$STREAM_STATUS" 1
+assert_log_has "$STREAM_ERR" 'recap rejected'
+((++checks))
+[[ ! -e "$STREAM_OUT" ]] || { print -ru2 -- 'result error left a report'; ((++failures)); }
+
+prior="$fixture/prior-good.md"
+printf '%s\n' "$GOOD_REPORT" > "$prior"
+run_stream_case keep-prior "$prior" "$progress_block" "$compaction_block" "$closing_result"
+assert_status keep-prior "$STREAM_STATUS" 1
+((++checks))
+if ! cmp -s "$STREAM_OUT" "$STREAM_PRIOR"; then
+  print -ru2 -- 'rejection replaced the previous valid report'
+  ((++failures))
+fi
+assert_file_has "$STREAM_OUT" '路由測試用的匿名主題'
+assert_file_lacks "$STREAM_OUT" '<summary>'
+
+for prior_report in "" "$prior"; do
+  run_stream_case report-then-summary "$prior_report" "$overview_block" "$compaction_block" "$(result_event success no "$COMPACTION")"
+  assert_status report-then-summary "$STREAM_STATUS" 1
+  assert_log_has "$STREAM_LOG" '原 daily recap 尚未完成'
+  ((++checks))
+  if [[ -n "$prior_report" ]]; then
+    if ! cmp -s "$STREAM_OUT" "$STREAM_PRIOR"; then
+      print -ru2 -- 'late summary replaced the previous valid report'
+      ((++failures))
+    fi
+  elif [[ -e "$STREAM_OUT" ]]; then
+    print -ru2 -- 'late summary published the earlier report'
+    ((++failures))
+  fi
+done
+
+run_stream_case late-error "" "$good_block" "$closing_block" "$late_error"
+assert_status late-error "$STREAM_STATUS" 1
+assert_log_has "$STREAM_ERR" 'recap rejected'
+((++checks))
+[[ ! -e "$STREAM_OUT" ]] || { print -ru2 -- 'late error published the earlier report'; ((++failures)); }
+
+upstream_fake="$fixture/claude-upstream-fail"
+cat > "$upstream_fake" <<'EOF'
+#!/bin/bash
+printf 'upstream failed\n' >&2
+exit 9
+EOF
+chmod +x "$upstream_fake"
+upstream_out="$fixture/upstream.out"
+upstream_log="$fixture/upstream.log"
+upstream_err="$fixture/upstream.err"
+mkdir -p "$upstream_out" "$upstream_log"
+set +e
+env -i HOME="$HOME" PATH="$PATH" RECAP_CLAUDE_BIN="$upstream_fake" RECAP_KEYS_FILE="$keys" RECAP_GPT_MODELS_FILE="$models" RECAP_OUT_DIR="$upstream_out" RECAP_LOG_DIR="$upstream_log" RECAP_DATE=2026-09-08 CC_VENDOR=gpt ANTHROPIC_BASE_URL='https://parent.invalid/gpt' bash "$script" >/dev/null 2>"$upstream_err"
+upstream_status=$?
+set -e
+assert_status upstream-nonzero "$upstream_status" 9
+assert_log_has "$upstream_log/local-analysis-recap-2026-09-08.log" 'upstream failed'
+assert_log_has "$upstream_log/local-analysis-recap-2026-09-08.log" 'upstream exit 9'
+((++checks))
+[[ ! -s "$upstream_out/2026-09-08-recap.md" ]] || { print -ru2 -- 'upstream failure left a report'; ((++failures)); }
 
 print -r -- "recap-model-route: checks=$checks failures=$failures"
 ((failures == 0))

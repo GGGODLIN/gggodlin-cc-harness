@@ -9,7 +9,7 @@ from datetime import date, timedelta
 from pathlib import Path
 
 SCRIPT = Path(__file__).with_name("failure-mode-daily.py")
-TODAY = date(2026, 9, 25)
+TODAY = date.today()
 
 HEAD = """<!-- 契約測試 -->
 
@@ -89,13 +89,13 @@ class FailureModeDailyTest(unittest.TestCase):
     self.tax.write_text(HEAD + row(31) + row(45, fn="F2"))
     out = self.run_cli()
     self.assertEqual(out.strip(), "__SILENT__")
-    self.assertEqual(self.header_line(), "> 近 30 天最常漏：（尚無登記）｜更新 2026-09-25")
+    self.assertEqual(self.header_line(), f"> 近 30 天最常漏：（尚無登記）｜更新 {TODAY.isoformat()}")
 
   def test_header_inserted_before_first_rule_then_rewritten_in_place_and_stable_bytes(self):
     self.tax.write_text(HEAD + row(1) + row(2, fn="F2") + row(3, fn="F2"))
     self.run_cli()
     lines = self.tax.read_text().splitlines()
-    idx = lines.index("> 近 30 天最常漏：F2（2）、F1（1）｜更新 2026-09-25")
+    idx = lines.index(f"> 近 30 天最常漏：F2（2）、F1（1）｜更新 {TODAY.isoformat()}")
     self.assertLess(idx, lines.index("---"))
     self.assertEqual(lines.count("---"), 2)
     before = self.tax.read_bytes()
@@ -105,7 +105,7 @@ class FailureModeDailyTest(unittest.TestCase):
     self.run_cli()
     lines = self.tax.read_text().splitlines()
     self.assertEqual(sum(1 for l in lines if l.startswith("> 近 30 天最常漏")), 1)
-    self.assertEqual(lines[idx], "> 近 30 天最常漏：F5（3）、F2（2）｜更新 2026-09-25")
+    self.assertEqual(lines[idx], f"> 近 30 天最常漏：F5（3）、F2（2）｜更新 {TODAY.isoformat()}")
 
   def test_concurrent_append_between_read_and_write_is_preserved(self):
     self.tax.write_text(HEAD + row(1))
@@ -122,7 +122,7 @@ class FailureModeDailyTest(unittest.TestCase):
     self.assertTrue(wrote)
     text = self.tax.read_text()
     self.assertIn(appended, text)
-    self.assertEqual(self.header_line(), "> 近 30 天最常漏：F1（1）、F4（1）｜更新 2026-09-25")
+    self.assertEqual(self.header_line(), f"> 近 30 天最常漏：F1（1）、F4（1）｜更新 {TODAY.isoformat()}")
     self.assertEqual(len(self.mod.parse(text).rows), 2)
     self.assertIn("重讀後重算", report)
 
@@ -150,7 +150,7 @@ class FailureModeDailyTest(unittest.TestCase):
     bad3 = "2026-09-24 | Failure-miss | F9 | shop | t | c → s | pr-review\n"
     bad4 = "- 2026-09-24 | Failure-miss | F1 | shop | t | 模仿條列 → 前面多了 - | pr-review\n"
     bad5 = "2026-09-24|Failure-miss|F1|shop|t|沒空格 → 分不開|pr-review\n"
-    bad6 = "2026-10-24 | Failure-miss | F1 | shop | t | 未來日期 → 打錯 | pr-review\n"
+    bad6 = f"{(TODAY + timedelta(days=29)).isoformat()} | Failure-miss | F1 | shop | t | 未來日期 → 打錯 | pr-review\n"
     self.tax.write_text(HEAD + row(1) + bad1 + bad2 + bad3 + bad4 + bad5 + bad6)
     out = self.run_cli()
     self.assertIn("## 無法解析", out)
@@ -167,7 +167,7 @@ class FailureModeDailyTest(unittest.TestCase):
     self.tax.write_text(HEAD)
     out = self.run_cli()
     self.assertEqual(out.strip(), "__SILENT__")
-    self.assertEqual(self.header_line(), "> 近 30 天最常漏：（尚無登記）｜更新 2026-09-25")
+    self.assertEqual(self.header_line(), f"> 近 30 天最常漏：（尚無登記）｜更新 {TODAY.isoformat()}")
     self.tax.unlink()
     p = subprocess.run([sys.executable, str(SCRIPT), "--taxonomy", str(self.tax), "--date", TODAY.isoformat(), "--out", str(self.out)],
                        capture_output=True, text=True)
@@ -184,14 +184,14 @@ class FailureModeDailyTest(unittest.TestCase):
     self.tax.write_text(HEAD + row(1, suffix=" [reviewed 2026-09-24 不改]") + row(2, tag="Acceptance-miss", fn="-", suffix=" [reviewed 2026-09-24 記摩擦]"))
     out = self.run_cli()
     self.assertEqual(out.strip(), "__SILENT__")
-    self.assertEqual(self.header_line(), "> 近 30 天最常漏：F1（1）｜更新 2026-09-25")
+    self.assertEqual(self.header_line(), f"> 近 30 天最常漏：F1（1）｜更新 {TODAY.isoformat()}")
 
   def test_acceptance_miss_never_drives_thresholds_or_header(self):
     self.tax.write_text(HEAD + row(1, fn="F6") + row(2, tag="Acceptance-miss", fn="F6") + row(3, tag="Acceptance-miss", fn="-"))
     out = self.run_cli()
     self.assertNotIn("F6 同類第 2 筆", out)
     self.assertEqual(sum(1 for l in out.splitlines() if l.startswith("- Acceptance-miss：")), 2)
-    self.assertEqual(self.header_line(), "> 近 30 天最常漏：F6（1）｜更新 2026-09-25")
+    self.assertEqual(self.header_line(), f"> 近 30 天最常漏：F6（1）｜更新 {TODAY.isoformat()}")
 
   def test_acceptance_miss_em_dash_counts_without_rewriting_history(self):
     original = row(2, tag="Acceptance-miss", fn="—")

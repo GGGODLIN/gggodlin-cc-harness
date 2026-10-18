@@ -282,8 +282,8 @@ class PrReviewGeminiWebTest(unittest.TestCase):
     )
     self.assertTrue(any(arg == "--dangerously-skip-permissions" for arg in argv))
     model_arg = next(arg for arg in argv if str(arg).startswith("--model"))
-    self.assertEqual(model_arg.split("=", 1)[1], "Gemini 3.1 Pro (High)")
-    self.assertEqual(execution["requested_model"], "Gemini 3.1 Pro (High)")
+    self.assertEqual(model_arg.split("=", 1)[1], "Gemini 4 Argon (High)")
+    self.assertEqual(execution["requested_model"], "Gemini 4 Argon (High)")
     self.assertEqual(execution["stdin"], "/dev/null")
     self.assertEqual(execution["prompt"], prompt_value)
     self.assertNotIn("prompt_file", execution)
@@ -433,7 +433,7 @@ class PrReviewGeminiWebTest(unittest.TestCase):
     })
     packet = run_cli(SCRIPT, "materials", self.channel_payload(
       "gemini-pro", preparation_path=finalized["preparation_path"], confirmation=True))
-    reply = {"status": "ok", "model": "gemini-3.1-pro-high", "output": json.dumps([
+    reply = {"status": "ok", "model": "gemini-4-argon-high", "output": json.dumps([
       {"severity": "HIGH", "file": f"{dash_root}/shared.ts", "line": 1, "line_end": 1,
        "title": "value dropped", "body": "shared value collides across targets",
        "confidence": 0.8, "anchor": "export const shared = 2"},
@@ -494,7 +494,7 @@ class PrReviewGeminiWebTest(unittest.TestCase):
 
     timeout = run_cli(SCRIPT, "collect", {
       "packet_path": packet["packet_path"],
-      "reply": {"status": "error", "reason": "timeout", "model": "gemini-3.1-pro-high", "output": ""},
+      "reply": {"status": "error", "reason": "timeout", "model": "gemini-4-argon-high", "output": ""},
     })
     self.assertEqual(timeout["status"], "FAILED")
     self.assertEqual(timeout["reason"], "timeout")
@@ -523,7 +523,7 @@ class PrReviewGeminiWebTest(unittest.TestCase):
     })
     packet = run_cli(SCRIPT, "materials", self.channel_payload(
       "gemini-pro", preparation_path=finalized["preparation_path"], confirmation=True))
-    reply = {"status": "ok", "model": "gemini-3.1-pro-high", "output": json.dumps([
+    reply = {"status": "ok", "model": "gemini-4-argon-high", "output": json.dumps([
       {"severity": "HIGH", "file": f"{self.target('11')['review_root']}/a.ts", "line": 2,
        "line_end": 2, "title": "no guard", "body": "b is added without a guard",
        "confidence": 0.9, "anchor": "const b = 2"},
@@ -553,7 +553,7 @@ class PrReviewGeminiWebTest(unittest.TestCase):
     })
     packet = run_cli(SCRIPT, "materials", self.channel_payload(
       "gemini-pro", preparation_path=finalized["preparation_path"], confirmation=True))
-    reply = {"status": "ok", "model": "gemini-3.1-pro-high", "output": "[]"}
+    reply = {"status": "ok", "model": "gemini-4-argon-high", "output": "[]"}
     result = run_cli(SCRIPT, "collect", {"packet_path": packet["packet_path"], "reply": reply})
     self.assertNotIn("observed_model", json.dumps(result))
     self.assertIn("reported_model", json.dumps(result))

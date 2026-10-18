@@ -6,21 +6,32 @@
 # 停用：touch ~/.claude/state/api-error-auto-continue/DISABLED，或設環境變數 CC_AUTO_CONTINUE=0。
 # 本檔在契約測試底下：python3 ~/.claude/hooks/api-error-auto-continue.test.py
 import json
+import math
 import os
+import re
 import stat
 import subprocess
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 CONTINUE_TEXT = "繼續原本的工作。（上一輪因系統斷線中斷，不是任務完成）"
 MAX_CONSECUTIVE = 2
 SEND_DELAY_SECONDS = 3
+RATE_LIMIT_DELAY_SECONDS = 30
+MAX_RATE_LIMIT_DELAY_SECONDS = 960
 READY_POLL_SECONDS = 15
 RETRYABLE_TYPES = {"server_error", "overloaded"}
 # 中繼站在上游串流沒送完就斷線時固定回這句，CC 把它歸成 error=unknown
 STREAM_CUT_MARKER = "stream disconnected before completion"
+# 只收上游 HTTP 429 的 API Error，排除 Claude 訂閱自身的 "You've hit your ... limit"（由 cc-seat-swap 處理）
+RATE_LIMIT_MARKER = "API Error: Request rejected (429)"
+HELD_UNTIL_RE = re.compile(
+  r"not asked again before (?:([A-Z][a-z]{2})\s+(\d{1,2})\s+)?(\d{2}):(\d{2})\s+UTC([+-])(\d{1,2})(?::(\d{2}))?"
+)
+MONTHS = {"Jan": 1, "Feb": 2, "Mar": 3, "Apr": 4, "May": 5, "Jun": 6,
+          "Jul": 7, "Aug": 8, "Sep": 9, "Oct": 10, "Nov": 11, "Dec": 12}
 
 
 def state_dir():
@@ -42,7 +53,33 @@ def classify(payload):
     return error
   if error == "unknown" and STREAM_CUT_MARKER in message:
     return "stream_cut"
+  if error == "rate_limit" and RATE_LIMIT_MARKER in message:
+    return "rate_limit"
   return None
+
+
+def rate_limit_delay(message, now=None):
+  base = RATE_LIMIT_DELAY_SECONDS
+  m = HELD_UNTIL_RE.search(message or "")
+  if not m:
+    return base
+  mon_str, day_str, hh_str, mm_str, sign, off_h_str, off_m_str = m.groups()
+  off_mins = int(off_h_str) * 60 + int(off_m_str or 0)
+  tz = timezone(timedelta(minutes=off_mins if sign == "+" else -off_mins))
+  cur = (now or datetime.now(timezone.utc)).astimezone(tz)
+  month = MONTHS.get(mon_str, cur.month) if mon_str else cur.month
+  day = int(day_str) if day_str else cur.day
+  year = cur.year
+  try:
+    target = datetime(year, month, day, int(hh_str), int(mm_str), tzinfo=tz)
+  except ValueError:
+    return base
+  if not mon_str and target < cur - timedelta(hours=12):
+    target += timedelta(days=1)
+  wait = math.ceil((target - cur).total_seconds()) + 2
+  if wait <= base:
+    return base
+  return min(wait, MAX_RATE_LIMIT_DELAY_SECONDS)
 
 
 def is_regular_or_absent(path):
@@ -148,8 +185,13 @@ def on_failure(payload):
     spawn(["--notify", session_id])
     return
   write_count(session_id, count + 1)
-  log({**base, "action": "continue_scheduled", "count": count + 1, "pane": pane})
-  spawn(["--send", pane, session_id, transcript])
+  if kind == "rate_limit":
+    delay = rate_limit_delay(payload.get("last_assistant_message") or "")
+    log({**base, "action": "continue_scheduled", "count": count + 1, "pane": pane, "delay": delay})
+    spawn(["--send", pane, session_id, transcript, str(delay)])
+  else:
+    log({**base, "action": "continue_scheduled", "count": count + 1, "pane": pane})
+    spawn(["--send", pane, session_id, transcript])
 
 
 def herdr_json(*args):
@@ -157,8 +199,8 @@ def herdr_json(*args):
   return json.loads(out.stdout) if out.returncode == 0 and out.stdout.strip() else None
 
 
-def send(pane, session_id, transcript):
-  time.sleep(SEND_DELAY_SECONDS)
+def send(pane, session_id, transcript, delay=None):
+  time.sleep(SEND_DELAY_SECONDS if delay is None else float(delay))
   entrypoint = transcript_entrypoint(transcript)
   if entrypoint != "cli":
     log({"event": "send", "session": session_id, "action": "skip_not_interactive", "entrypoint": entrypoint, "pane": pane})
@@ -205,7 +247,8 @@ def on_stop(payload):
 def main(argv):
   try:
     if argv[:1] == ["--send"]:
-      send(argv[1], argv[2], argv[3])
+      delay = float(argv[4]) if len(argv) > 4 else None
+      send(argv[1], argv[2], argv[3], delay)
       return
     if argv[:1] == ["--notify"]:
       notify(argv[1])

@@ -54,6 +54,12 @@ class PrReviewSelfVerifyContractTest(unittest.TestCase):
       with self.subTest(marker=marker):
         self.assertIn(marker, self.command)
 
+  def test_rubric_skeleton_requires_the_review_scope_section(self):
+    start = self.command.index("### 正式報告 Self-Verify 固定 rubric")
+    rubric = self.command[start:self.command.index("## Step 6.5", start)]
+    r9 = next(line for line in rubric.splitlines() if line.startswith("- **R9"))
+    self.assertIn("這次審查範圍", r9)
+
   def test_auditor_output_requires_complete_consistent_rubric(self):
     for marker in (
       "必須恰好含 R1–R10 各一行",

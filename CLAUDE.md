@@ -56,7 +56,7 @@
   - 給出任何具體數字（百分比 / 延遲 / 次數 / 版本 / PR 號）→ 同句附計算方式或出處，附不出就明標「估計」
   - 敘述機制或來源（「X 會讀 Y」「X 來自 Z」「X 不支援 W」）→ 附 grep / doc / 實測證據，沒有就明標「未驗證的推測」；適用於工作中段的每一句、不限結案宣告
   - 結案宣稱來自**自己沒有親眼看到的執行**（背景 workflow / subagent 回報 / 長時間自主跑完的多步驟工作），或當場附不出新鮮證據 → 派 `task-verifier` 重跑驗證再結案，不以自述收尾
-- 宣告「現有 code 缺 X」前先搜，找不到才提並附證據。例外：typo / 硬編密鑰 / SQL injection 等 strict-liability 缺陷直接提。**同規則涵蓋「建議做 X」**：retrospective / review / audit 列改善建議前，每條先 grep 目標檔＋`git log -S` 確認尚未實作，已做的不列
+- 宣告「現有 code 缺 X」前先搜，找不到才提並附證據；說上游、以前的工作、官方資源或環境「沒有／沒做過／不存在」前也一樣先查。例外：必報清單第二層（strict-liability）的缺陷直接提，成員與例外看 `~/.claude/review-standards/must-report.md`。**同規則涵蓋「建議做 X」**：retrospective / review / audit 列改善建議前，每條先 grep 目標檔＋`git log -S` 確認尚未實作，已做的不列
 - Remote master / main = ground truth、本地可能 stale。查 PR / ship 狀態 / 比對 master 前先 `git fetch`；本地與 remote 不一致時**主動 surface 給 user**、不要靜默以本地為準
 - 「不確定 / 看不到 / 只有你知道」≠ 出口：grep / git log / session jsonl / api 三秒事，先翻過才能說查不到
 - 使用者句中出現「我記得 / 之前有 / 上次 / 翻一下 / 你查一下」等指涉過去工作的詞 → **回答前必先翻對應紀錄**（session jsonl / git / memory / 實驗輸出），找到或確認不存在才下判斷；不得憑印象直接回

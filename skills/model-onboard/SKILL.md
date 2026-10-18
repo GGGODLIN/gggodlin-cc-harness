@@ -1,6 +1,6 @@
 ---
 name: model-onboard
-description: 把新的第三方模型接進本機模型池，並判定它值不值得用。觸發語包括「我串了一個 X」「接入 X」「幫我確認一下這個模型」「這顆模型行不行」「簡單驗一下」「要不要排進 free chain」「新加了一個 provider」，以及接入後想比較兩顆模型優劣的場合。涵蓋 adapter、litellm gateway 與 CLIProxyAPI relay 三層接線、能力探針、CC session 內的整合驗證、裁決與登記。不要用在：模型定價或規格的純事實查詢（走 research-before-answer）、已接入模型的行為除錯（走 debugging）、harbor testbench 的實驗設計與判讀（那是使用者自己拍板的重型實驗，本 skill 只負責提名候選）。
+description: 把新的第三方模型接進本機模型池，並判定它值不值得用。觸發語包括「我串了一個 X」「接入 X」「幫我確認一下這個模型」「這顆模型行不行」「簡單驗一下」「要不要排進 free chain」「新加了一個 provider」，以及接入後想比較兩顆模型優劣的場合。涵蓋 Magpie 接線、能力探針、CC session 內的整合驗證、裁決與登記。不要用在：模型定價或規格的純事實查詢（走 research-before-answer）、已接入模型的行為除錯（走 debugging）、harbor testbench 的實驗設計與判讀（那是使用者自己拍板的重型實驗，本 skill 只負責提名候選）。
 ---
 
 <!-- 本檔在契約測試底下：python3 ~/.claude/commands/tests/test_skill_verify_one_shot_callers.py -->
@@ -11,15 +11,15 @@ description: 把新的第三方模型接進本機模型池，並判定它值不�
 
 五階段之所以要拆開，是因為它們的失敗長得不一樣：接線失敗會沉默（某一層沒登記，但別層測起來都正常）、能力不足會被限流偽裝成失敗、CC 整合層的問題在 API 面完全看不出來、而「這顆該放哪」是價值判斷不是測量結果。混在一起做，最常見的後果是把上游故障寫成「這個模型不行」。
 
-## 階段一：WIRE — 三層都要登記
+## 階段一：WIRE — 登記進 Magpie
 
-本機模型池是三層串接，任何一層漏登記，別層都測得出綠燈，於是漏層不會被發現。層次地圖、各層設定檔位置與 probe 指令見 [references/wiring-layers.md](references/wiring-layers.md)，接入新模型時先讀它再動手。
+2026-10-15 起本機模型池由 Magpie 管：`:8317` 的 relay-switch 轉給 Magpie，CPA 與一般 LiteLLM 已停、只留作回退材料，往那兩處加模型不會有任何消費端看得到。新 key 或新模型用 Magpie CLI 加；不手改 `providers.json`、不重啟 Magpie，因為它是所有 session 共用的入口，重啟會讓進行中的請求斷線，而 CLI 加完當下就生效。如果要接新 key 或新模型，就在動手前讀 [references/wiring-layers.md](references/wiring-layers.md) 的 CLI 指令與 probe。
 
 同時問清楚**額度來源與共用對象**：這顆的額度是訂閱、PAYG、免費層還是本機 engine？跟既有哪幾顆共用？共用額度的新模型不增加容量，能力再好也沒有存在意義——這件事在 WIRE 就要問，不要等能力都測完才發現。
 
-完成條件：**三層的 `/v1/models` 都列得出這個 model id**，而且是逐層實際 curl 過的輸出，不是「我改了設定檔所以應該有」；**額度來源與共用對象已寫下來**。
+完成條件：**`:8317/v1/models` 列得出 `<provider>/<model>`，且實打一發回 200、回應的 model 對得上**，是實際 curl 的輸出，不是「CLI 說加好了所以應該有」；**額度來源與共用對象已寫下來**。
 
-登記完把改動 commit（個人 repo 照自動 commit 慣例），設定檔若不在版控則先備份再改。接著完成下方「輸出預算」，才進 SMOKE。
+改 `providers.json` 前先備份；版控內的檔照自動 commit 慣例 commit。接著完成下方「輸出預算」，才進 SMOKE。
 
 ### 輸出預算
 
@@ -35,7 +35,8 @@ description: 把新的第三方模型接進本機模型池，並判定它值不�
 
 ```bash
 cd ~/Desktop/projects/local-llm-gateway/bench
-BENCH_BASE_URL=http://127.0.0.1:8000/v1 BENCH_API_KEY=sk-1234 python3 smoke.py <model-id> 3
+source ~/.cli-proxy-api/keys.env   # relay-switch 仍收 CLIPROXY_KEY_ADMIN
+BENCH_BASE_URL=http://127.0.0.1:8317/v1 BENCH_API_KEY=$CLIPROXY_KEY_ADMIN python3 smoke.py <provider>/<model> 3
 ```
 
 十二道探針涵蓋可達性、content 通道、小 max_tokens、streaming、tool_call 格式、tool loop 收尾、system prompt 遵從、繁中單輪、參數相容性、繁中×tool 情境、證據忠實度、該不該呼叫工具。每道預設跑 3 次，因為單次樣本分不出「這顆不會」和「這次剛好沒中」。
@@ -60,6 +61,8 @@ SMOKE 全綠之後才有意義。跑 `bench/` 底下移植自 cline 系的題組
 
 跳過這階段是合理的——例如這顆模型只打算當單次來回用（翻譯、摘要、判官），不進 agentic 派工。跳過時在裁決裡寫明「未測能力，定位僅限單次來回」，不要讓 SMOKE 的綠燈被讀成能力背書。
 
+如果這顆要放進 session-audit、`audit-chain`、`mem-observer`，或使用者要跟現役線比實際工作能力（不限要不要進 `free` 鏈），就在 VERDICT 前讀 [references/workload-suite.md](references/workload-suite.md)，跑真實工作量題組完整版。完整版不判過關，只列它在 10-16 九個組合裡的位置；用不用、放哪是使用者的決定。
+
 ## 階段四：LIVE — 在真的 CC session 裡跑
 
 **接進來多半是要給 CC 用的，而前三階段全部是用 curl 或 python 直接打端點，測不到 CC 整合層。** 有一整類問題只有真的開一個 session 才看得見：context window 被退回 200K 假設、ToolSearch 的延遲載入對非 Anthropic 端點預設停用、stop hook 對 vendor session 發出不適用的提示、subagent 實際派到哪顆模型、CLAUDE.md 的風格規則有沒有被遵守。這些在 API 面全是綠燈。
@@ -78,14 +81,15 @@ SMOKE 全綠之後才有意義。跑 `bench/` 底下移植自 cline 系的題組
 
 ## 入鏈關卡：free 池回歸題組
 
-chain 的主要消費者是 CC 主 session 底下的子 agent，做的是規則稽核、小段 review、分類這類日常短任務。前面幾階段都沒有「跟現役腿比」的對照組，所以 SMOKE、BENCH 全綠也看不出這顆會不會把現役腿做得到的事做壞。這道關卡用同期交錯跑的對照組補這一塊（使用者 2026-09-25 定 v1；2026-10-03 改用分析類 v3 取代原本的 D3/D4）。
+chain 的主要消費者是 CC 主 session 底下的子 agent，做的是規則稽核、小段 review、分類這類日常短任務。前面幾階段都沒有「跟現役腿比」的對照組，所以 SMOKE、BENCH 全綠也看不出這顆會不會把現役腿做得到的事做壞。這道關卡拿現役腿的歷史成績當對照補這一塊：v1 對 mimo26 的凍結基準、v3 對 10-03 正式考試、真實工作量題組對 10-16 盲評，只跑受測腿，不現場重跑對照腿（使用者 2026-09-25 定 v1、2026-10-03 改用 v3 取代 D3/D4、2026-10-16 定一律對歷史成績比並加入真實工作量題組——現場對照只為偵測基準漂移，每次付一倍時間與額度不划算）。
 
-做法、指令與判讀見 [references/regress-gate.md](references/regress-gate.md)。兩部分都要跑：
+做法、指令與判讀見 [references/regress-gate.md](references/regress-gate.md)。三部分都要跑：
 
-1. v1（`regress.run`，對照 mimo26）；報告有退步候選就跑 `--attempts 3,4` 追加確認
+1. v1（`regress.run` 只跑受測腿，報告對 mimo26 凍結基準）；報告有退步候選就只對受測腿跑 `--attempts 3,4` 追加確認
 2. 分析類 v3（`regress.v3_run formal`，只跑這條腿 4 場，再用 `regress.v3_run report` 產報告）
+3. 真實工作量題組 free 版（`regress.workload` run → pack → 派 5 位判官 subagent → `report --mode free`）。v1、v3 都是機械判分，判不出「分析抓得準不準、雜訊多不多」；這組用 session-audit 的真實對話片段，由判官對固定參考答案評分
 
-完成條件：**v1 報告結論與 v3 報告摘要列都有；每個退步候選都跑過追加確認**。v1 不是「未發現明確退步」，或 v3 不是「有效評分 4/4、按時完整交件 4/4、捏造 0、越界 0」，就預設不進 chain；v3 內容分數只記錄、不當門檻。仍想進是使用者的決定，帶著報告問，不要自己放行。
+完成條件：**v1 報告結論、v3 報告摘要列、真實工作量報告的「free 入鏈判定」列都有；每個退步候選都跑過追加確認**。v1 不是「未發現明確退步」、v3 不是「有效評分 4/4、按時完整交件 4/4、捏造 0、越界 0」，或真實工作量判定是「退步」，就預設不進 chain；v3 內容分數只記錄、不當門檻。真實工作量判定是「資料不足」時，不是能力結論，處理方式見 regress-gate.md；報告上的判官尺度偏移只照抄進裁決表，不影響判定。仍想進是使用者的決定，帶著報告問，不要自己放行。
 
 完成後接階段五；chain priority 停點在這裡才問，不是 WIRE 之後。
 
@@ -130,7 +134,7 @@ rubric：
 
 | 停點 | 什麼時候出現 | 要問什麼 |
 |---|---|---|
-| **chain priority** | 入鏈關卡跑完後 | 這顆要不要排進 `free` chain？排第幾腿？附回歸題組兩份結論（新模型預設不進 chain，只給獨立 alias；關卡沒過時明講退步清單） |
+| **chain priority** | 入鏈關卡跑完後 | 這顆要不要排進 `free` chain？排第幾腿？附回歸題組三份結論（新模型預設不進 chain，只給獨立 alias；關卡沒過時明講退步清單） |
 | **BENCH 要不要跑** | SMOKE 全綠後 | 這顆的定位需不需要 agentic 能力證據？不需要就跳過 |
 | **送不送 harbor** | BENCH 出結果後 | harbor testbench 成本高（一輪百餘 trial 加 LLM 判官審軌跡），題庫子集、臂數、attempts 全由使用者選。本 skill 只負責提名候選並說明理由，不代為設計實驗 |
 

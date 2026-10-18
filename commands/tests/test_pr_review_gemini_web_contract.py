@@ -46,7 +46,7 @@ class PrReviewGeminiWebContractTest(unittest.TestCase):
   def test_gemini_multi_target_keeps_selected_role_and_model(self):
     step = self.gemini_multi()
     self.assertIn("只保留該 cell 的 selected 角色、requested model", step)
-    self.assertIn("Gemini 3.1 Pro (High)", step)
+    self.assertIn("Gemini 4 Argon (High)", step)
     self.assertIn("$GEMINI_FLASH_MODEL", step)
     self.assertIn("不新增通道、不偷換模型", step)
 
@@ -121,6 +121,7 @@ class PrReviewGeminiWebContractTest(unittest.TestCase):
   def test_web_multi_target_sends_one_labeled_full_text_diff_send(self):
     step = self.web_multi()
     self.assertIn("已選角度只送一次", step)
+    self.assertIn("--materials-only", step)
     self.assertIn("--new --wait false --window background -f json", step)
     self.assertIn("detail <id> --markdown true -f json", step)
     self.assertIn("不帶 `--wait true`", step)

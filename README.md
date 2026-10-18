@@ -114,15 +114,16 @@ It is a reference, not a product. You can install single pieces, but nothing gua
 - [`examples/`](examples/) — 8 個檔案；內含 `friction/`、`memory/`、`tool-upgrade-notes/`、`trials/`、`wiki/`
 - [`folder-level/`](folder-level/) — 15 個檔案；內含 `.claude/`、`CLAUDE.md`
 - [`friction/`](friction/) — 1 個檔案；內含 `PROTOCOL.md`
-- [`hooks/`](hooks/) — 111 個檔案；內含 `T1-claim-detect-local-first.llm.test.sh`、`T1-claim-detect-local-first.sh`、`T1-claim-detect-local-first.test.sh`、`T1-evidence-level-detect.sh`、`T1-evidence-level-detect.test.sh`、`T1-evidence-level-fixtures/`、`T1-evidence-level-prompt-v2.txt`、`T1-system-prompt-v5d.txt`…（共 107 項）
+- [`hooks/`](hooks/) — 110 個檔案；內含 `T1-claim-detect-local-first.llm.test.sh`、`T1-claim-detect-local-first.sh`、`T1-claim-detect-local-first.test.sh`、`T1-evidence-level-detect.sh`、`T1-evidence-level-detect.test.sh`、`T1-evidence-level-fixtures/`、`T1-evidence-level-prompt-v2.txt`、`T1-system-prompt-v5d.txt`…（共 106 項）
 - [`install/`](install/) — 44 個檔案；內含 `compact-guard/`、`folder-level/`、`hooks/`、`output-styles/`、`workflows/`
 - [`model-routing.env`](model-routing.env)
 - [`openspec/`](openspec/) — 3 個檔案；內含 `specs/`
 - [`output-styles/`](output-styles/) — 1 個檔案；內含 `Explanatory.md`
-- [`references/`](references/) — 14 個檔案；內含 `claim-evidence-examples.md`、`dispatch-and-verify-examples.md`、`effort-controls.md`、`harness-model-sensitivity.md`、`ledger-lifecycle.md`、`perspective-sub-scout.md`、`perspective-sub-scout.md.LICENSE`、`severity-calibration.md`…（共 14 項）
+- [`references/`](references/) — 16 個檔案；內含 `claim-evidence-examples.md`、`dispatch-and-verify-examples.md`、`effort-controls.md`、`failure-mode-taxonomy.md`、`harness-model-sensitivity.md`、`ledger-lifecycle.md`、`perspective-sub-scout.md`、`perspective-sub-scout.md.LICENSE`…（共 16 項）
+- [`review-standards/`](review-standards/) — 34 個檔案；內含 `ai-generated-changes.md`、`architecture-proposal-lens.md`、`architecture-transformed-code-lens.md`、`catalog.md`、`code-review-quality.md`、`code-review-security.md`、`design-and-maintainability.md`、`finding-discipline.md`…（共 34 項）
 - [`rules/`](rules/) — 14 個檔案；內含 `common/`、`typescript/`
 - [`scripts/`](scripts/) — 100 個檔案；內含 `advisor-extract-context.py`、`agent-contract-command/`、`agent-contract-validator.definition.test.sh`、`agent-contract-validator.diagnostics.test.sh`、`agent-contract-validator.frontmatter.test.sh`、`agent-contract-validator.mcp-tools.test.sh`、`agent-contract-validator.mjs`、`agent-contract-validator.name.test.sh`…（共 86 項）
 - [`settings.json`](settings.json)
-- [`skills/`](skills/) — 203 個檔案；內含 `INVENTORY.md`、`absorb-pack/`、`agent-authoring/`、`agent-dispatch/`、`align-intent/`、`auto-choice/`、`brainstorm/`、`caveman/`…（共 42 項）
+- [`skills/`](skills/) — 201 個檔案；內含 `INVENTORY.md`、`absorb-pack/`、`agent-authoring/`、`agent-dispatch/`、`align-intent/`、`auto-choice/`、`brainstorm/`、`caveman/`…（共 43 項）
 - [`social-info/`](social-info/) — 76 個檔案；內含 `scripts/`、`tests/`
 - [`workflows/`](workflows/) — 7 個檔案；內含 `best-of-n-implement.js`、`failure-mode-daily.sh`、`local-analysis.js`、`skill-changes-daily.sh`、`skillevaluator-weekly.sh`、`tests/`

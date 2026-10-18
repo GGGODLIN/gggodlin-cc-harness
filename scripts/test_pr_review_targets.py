@@ -381,8 +381,8 @@ class PrReviewTargetsTest(unittest.TestCase):
     self.assertEqual(small["capacity"]["decision"], "within-threshold")
     self.assertFalse(small["capacity"]["adjudication_required"])
     self.assertEqual(small["capacity"]["waiting_seats"], [])
-    self.assertFalse(small["dispatch"]["allowed"])
-    self.assertEqual(small["dispatch"]["reason"], "awaiting-confirmation")
+    self.assertTrue(small["dispatch"]["allowed"])
+    self.assertEqual(small["dispatch"]["reason"], "claude-seats-auto")
 
     bulk = self.fx.saas_pair_platform()
     bulk["github.com/acme/saas#12"]["changed_files"] = [f"src/f{index}.ts" for index in range(40)]
@@ -409,7 +409,7 @@ class PrReviewTargetsTest(unittest.TestCase):
     self.assertEqual(adjudicated["capacity"]["waiting_seats"], [])
     self.assertEqual(adjudicated["capacity"]["adjudication"]["github:github.com/acme/saas#12"],
                      "accept-incomplete")
-    self.assertEqual(adjudicated["dispatch"]["reason"], "awaiting-confirmation")
+    self.assertEqual(adjudicated["dispatch"]["reason"], "claude-seats-auto")
 
     blocked_platform = self.fx.saas_pair_platform()
     blocked_platform["github.com/acme/saas#12"] = {"status": "error", "reason": "not_found"}
@@ -441,7 +441,7 @@ class PrReviewTargetsTest(unittest.TestCase):
     )
     self.assertFalse(accepted["capacity"]["adjudication_required"])
     self.assertEqual([], accepted["capacity"]["unresolved"])
-    self.assertEqual("awaiting-confirmation", accepted["dispatch"]["reason"])
+    self.assertEqual("claude-seats-auto", accepted["dispatch"]["reason"])
 
   def test_any_target_failure_stops_whole_set_and_cancel_only_clears_this_run(self):
     selection = [{"seat": "opus/code-reviewer", "angle": "context-aware primary"}]
@@ -593,7 +593,10 @@ class PrReviewTargetsTest(unittest.TestCase):
     self.assertEqual(revision["failures"][0]["reason_code"], "TARGET_VERSION_MISMATCH")
 
   def test_dispatch_authorization_requires_explicit_confirmation(self):
-    selection = [{"seat": "opus/code-reviewer", "angle": "context-aware primary"}]
+    selection = [
+      {"seat": "opus/code-reviewer", "angle": "context-aware primary"},
+      {"seat": "codex", "angle": "Codex 中性"},
+    ]
     prepared = self.prepare(self.fx.payload(self.fx.inputs_11_12(), self.fx.saas_pair_platform()))
     self.assertEqual(prepared["status"], "READY")
 
@@ -621,6 +624,232 @@ class PrReviewTargetsTest(unittest.TestCase):
     self.assertFalse(gap_decision["allowed"])
     self.assertEqual(gap_decision["reason"], "awaiting-adjudication")
     self.assertEqual(self.recorder.read_text().count("dispatch"), 1)
+
+  def claude_state(self, run_id, selection, platform=None):
+    prepared = self.prepare(self.fx.payload(
+      self.fx.inputs_11_12(), platform or self.fx.saas_pair_platform(), run_id=run_id,
+    ))
+    self.assertEqual(prepared["status"], "READY")
+    return self.finalize(prepared["preparation_path"], selection)
+
+  def rewrite_state(self, path, mutate):
+    state = json.loads(Path(path).read_text())
+    mutate(state)
+    Path(path).write_text(json.dumps(state, ensure_ascii=False, sort_keys=True))
+
+  def test_claude_only_selection_without_capacity_gap_needs_no_confirmation(self):
+    selection = [
+      {"seat": "opus/typescript-reviewer", "angle": "context-aware primary"},
+      {"seat": "opus/security-reviewer", "angle": "security"},
+      {"seat": "opus/spec-compliance-reviewer", "angle": "formal spec"},
+    ]
+    state = self.claude_state("run-claude-only", selection)
+    self.assertTrue(state["dispatch"]["allowed"])
+    self.assertEqual(state["dispatch"]["reason"], "claude-seats-auto")
+
+    decision = self.authorize(state["preparation_path"], None)
+    self.assertTrue(decision["allowed"])
+    self.assertEqual(decision["reason"], "claude-seats-auto")
+    self.assertEqual(self.recorder.read_text().count("dispatch"), 1)
+
+    confirmed = self.authorize(state["preparation_path"], {"user_message": "照推薦，開始"})
+    self.assertTrue(confirmed["allowed"])
+    self.assertEqual(confirmed["reason"], "confirmed")
+
+    for model in ("opus", "claude-opus-4-7"):
+      with self.subTest(model=model):
+        pinned = self.claude_state(
+          f"run-pinned-{model}", [{**selection[0], "model": model}],
+        )
+        self.assertTrue(pinned["dispatch"]["allowed"])
+
+  def test_extra_quota_seat_in_selection_still_awaits_confirmation(self):
+    claude = {"seat": "opus/code-reviewer", "angle": "context-aware primary"}
+    external_cells = {
+      "codex-neutral": {"seat": "codex", "angle": "Codex 中性"},
+      "codex-adversarial": {"seat": "codex", "angle": "Codex 對抗"},
+      "gemini": {"seat": "agy", "angle": "Gemini Pro"},
+      "web-gpt": {"seat": "web-gpt", "angle": "web GPT Pro"},
+      "fable-on-claude-row": {**claude, "model": "fable"},
+      "fable-versioned": {**claude, "model": "claude-fable-1"},
+      "other-model": {**claude, "model": "gpt-6-astra"},
+    }
+    control = self.claude_state("run-ext-control", [claude])
+    self.assertTrue(control["dispatch"]["allowed"])
+    for name, cell in external_cells.items():
+      with self.subTest(external=name):
+        state = self.claude_state(f"run-ext-{name}", [claude, cell])
+        self.assertFalse(state["dispatch"]["allowed"])
+        self.assertEqual(state["dispatch"]["reason"], "awaiting-confirmation")
+        awaiting = self.authorize(state["preparation_path"], None)
+        self.assertFalse(awaiting["allowed"])
+        self.assertEqual(awaiting["reason"], "awaiting-confirmation")
+        confirmed = self.authorize(state["preparation_path"], {"user_message": "加選，開始"})
+        self.assertTrue(confirmed["allowed"])
+        self.assertEqual(confirmed["reason"], "confirmed")
+    self.assertEqual(self.recorder.read_text().count("dispatch"), len(external_cells))
+
+    only_external = self.claude_state("run-only-external", [external_cells["gemini"]])
+    self.assertEqual(only_external["dispatch"]["reason"], "awaiting-confirmation")
+
+  def test_claude_only_selection_waits_for_capacity_adjudication(self):
+    selection = [
+      {"seat": "opus/typescript-reviewer", "angle": "context-aware primary"},
+      {"seat": "opus/security-reviewer", "angle": "security"},
+    ]
+    bulk = self.fx.saas_pair_platform()
+    bulk["github.com/acme/saas#12"]["changed_files"] = [f"src/f{index}.ts" for index in range(40)]
+    bulk["github.com/acme/saas#12"]["diff_lines"] = 900
+    gapped = self.claude_state("run-claude-gap", selection, bulk)
+    self.assertEqual(
+      sorted(gapped["capacity"]["waiting_seats"]),
+      ["opus/security-reviewer", "opus/typescript-reviewer"],
+    )
+    self.assertEqual(gapped["dispatch"]["reason"], "awaiting-adjudication")
+    for confirmation in (None, {"user_message": "照推薦，開始"}):
+      decision = self.authorize(gapped["preparation_path"], confirmation)
+      self.assertFalse(decision["allowed"])
+      self.assertEqual(decision["reason"], "awaiting-adjudication")
+    self.assertFalse(self.recorder.exists())
+
+    adjudicated = self.finalize(
+      gapped["preparation_path"], selection,
+      {"github:github.com/acme/saas#12": "accept-incomplete", "review_set": "accept-incomplete"},
+    )
+    self.assertEqual(adjudicated["capacity"]["waiting_seats"], [])
+    self.assertTrue(self.authorize(adjudicated["preparation_path"], None)["allowed"])
+
+  def test_only_known_adjudication_values_settle_capacity(self):
+    selection = [{"seat": "opus/typescript-reviewer", "angle": "context-aware primary"}]
+    bulk = self.fx.saas_pair_platform()
+    bulk["github.com/acme/saas#12"]["changed_files"] = [f"src/f{index}.ts" for index in range(40)]
+    bulk["github.com/acme/saas#12"]["diff_lines"] = 900
+    for name, value in (("null", None), ("empty", ""), ("unknown", "please-ask")):
+      with self.subTest(value=name):
+        gapped = self.claude_state(f"run-adj-{name}", selection, bulk)
+        state = self.finalize(
+          gapped["preparation_path"], selection,
+          {"github:github.com/acme/saas#12": value, "review_set": value},
+        )
+        self.assertTrue(state["capacity"]["unresolved"])
+        for confirmation in (None, {"user_message": "照推薦，開始"}):
+          decision = self.authorize(state["preparation_path"], confirmation)
+          self.assertFalse(decision["allowed"])
+          self.assertEqual(decision["reason"], "awaiting-adjudication")
+    self.assertFalse(self.recorder.exists())
+
+  def test_matrix_cells_not_selected_do_not_block_claude_auto_dispatch(self):
+    claude = {"seat": "opus/code-reviewer", "angle": "context-aware primary", "status": "selected"}
+    skipped = [
+      {"seat": "codex", "angle": "Codex 中性", "status": "not-selected"},
+      {"seat": "agy", "angle": "Gemini Pro", "status": "cancelled"},
+      {"seat": "web-gpt", "angle": "web GPT Pro", "status": "unavailable"},
+    ]
+    state = self.claude_state("run-matrix-cells", [claude, *skipped])
+    self.assertEqual(state["dispatch"]["reason"], "claude-seats-auto")
+    nothing_selected = self.claude_state(
+      "run-matrix-none", [{**claude, "status": "not-selected"}, *skipped],
+    )
+    self.assertEqual(nothing_selected["dispatch"]["reason"], "awaiting-confirmation")
+
+  def test_model_names_that_only_start_with_opus_are_not_claude_seats(self):
+    cell = {"seat": "opus/code-reviewer", "angle": "context-aware primary"}
+    for model in ("opus-gpt-6", "opus.codex", "opus_via_proxy"):
+      with self.subTest(model=model):
+        state = self.claude_state(f"run-model-{model}", [{**cell, "model": model}])
+        self.assertEqual(state["dispatch"]["reason"], "awaiting-confirmation")
+    for model in ("opus-5-5", "claude-opus-5-5"):
+      with self.subTest(model=model):
+        state = self.claude_state(f"run-model-{model}", [{**cell, "model": model}])
+        self.assertEqual(state["dispatch"]["reason"], "claude-seats-auto")
+
+  def test_state_written_before_this_change_is_never_released_for_missing_data(self):
+    selection = [{"seat": "opus/code-reviewer", "angle": "context-aware primary"}]
+    state = self.claude_state("run-old-state", selection)
+    path = Path(state["preparation_path"])
+    pristine = path.read_text()
+    self.assertTrue(self.authorize(path, None)["allowed"])
+
+    def drop_selection(value):
+      del value["selection"]
+
+    def drop_angle(value):
+      value["selection"] = [{"seat": cell["seat"]} for cell in value["selection"]]
+
+    def drop_capacity(value):
+      del value["capacity"]
+
+    def drop_adjudication_flag(value):
+      del value["capacity"]["adjudication_required"]
+
+    variants = {
+      "selection-key-missing": drop_selection,
+      "selection-empty-with-count": lambda value: value.update(selection=[]),
+      "selection-not-a-list": lambda value: value.update(selection="opus/code-reviewer"),
+      "cell-is-a-string": lambda value: value.update(selection=["opus/code-reviewer"]),
+      "cell-without-angle": drop_angle,
+      "seat-unhashable": lambda value: value.update(selection=[{"seat": ["x"], "angle": "security"}]),
+      "capacity-missing": drop_capacity,
+      "capacity-null": lambda value: value.update(capacity=None),
+      "capacity-string": lambda value: value.update(capacity="within-threshold"),
+      "capacity-flag-missing": drop_adjudication_flag,
+      "external-seat-with-claude-angle": lambda value: value.update(
+        selection=[{"seat": "codex", "angle": "context-aware primary"}]),
+      "claude-seat-with-external-angle": lambda value: value.update(
+        selection=[{"seat": "opus/code-reviewer", "angle": "Codex 中性"}]),
+      "pair-mismatch": lambda value: value.update(
+        selection=[{"seat": "opus/security-reviewer", "angle": "context-aware primary"}]),
+      "unknown-claude-looking-seat": lambda value: value.update(
+        selection=[{"seat": "opus/unknown-reviewer", "angle": "context-aware primary"}]),
+      "seat-case-variant": lambda value: value.update(
+        selection=[{"seat": "Opus/code-reviewer", "angle": "context-aware primary"}]),
+      "legacy-fixture-seat": lambda value: value.update(
+        selection=[{"seat": "cc-primary", "angle": "context-aware primary"}]),
+    }
+    for name, mutate in variants.items():
+      with self.subTest(variant=name):
+        path.write_text(pristine)
+        self.rewrite_state(path, mutate)
+        decision = self.authorize(path, None)
+        self.assertFalse(decision["allowed"])
+        self.assertEqual(decision["reason"], "awaiting-confirmation")
+        confirmed = self.authorize(path, {"user_message": "照推薦，開始"})
+        self.assertTrue(confirmed["allowed"])
+        self.assertEqual(confirmed["reason"], "confirmed")
+
+  def test_cancel_and_unready_states_still_refuse_claude_only_selection(self):
+    selection = [{"seat": "opus/code-reviewer", "angle": "context-aware primary"}]
+    state = self.claude_state("run-claude-cancel", selection)
+    path = Path(state["preparation_path"])
+    self.assertTrue(self.authorize(path, None)["allowed"])
+    pristine = path.read_text()
+
+    for status, reason in (("BLOCKED", "preparation-blocked"),
+                           ("NEEDS_INPUT", "preparation-blocked"),
+                           ("NO_NET_DIFF", "no-net-diff")):
+      with self.subTest(status=status):
+        path.write_text(pristine)
+        self.rewrite_state(path, lambda value: value.update(status=status))
+        decision = self.authorize(path, None)
+        self.assertFalse(decision["allowed"])
+        self.assertEqual(decision["reason"], reason)
+
+    path.write_text(pristine)
+    cleared = self.finalize(path, [])
+    self.assertEqual(cleared["dispatch"]["reason"], "selection-required")
+    self.assertEqual(self.authorize(path, None)["reason"], "selection-required")
+
+    path.write_text(pristine)
+    cancelled = run_cli("cancel", {"preparation_path": str(path)})
+    self.assertTrue(cancelled["cancelled"])
+    for confirmation in (None, {"user_message": "照推薦，開始"}):
+      decision = self.authorize(path, confirmation)
+      self.assertFalse(decision["allowed"])
+      self.assertEqual(decision["reason"], "cancelled")
+
+    missing = self.authorize(self.fx.base / "state" / "no-such-run.json", None)
+    self.assertFalse(missing["allowed"])
+    self.assertEqual(missing["reason"], "preparation-not-found")
 
 
 ERRORS_REMOTE = "https://github.com/acme/errors.git"

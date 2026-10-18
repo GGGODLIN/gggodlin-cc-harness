@@ -17,6 +17,6 @@
 - **上游貢獻第一次公開前，先審再問**（優先於上面「個人 repo 不必問」）：對別人 repo（owner 不是 `example-owner`）的貢獻，內容第一次公開前——推到公開 fork、`gh pr create`（含 `--dry-run`，它也可能 push）、`gh pr comment`、`gh pr edit`、PR review 留言，改用其他工具也算——走下面三步；一次確認可涵蓋「push 這版＋開這個 PR」。審查點若只放在開 PR，fork 一推內容就已公開，審了也擋不住
   1. 先跑 `~/.claude/scripts/upstream-pr-bundle.sh --repo <repo> --base <上游基準，如 upstream/main> --title <標題> --body-file <內文檔> --out <scratchpad 檔>` 打包，再把它印出的 `BUNDLE_PATH`／`BUNDLE_TOTAL_LINES` 兩行原樣交給 `upstream-pr-reviewer`。這支 agent 只有 Read：它要讀別人寫的內容，被騙也發不出東西，所以不改派帶全套工具的 agent 代審
   2. `VERDICT: CLEAR` 或 `ISSUES` 帶著它的三欄回報進第 3 步；`INCOMPLETE`（讀檔失敗、內容截斷）、subagent 失敗或空輸出都算沒查完、不算通過，先補齊或向使用者講明缺口
-  3. 問使用者時依序貼：公開風險與未查項、目標 repo 與基準分支、待送 commit SHA、標題與內文全文。使用者同意的是這一組；之後任何一項變了（含主 session 修稿、分支多了 commit），舊同意作廢，只就變動部分補審再問
+  3. 問使用者時依序貼：公開風險與未查項、目標 repo 與基準分支、待送 commit SHA、標題與內文全文。使用者同意的是這一組；之後任何一項變了（含主 session 修稿、分支多了 commit），舊同意作廢，只就變動部分補審再問（打包時加 `--since <上次審過的打包檔>`，只輸出差異；歷史被改寫時腳本自動退回整包）
   - 這是降低疏漏的流程、不是防外洩保證：靠 agent 遵守，沒有 hook 攔截；審查員判斷是機率性的，讀得到記憶也可能漏
 - **仍要 confirm（所有 repo 一律）**：`push --force` / `--force-with-lease`、`reset --hard`、`checkout .` / `restore .`、`branch -D`、`rebase`、`commit --amend` 已 push 過的 commit、`gh repo delete`、使用者已明確選擇 PR 路徑後的 `gh pr merge`、多人協作 repo 直推 `main` / `master`

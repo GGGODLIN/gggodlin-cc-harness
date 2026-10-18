@@ -2,7 +2,7 @@
 set -euo pipefail
 
 PROJECTS_DIR="${RBA_PROJECTS_DIR:-$HOME/.claude/projects}"
-LEDGER="${RBA_LEDGER:-/Users/you/code/social-info/reports/local-analysis/rba-verify-ledger.jsonl}"
+LEDGER="${RBA_LEDGER:-$HOME/code/social-info/reports/local-analysis/rba-verify-ledger.jsonl}"
 DAYS="${RBA_DAYS:-7}"
 DATE="${RBA_DATE:-}"
 [[ "$DAYS" =~ ^[0-9]+$ ]] && [ "$DAYS" -ge 1 ] || exit 1

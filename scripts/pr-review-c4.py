@@ -528,6 +528,13 @@ EMIT_CLI_SCHEMA = strict_object(
   },
   ["packet"],
 )
+SOURCE_PREFLIGHT_CLI_SCHEMA = strict_object(
+  {
+    "packet": {"type": "object"},
+    "binding_context": {"type": "object"},
+  },
+  ["packet", "binding_context"],
+)
 AUTHORITY_CANDIDATE_VALIDATOR = Draft202012Validator(AUTHORITY_CANDIDATE_SCHEMA)
 PACKET_VALIDATOR = Draft202012Validator(PACKET_SCHEMA)
 REVIEWER_OUTPUT_VALIDATOR = Draft202012Validator(REVIEWER_OUTPUT_SCHEMA)
@@ -537,6 +544,7 @@ BINDING_CONTEXT_VALIDATOR = Draft202012Validator(BINDING_CONTEXT_SCHEMA)
 RESOLVE_CLI_VALIDATOR = Draft202012Validator(RESOLVE_CLI_SCHEMA)
 VALIDATE_CLI_VALIDATOR = Draft202012Validator(VALIDATE_CLI_SCHEMA)
 EMIT_CLI_VALIDATOR = Draft202012Validator(EMIT_CLI_SCHEMA)
+SOURCE_PREFLIGHT_CLI_VALIDATOR = Draft202012Validator(SOURCE_PREFLIGHT_CLI_SCHEMA)
 
 
 def canonical_json(value):
@@ -1993,6 +2001,19 @@ def render_dispatch_prompt(packet_value):
   ))
 
 
+def preflight_sources(packet, binding_context):
+  if not packet_valid(packet):
+    return {"status": "FAILED", "reason_code": "C4_CLI_INPUT_INVALID"}
+  if not schema_valid(BINDING_CONTEXT_VALIDATOR, binding_context):
+    return {"status": "FAILED", "reason_code": "C4_BINDING_CONTEXT_INVALID"}
+  resolved_context = target_context(binding_context, packet)
+  if resolved_context is None:
+    return {"status": "FAILED", "reason_code": "C4_BINDING_TARGET_INVALID"}
+  if not packet_authority_valid(resolved_context, packet):
+    return {"status": "SKIPPED", "reason_code": "C4_AUTHORITY_BINDING_INVALID"}
+  return {"status": "COMPLETE", "reason_code": "C4_SOURCE_PREFLIGHT_OK"}
+
+
 def dispatch_envelope(packet_value):
   if not packet_valid(packet_value):
     return {"status": "FAILED", "reason_code": "C4_CLI_INPUT_INVALID"}
@@ -2028,6 +2049,7 @@ def main(argv=None):
       "resolve-authority",
       "emit-prompt",
       "dispatch-envelope",
+      "preflight-sources",
       "validate",
       "runtime-receipt",
     ),
@@ -2057,6 +2079,11 @@ def main(argv=None):
     else:
       sys.stdout.write(f"C4_PACKET_JSON={canonical_json(data['packet'])}\n")
       return 0
+  elif args.mode == "preflight-sources":
+    if not schema_valid(SOURCE_PREFLIGHT_CLI_VALIDATOR, data):
+      result = {"status": "FAILED", "reason_code": "C4_CLI_INPUT_INVALID"}
+    else:
+      result = preflight_sources(data["packet"], data["binding_context"])
   elif args.mode == "dispatch-envelope":
     if not schema_valid(EMIT_CLI_VALIDATOR, data):
       result = {"status": "FAILED", "reason_code": "C4_CLI_INPUT_INVALID"}

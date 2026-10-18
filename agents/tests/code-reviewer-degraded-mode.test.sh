@@ -1,7 +1,10 @@
 #!/bin/bash
 set -u
 
-AGENT="$HOME/.claude/agents/code-reviewer.md"
+# 檢查項搬到審查標準正本後，斷言改到正本找；根目錄可用 REVIEW_STANDARDS_ROOT 指定（測 worktree 或隔離副本）
+ROOT="${REVIEW_STANDARDS_ROOT:-$HOME/.claude}"
+AGENT="$ROOT/review-standards/code-review-quality.md"
+DEFINITION="$ROOT/agents/code-reviewer.md"
 PASS=0
 FAIL=0
 
@@ -23,7 +26,8 @@ check_contains 'degraded state is observable' 'degradation must be visible'
 check_contains 'explicit threshold that escalates or aborts' 'degradation has a bound'
 check_contains 'Do not require every layer to log' 'rule avoids duplicate logging'
 
-if grep -Fq 'Every failure path must log' "$AGENT"; then
+# 正本不存在時不能因為「找不到字」而過
+if [ ! -f "$AGENT" ] || grep -Fq 'Every failure path must log' "$AGENT" "$DEFINITION"; then
   printf 'FAIL: mandatory logging was not copied\n'
   FAIL=$((FAIL + 1))
 else

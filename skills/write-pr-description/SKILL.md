@@ -45,7 +45,9 @@ Keep evidence-based prose separate from provider mutation so every adapter can r
    - Preserve validation commands and observed outcomes exactly enough to audit. Pair available before/after receipts using the validation rules in drafting-rules.md. Name important checks that were explicitly not run; do not convert unit, build, or typecheck receipts into UI, integration, rollout, or performance evidence.
    - Keep a small PR to a few useful bullets. For a large foundational PR, summarize boundaries rather than listing every file.
 
-   Done when a reviewer can tell what changed, why, what was actually checked, and what remains unverified without reading intent as proof.
+   For a body with a change outline, assign each fact to one place before writing: field/type inventories and call order belong to the views; intent, effects, conditions, and limitations belong to Summary. When revising, use the old body as a fact source rather than copying its bullet structure. Check every Summary bullet against the views: a sentence that only says a field was added, exists, or is exposed belongs only in the view. A field name may still appear in a condition or effect; “Adds a `breed` field” duplicates a view, while “Cycles without a breed cannot contribute to the comparison” adds behavior the view does not show. Split mixed sentences and retain the behavior. Keep the reviewer guide, rollout, recovery boundary, and validation receipts in their own sections.
+
+   Done when a reviewer can tell what changed, why, what was actually checked, and what remains unverified without reading intent as proof, and Summary contains no field/type inventory or call-order narration already owned by a view. Continue to Step 5.
 
 5. **Return the candidate.** Emit Markdown in this shape:
 

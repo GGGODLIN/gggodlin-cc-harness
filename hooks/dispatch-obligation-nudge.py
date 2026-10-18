@@ -10,7 +10,7 @@
 # 兩條路：
 #   prompt（UserPromptSubmit）：把前三則使用者訊息、main 上一則回覆、這句 prompt 與規則派工段送
 #     relay 上的 groq-qwen-3.8-27b，問「可預見命中哪條門檻、例外是否成立」。P(must)＝P(trigger)×(1−P(exception))≥DON_P_MUST（預設 0.5，
-#     依 U 臂 1b 174 筆：裁判判必須派者 P(must) 集中 ≥0.81、兩種都允許 p90 0.09）才提示。逾時 DON_TIMEOUT_S（預設 1.5）放行。
+#     依 U 臂 1b 174 筆：裁判判必須派者 P(must) 集中 ≥0.81、兩種都允許 p90 0.09）才提示。逾時 DON_TIMEOUT_S（預設 3）放行。
 #   tool（PostToolUse WebSearch|WebFetch|navigate）：本回合搜尋類呼叫 ≥3 且尚無 Agent 派工 → 提示一次。
 # 不承諾：LLM 判斷是一顆 27B 模型對規則的讀法，不是規則本身；計數器只在第三次搜尋後才響，
 # 前兩次已經做掉的工作救不回來；bidi／控制字元不進輸出（輸出只含固定文字與 trigger 名）。
@@ -24,11 +24,19 @@
 #   同一 session 兩條路同組，避免一回合內一邊提醒一邊不提醒污染比較。過期自動回到全部提醒，不需要人記得拆。
 #   不承諾：分組以 session 為單位，一個 session 內多回合不獨立；證得出的只有「提醒是否改變派工」，不是品質改善。
 #   recovery：DON_CONTROL=0 提早結束對照（仍保留 DON_DISABLE=1 全停）。
+# selfBulk 觀察（2026-10-13 使用者拍板 a，觀察 7 天）：另一道獨立請求問「main 上一輪回覆是否要它自己逐一讀並
+#   判斷約百份以上材料」，只寫 event=selfbulk 的 log 列、永不注入。起因是 1777beba 讓 main 親評約 400 份產物、
+#   壓縮 29 次，而原題在關鍵輪次 P(trigger) 只有 0.01–0.05。題目、上下文形狀（上一輪全部文字取尾 6000 字）
+#   與雙語同請求照 ~/Desktop/projects/routing-replay/self-review 離線測過的原樣搬：併進原題同一請求實測
+#   真實正例 3/4 掉到 1/4，所以必須分開問；由脫離的子程序送出，hook 不等它（實測單次可達 1.8 秒）。
+#   不承諾：子程序寫 log 晚於 hook 結束，與同回合 prompt 列的先後不固定；回覆沒寫出數量時三顆模型都判不出來；這只是觀察，
+#   不證明提醒會改變派工。429 只設 selfbulk 自己的冷卻，不讓觀察題拖停原題。recovery：DON_SELFBULK_DISABLE=1。
 import hashlib
 import json
 import os
 import re
 import sys
+import subprocess
 import time
 import urllib.error
 import urllib.request
@@ -44,6 +52,14 @@ TRIGGER_LABEL = {"big": "預估工作量 > 30K tokens（多檔閱讀＋跨主題
 TRIGGER_ROUTE = {"big": "deep-explore 或 routed-judge", "edit>5": "routed-impl + plan", "search>2": "parallel-search 或 routed-judge"}
 # 10/03 review 當天仍收樣本，所以界線放在隔天
 CONTROL_UNTIL = "2026-10-04"
+SELF_BULK_Q = {
+  "q_zh": "在這段對話裡，助理最後一則回覆描述的接下來做法，是否由助理自己在這個對話中逐一閱讀並判斷大量材料（約一百份以上的文件、樣本或案例）？",
+  "q_en": "Does the assistant's latest reply commit the assistant itself to personally reading and judging a large number of items (roughly 100 or more documents, samples, or cases) one by one inside this conversation?",
+}
+SELF_BULK_SYSTEM = ("You are an evaluation model. Read the state and answer two yes/no questions independently. "
+                    "For each, give the probability (0 to 1) that the answer is yes.\n"
+                    "q_zh: " + SELF_BULK_Q["q_zh"] + "\nq_en: " + SELF_BULK_Q["q_en"] + "\n"
+                    'Return only JSON: {"q_zh": p, "q_en": p}')
 
 
 def env(name, default):
@@ -173,23 +189,83 @@ def relay_key():
   return ""
 
 
-def cooldown_path():
-  return state_dir() / "relay-cooldown"
+def cooldown_path(name="relay-cooldown"):
+  return state_dir() / name
 
 
-def in_cooldown():
+def in_cooldown(name="relay-cooldown"):
   try:
-    return time.time() - cooldown_path().stat().st_mtime < 1800
+    return time.time() - cooldown_path(name).stat().st_mtime < 1800
   except Exception:
     return False
 
 
-def set_cooldown():
+def set_cooldown(name="relay-cooldown"):
   try:
     state_dir().mkdir(parents=True, exist_ok=True)
-    cooldown_path().touch()
+    cooldown_path(name).touch()
   except Exception:
     pass
+
+
+def self_bulk_state(entries, prompt):
+  # 離線測試的封包形狀：上一則人類訊息＋其後 main 的全部文字（最後幾段，取尾 6000 字）＋這句 prompt。
+  # 原題只取最後一段 2500 字；數量常寫在較早那段，沿用原題的截法會讓測過的命中率搬不過來。
+  last_human = max((i for i, e in enumerate(entries) if is_human(e)), default=-1)
+  prev_user = text_of(entries[last_human]["message"].get("content")) if last_human >= 0 else ""
+  texts = [text_of(e.get("message", {}).get("content")).strip() for e in entries[last_human + 1:] if e.get("type") == "assistant"]
+  texts = [t for t in texts if t]
+  if not texts:
+    return ""
+  reply = "\n\n".join(texts[-3:])[-6000:]
+  return "[使用者前一則訊息]\n" + prev_user[:1500] + "\n\n[助理最後一則回覆]\n" + reply + "\n\n[使用者剛送出的訊息]\n" + prompt[:1500]
+
+
+def ask_self_bulk(state_text):
+  fake = env("DON_FAKE_SELFBULK", "") if test_mode() else ""
+  if fake:
+    return json.loads(fake), 0, ""
+  key = relay_key()
+  if not key:
+    return None, 0, "no-key"
+  if in_cooldown() or in_cooldown("selfbulk-cooldown"):
+    return None, 0, "cooldown"
+  body = json.dumps({
+    "model": env("DON_MODEL", "groq-qwen-3.8-27b"),
+    "temperature": 0,
+    "response_format": {"type": "json_object"},
+    "max_tokens": 64,
+    "messages": [{"role": "system", "content": SELF_BULK_SYSTEM}, {"role": "user", "content": "State:\n" + state_text}],
+  }).encode("utf-8")
+  url = env("DON_RELAY_URL", "http://127.0.0.1:8317/v1/chat/completions")
+  request = urllib.request.Request(url, data=body, headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"})
+  started = time.time()
+  try:
+    with urllib.request.urlopen(request, timeout=float(env("DON_SELFBULK_TIMEOUT_S", "8.0"))) as response:
+      data = json.loads(response.read().decode("utf-8"))
+  except urllib.error.HTTPError as error:
+    if error.code == 429 and "Request too large" not in (error.read().decode("utf-8", errors="ignore") if error.fp else ""):
+      set_cooldown("selfbulk-cooldown")
+    return None, int((time.time() - started) * 1000), "http-%d" % error.code
+  except Exception:
+    return None, int((time.time() - started) * 1000), "error"
+  try:
+    return json.loads(data["choices"][0]["message"]["content"]), int((time.time() - started) * 1000), ""
+  except Exception:
+    return None, int((time.time() - started) * 1000), "malformed"
+
+
+def self_bulk_row(state_text, session):
+  answer, ms, reason = ask_self_bulk(state_text)
+  row = {"ts": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "event": "selfbulk", "session": session, "ms": ms}
+  if answer is None:
+    return {**row, "result": "unavailable", "reason": reason}
+  try:
+    p_en = float(answer["q_en"])
+    p_zh = float(answer["q_zh"])
+  except Exception:
+    return {**row, "result": "malformed"}
+  return {**row, "result": "would-flag" if p_en >= float(env("DON_SELFBULK_P", "0.5")) else "quiet", "pEn": p_en, "pZh": p_zh}
 
 
 def ask_model(state, rules):
@@ -217,7 +293,8 @@ def ask_model(state, rules):
   request = urllib.request.Request(url, data=body, headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"})
   started = time.time()
   try:
-    with urllib.request.urlopen(request, timeout=float(env("DON_TIMEOUT_S", "1.5"))) as response:
+    # 共用 relay 的路由與換 key 可能超過 1.5 秒；仍留在外層 5 秒 hook 上限內。
+    with urllib.request.urlopen(request, timeout=float(env("DON_TIMEOUT_S", "3.0"))) as response:
       data = json.loads(response.read().decode("utf-8"))
   except urllib.error.HTTPError as error:
     if error.code == 429 and "Request too large" not in (error.read().decode("utf-8", errors="ignore") if error.fp else ""):
@@ -241,6 +318,39 @@ def run_prompt(payload):
     return
   transcript = payload.get("transcript_path") or ""
   entries = parse_entries(read_tail(transcript)) if transcript else []
+  start_self_bulk(entries, prompt, payload.get("session_id", ""))
+  judge_prompt(payload, prompt, entries)
+
+
+def start_self_bulk(entries, prompt, session):
+  if env("DON_SELFBULK_DISABLE", "") == "1":
+    return
+  state_text = self_bulk_state(entries, prompt)
+  if not state_text:
+    return
+  job = {"state": state_text, "session": session}
+  if test_mode() and env("DON_SELFBULK_SYNC", "") == "1":
+    run_self_bulk(job)
+    return
+  # 只寫 log 的觀察題不該讓使用者多等：交給脫離的子程序，hook 立刻結束。
+  # stdout／stderr 必須接 DEVNULL，否則 CC 會等子程序關掉繼承的輸出管線才算 hook 結束。
+  try:
+    child = subprocess.Popen([sys.executable, os.path.abspath(__file__), "selfbulk"], stdin=subprocess.PIPE,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True, start_new_session=True)
+    child.stdin.write(json.dumps(job).encode("utf-8"))
+    child.stdin.close()
+  except Exception:
+    return
+
+
+def run_self_bulk(job):
+  try:
+    safe_append(log_path(), self_bulk_row(job["state"], job.get("session", "")))
+  except Exception:
+    return
+
+
+def judge_prompt(payload, prompt, entries):
   earlier, previous_reply = context_before_prompt(entries)
   state = {"earlierUserMessages": earlier, "mainPreviousReply": previous_reply, "userRequest": blind(prompt)[:4000]}
   rules = rule_section()
@@ -333,6 +443,8 @@ def main():
     run_prompt(payload)
   elif mode == "tool":
     run_tool(payload)
+  elif mode == "selfbulk":
+    run_self_bulk(payload)
 
 
 if __name__ == "__main__":

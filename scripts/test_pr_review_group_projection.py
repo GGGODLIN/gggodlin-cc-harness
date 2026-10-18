@@ -406,6 +406,14 @@ class GroupProjectionTest(unittest.TestCase):
       self.module.canonical_report_identity(main),
     )
 
+  def test_group_main_report_keeps_review_scope_section(self):
+    rendered = run_group("render", group_payload())
+    scope = "\n## 這次審查範圍\n\n- 底線未完成：typescript-reviewer 停審（CI 紅燈）\n"
+    _, main = self.published_pair(rendered.rstrip("\n") + "\n" + scope)
+    main_text = main.read_text()
+    self.assertIn("## 這次審查範圍", main_text)
+    self.assertIn("底線未完成：typescript-reviewer 停審（CI 紅燈）", main_text)
+
   def test_group_report_reads_markdown_and_rejects_json_blobs(self):
     prior = {
       "set_identity": SET_IDENTITY,

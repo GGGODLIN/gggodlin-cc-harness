@@ -16,7 +16,8 @@ new_fixture() {
 
 run_audit() {
   local root="$1"
-  WIRED_ROOT="$root" WIRED_BIN_DIR="$root/bin" bash "$SCRIPT" > "$root/out" 2> "$root/err"
+  # launchd 與 zshrc 來源預設讀真實家目錄，fixture 要指到不存在的路徑才不會把本機接線漏進測試（2026-10-16 dcg 案例因 ~/.zshrc 提到 dcg 而翻 OK）
+  WIRED_ROOT="$root" WIRED_BIN_DIR="$root/bin" WIRED_LAUNCHD_DIR="$root/launchd" WIRED_ZSHRC="$root/zshrc" bash "$SCRIPT" > "$root/out" 2> "$root/err"
   printf '%s\n' "$?" > "$root/rc"
 }
 
@@ -166,6 +167,28 @@ else
   echo "FAIL missing memory dir: rc=$(<"$r/rc") out=[$(<"$r/out")]"
   ((fail++))
 fi
+
+# 新來源：rules/ 的 md 與 ~/.zshrc alias 引用 scripts/ 內的腳本時算接線（2026-10-16 加掃 rules／references／agents／workflows／zshrc）
+r=$(new_fixture rules-and-zshrc-sources)
+mkdir -p "$r/rules/common"
+printf '#!/bin/bash\necho bundle\n' > "$r/scripts/bundle.sh"
+printf '#!/bin/bash\necho radar\n' > "$r/scripts/radar.sh"
+printf '#!/bin/bash\necho orphan\n' > "$r/scripts/orphan.sh"
+printf '先跑 `~/.claude/scripts/bundle.sh` 打包\n' > "$r/rules/common/flow.md"
+printf 'alias radar="bash ~/.claude/scripts/radar.sh"\n' > "$r/zshrc"
+printf '打包用 `~/.claude/scripts/bundle.sh`；雷達用 `~/.claude/scripts/radar.sh`；另有 `~/.claude/scripts/orphan.sh`\n' > "$r/memory/wired.md"
+run_audit "$r"
+check "rules md and zshrc alias count as wiring sources" "$r" "$(printf 'OK scripts/bundle.sh ← wired.md:1\nOK scripts/radar.sh ← wired.md:1\nUNWIRED scripts/orphan.sh ← wired.md:1')" 0
+
+# workflows/ 的 .sh 呼叫 scripts/ 腳本算接線（2026-10-17：failure-mode-daily.py 只被 workflow wrapper 呼叫，曾被判 UNWIRED）
+r=$(new_fixture workflow-sources)
+mkdir -p "$r/workflows"
+printf '#!/usr/bin/env python3\n' > "$r/scripts/wf-only.py"
+printf '#!/usr/bin/env python3\n' > "$r/scripts/nobody.py"
+printf '#!/bin/bash\npython3 ~/.claude/scripts/wf-only.py --date today\n' > "$r/workflows/wf-only-daily.sh"
+printf '每日由 `~/.claude/scripts/wf-only.py` 算筆數；`~/.claude/scripts/nobody.py` 沒人叫\n' > "$r/memory/wf.md"
+run_audit "$r"
+check "workflow wrapper counts as wiring source" "$r" "$(printf 'OK scripts/wf-only.py ← wf.md:1\nUNWIRED scripts/nobody.py ← wf.md:1')" 0
 
 echo "== $pass pass / $fail fail =="
 [ "$fail" -eq 0 ]

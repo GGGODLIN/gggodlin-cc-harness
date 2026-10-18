@@ -12,7 +12,7 @@ export PATH
 
 PARENT_CC_VENDOR="${CC_VENDOR-}"
 PARENT_ANTHROPIC_BASE_URL="${ANTHROPIC_BASE_URL-}"
-CLAUDE="${RECAP_CLAUDE_BIN:-/Users/you/.local/bin/claude}"
+CLAUDE="${RECAP_CLAUDE_BIN:-$HOME/.local/bin/claude}"
 KEYS_FILE="${RECAP_KEYS_FILE:-$HOME/.cli-proxy-api/keys.env}"
 GPT_MODELS_FILE="${RECAP_GPT_MODELS_FILE:-$HOME/.claude/config/gpt-models.env}"
 REPO_DIR="$HOME/code/social-info"
@@ -129,6 +129,77 @@ stdout 只輸出 markdown 報告本身，不要 preamble（「整理完...」「
 EOF
 )
 
+# result.result 是最後一則文字，結語也算成功；報告在它前面的 assistant 訊息裡。
+# 只驗證 result 沒有失敗，再從 assistant 取最後一份合規正文。最後一份是 summary、
+# 或 result 自己是錯誤，都不出版。這不驗證數字、ledger 或正文語意。
+extract_recap_text() {
+  python3 -I -c '
+import json, re, sys
+
+def fail(reason):
+    print("recap rejected: " + reason, file=sys.stderr)
+    raise SystemExit(1)
+
+def text_of(event):
+    parts = []
+    for block in (event.get("message") or {}).get("content") or []:
+        if block.get("type") == "text" and block.get("text"):
+            parts.append(block["text"])
+    return "\n\n".join(parts)
+
+def acceptable(text):
+    # summary 是 compaction 的容器，不是報告；標題前有文字代表這則不是正文。
+    if "<summary>" in text or "</summary>" in text:
+        return False
+    match = re.search(r"(?m)^# ", text)
+    if match and text[:match.start()].strip():
+        return False
+    body = text.strip()
+    if not re.search(r"(?m)^## \d{4}-\d{2}-\d{2}\b", body):
+        return False
+    first = body.splitlines()[0]
+    return first.startswith("# Daily Recap") or bool(re.match(
+        r"^\d+ (?:個 )?(?:CC )?session / .+commit / .+/ 跨 ", first))
+
+blocks = []
+result = None
+for raw in sys.stdin:
+    raw = raw.strip()
+    if not raw:
+        continue
+    try:
+        event = json.loads(raw)
+    except ValueError:
+        continue
+    kind = event.get("type")
+    if kind == "assistant":
+        text = text_of(event)
+        if text:
+            blocks.append(text)
+    elif kind == "result":
+        result = event
+
+if result is None:
+    fail("no result event")
+if result.get("subtype") != "success" or result.get("is_error") is not False:
+    fail("result " + str(result.get("subtype")) + " is_error=" + str(result.get("is_error")))
+# 普通結語可以略過；中斷摘要必須先拒收，不能再回頭拿較早正文出版。
+chosen = None
+for block in reversed(blocks):
+    if "<summary>" in block or "</summary>" in block:
+        print(block, file=sys.stderr)
+        fail("interrupted recap")
+    if acceptable(block):
+        chosen = block
+        break
+if chosen is None:
+    # 拒收時 log 只看得到這支函式的 stderr，原文留在這裡，不另開檔。
+    print("\n\n".join(blocks), file=sys.stderr)
+    fail("no recap body")
+sys.stdout.write(chosen if chosen.endswith("\n") else chosen + "\n")
+'
+}
+
 run_recap() {
   local luna_model=''
   if [[ -z "$PARENT_CC_VENDOR" && -z "$PARENT_ANTHROPIC_BASE_URL" ]]; then
@@ -137,7 +208,12 @@ run_recap() {
       unset ANTHROPIC_DEFAULT_SONNET_MODEL ANTHROPIC_DEFAULT_HAIKU_MODEL
       unset CLAUDE_CODE_SUBAGENT_MODEL ANTHROPIC_AUTH_TOKEN
       export CC_VENDOR=headless-channel
-      command "$CLAUDE" --model opus -p "$PROMPT"
+      command "$CLAUDE" --model opus --output-format stream-json --verbose -p "$PROMPT" | extract_recap_text
+      # local 會重設 PIPESTATUS，所以先抄出來。抽出器的拒絕留在自己那段；
+      # claude 自己非零則保留原碼，不讓後段的非零把它蓋掉。
+      local pipe_rc=("${PIPESTATUS[@]}")
+      [[ "${pipe_rc[0]}" -eq 0 ]] || exit "${pipe_rc[0]}"
+      exit "${pipe_rc[1]}"
     )
     return $?
   fi
@@ -193,7 +269,10 @@ run_recap() {
     export API_TIMEOUT_MS="${API_TIMEOUT_MS:-3000000}"
     export CLAUDE_STREAM_IDLE_TIMEOUT_MS="${CLAUDE_STREAM_IDLE_TIMEOUT_MS:-600000}"
     export CLAUDE_BYTE_STREAM_IDLE_TIMEOUT_MS="${CLAUDE_BYTE_STREAM_IDLE_TIMEOUT_MS:-600000}"
-    command "$CLAUDE" --model "$luna_model" -p "$PROMPT"
+    command "$CLAUDE" --model "$luna_model" --output-format stream-json --verbose -p "$PROMPT" | extract_recap_text
+    local pipe_rc=("${PIPESTATUS[@]}")
+    [[ "${pipe_rc[0]}" -eq 0 ]] || exit "${pipe_rc[0]}"
+    exit "${pipe_rc[1]}"
   )
 }
 
@@ -201,10 +280,26 @@ run_recap() {
   echo "=== recap started: $(date) ==="
 } >> "$LOG"
 
+# 先收到暫存檔：不合規或中途失敗時 $OUT 還是昨天的有效報告，不會先被截成空檔。
+STAGED="$(mktemp "${TMPDIR:-/tmp}/recap-staged.XXXXXX")"
+cleanup_staged() {
+  rm -f "$STAGED"
+}
+trap cleanup_staged EXIT
+
 set +e
-run_recap > "$OUT" 2>> "$LOG"
+run_recap > "$STAGED" 2>> "$LOG"
 RC=$?
 set -e
+
+if [[ "$RC" -ne 0 ]]; then
+  printf 'recap rejected: upstream exit %s, existing report left untouched\n' "$RC" >> "$LOG"
+  printf 'recap rejected: upstream exit %s\n' "$RC" >&2
+  exit "$RC"
+fi
+
+mv "$STAGED" "$OUT"
+trap - EXIT
 
 {
   echo "=== recap claude exit: $RC ==="
@@ -212,4 +307,4 @@ set -e
   echo "Output: $OUT ($(wc -c < "$OUT") bytes)"
 } >> "$LOG"
 
-exit "$RC"
+exit 0

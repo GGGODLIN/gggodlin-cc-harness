@@ -37,15 +37,15 @@ set +e
 
 INPUT=$(cat)
 TS=$(date -Iseconds)
-LOG=${T2_TRACE_LOG:-/Users/you/.claude/hooks/T2-routing-gate.trace.log}
-AUDIT=${T2_AUDIT_LOG:-/Users/you/.claude/logs/T2-routing-gate-audit.jsonl}
+LOG=${T2_TRACE_LOG:-$HOME/.claude/hooks/T2-routing-gate.trace.log}
+AUDIT=${T2_AUDIT_LOG:-$HOME/.claude/logs/T2-routing-gate-audit.jsonl}
 
 # routed-agent-enforce trial：sentinel 檔存在才啟用白名單強制
 # sentinel 關閉會停用白名單強制，但 routed-mech 的 <mech-ok> 檢查仍保留
-SENTINEL=${T2_ROUTED_SENTINEL:-/Users/you/.claude/hooks/routed-enforce.on}
-AGENT_DIR=${T2_AGENT_DIR:-/Users/you/.claude/agents}
-DUAL_PERMIT_HELPER=${REVIEW_SPEC_DUAL_PERMIT_HELPER:-/Users/you/.claude/hooks/review-spec-dual-permit.py}
-YAGNI_PERMIT_HELPER=${REVIEW_SPEC_YAGNI_PERMIT_HELPER:-/Users/you/.claude/hooks/review-spec-yagni-permit.py}
+SENTINEL=${T2_ROUTED_SENTINEL:-$HOME/.claude/hooks/routed-enforce.on}
+AGENT_DIR=${T2_AGENT_DIR:-$HOME/.claude/agents}
+DUAL_PERMIT_HELPER=${REVIEW_SPEC_DUAL_PERMIT_HELPER:-$HOME/.claude/hooks/review-spec-dual-permit.py}
+YAGNI_PERMIT_HELPER=${REVIEW_SPEC_YAGNI_PERMIT_HELPER:-$HOME/.claude/hooks/review-spec-yagni-permit.py}
 EXTRA_ALLOW="claude-code-guide statusline-setup"
 ENFORCE=0
 [ -f "$SENTINEL" ] && ENFORCE=1
@@ -751,7 +751,7 @@ fi
 #
 # Recovery：fork 分支在 ENFORCE 兩態共用位置，`routed-enforce.on` 改名救不了它。
 # 誤攔時 `touch ~/.claude/hooks/fork-gate.off` 單獨停用本分支，放行仍寫 audit。
-FORK_GATE_OFF=${T2_FORK_GATE_OFF:-/Users/you/.claude/hooks/fork-gate.off}
+FORK_GATE_OFF=${T2_FORK_GATE_OFF:-$HOME/.claude/hooks/fork-gate.off}
 FORK_REASON_MIN_BYTES=12
 if [ "$SUBAGENT_TYPE" = "fork" ]; then
   if [ -f "$FORK_GATE_OFF" ]; then

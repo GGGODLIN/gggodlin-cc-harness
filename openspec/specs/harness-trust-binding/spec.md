@@ -1,7 +1,7 @@
 # harness-trust-binding Specification
 
 ## Purpose
-TBD - created by archiving change hash-free-harness. Update Purpose after archive.
+規定自家 harness 機制（permit、receipt、manifest、workflow envelope）一律以身分欄位或儲存原文綁定，不算、不存、不比對內容雜湊（digest / checksum / sha256），並列出唯一允許的識別鍵與外部契約例外。
 
 ## Requirements
 
@@ -62,7 +62,7 @@ Hashes used purely as data keys (dedup item id and title key, session-audit fing
 
 ### Requirement: External-contract exceptions are the only verification hashes left
 
-After cleanup, the only verification-use hashes in harness code SHALL be the keychain service name derived from config_dir in cc-quota-fetcher-host, the source and archive checks in build-cc-sticky-fix, and three external formats the harness only reproduces: the Chrome Safe Storage key derivation (PBKDF2-SHA1) in scripts/cookie-extract.py, the Electron safeStorage key derivation (PBKDF2-SHA1) in scripts/cc-statusline/grok-bot-usage.mjs, and the git tree sha1 recomputed by social-info scripts/local-analysis/skill-lock-drift.py to compare against the external skills installer's skillFolderHash. A SHA-256 comparison inside a private release skill (not part of this public copy) is also permitted solely to verify a downloaded app archive against the publisher's checksum from the same release; this exception does not cover other files, receipts, manifests, or permit binding. Adding any other exception MUST require the user's explicit decision. If implementation finds the keychain naming does not match Claude Code's own convention, the ledger note records it and the disposition stays unchanged.
+After cleanup, the only verification-use hashes in harness code SHALL be the keychain service name derived from config_dir in a private quota helper (not part of this public copy), the source and archive checks in a private build helper (not part of this public copy), and three external formats the harness only reproduces: two desktop credential-store key derivations (PBKDF2-SHA1) in private helper scripts (not part of this public copy) and the git tree sha1 recomputed by social-info scripts/local-analysis/skill-lock-drift.py to compare against the external skills installer's skillFolderHash. A SHA-256 comparison inside a private release skill (not part of this public copy) is also permitted solely to verify a downloaded app archive against the publisher's checksum from the same release; this exception does not cover other files, receipts, manifests, or permit binding. Adding any other exception MUST require the user's explicit decision. If implementation finds the keychain naming does not match Claude Code's own convention, the ledger note records it and the disposition stays unchanged.
 
 #### Scenario: One-time closing enumeration
 - **WHEN** the cleanup closes and `command grep` enumerates hash identifiers over own code in each of the three repos

@@ -10,6 +10,8 @@ from pathlib import Path
 TRIGGER_PATTERN = r"我記得|之前有|上次|翻一下|查一下|重撈|好像有|應該有|處理過|做過|眼熟|研究紀錄|自創|先確認|看一下|不是有|之前(的|那個)"
 TRIGGER_RE = re.compile(TRIGGER_PATTERN)
 DEFAULT_LEDGER = Path(os.path.expanduser("~/code/social-info/reports/local-analysis/rule-adherence-ledger.jsonl"))
+# ~/.claude/rule-review/ledger-mapping.json 為原作者 2026-08-25 歷史盤點產生的舊規則文字對照表（公開版不匯出）；
+# 檔案不存在時 load_mapping() 會自動退回空對照表，直接由帳本列的 rule_id 欄位或 rule 字串內的 C077 標記判讀。
 DEFAULT_MAPPING = Path(os.path.expanduser("~/.claude/rule-review/ledger-mapping.json"))
 DIRECT_ID_KEYS = ("rule_id", "rule_ids", "matched_rule_id", "matched_rule_ids", "ruleId", "ruleIds")
 QUOTE_KEYS = ("quote", "original_quote", "original_sentence", "sentence", "text")

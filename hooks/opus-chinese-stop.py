@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 # 提示型 Stop hook：只認常見的整段英文結案，不承諾完整語意；判不出來就放行。
 # 不能阻止第一份英文顯示，也不能保證 Opus 接受提醒；不處理中途進度或刻意繞過。
+# 背景任務進行中也提醒（2026-10-13 起）：舊版跳過這類回合，fa52de65 兩天 5 次英文結案 0 次提醒，
+# 通知喚醒回合的 nudge 注入了 Opus 也沒照做；每則人類訊息仍只提醒一次。
+# decisions.jsonl 是純診斷 log、無消費端：英文結案才記一筆（提醒或放行原因＋背景任務種類／狀態），超過 512KB 停寫。
 # 本檔在契約測試底下：python3 ~/.claude/hooks/opus-chinese-stop.test.py
 import fcntl
 import hashlib
@@ -29,8 +32,10 @@ NEGATIVE_ENGLISH = re.compile(
 )
 REMINDER = (
   "[opus-chinese-stop] 使用者的預設回覆語言是繁體中文；剛才的結案說明主要是英文。"
-  "請以繁體中文重述相同的結論與必要資訊，不增減內容，也不要重跑已完成的工具工作。"
+  "請以繁體中文重述相同的結論與必要資訊，不增減內容，也不要重跑已完成的工具工作；"
+  "背景任務還在跑就照原計畫等它的通知，不要另開新動作。"
 )
+LOG_LIMIT = 512 * 1024
 
 
 def natural_text(text):
@@ -63,6 +68,7 @@ def transcript_turn(path, prompt_id):
   anchor_id = None
   user_time = None
   model = None
+  latest = None
   with open(path, encoding="utf-8") as source:
     for raw in source:
       try:
@@ -86,11 +92,15 @@ def transcript_turn(path, prompt_id):
         anchor_id = human_id if current_turn else None
         user_time = entry.get("timestamp") if current_turn else None
         model = None
-      elif user_text is not None and entry.get("type") == "assistant":
+      elif entry.get("type") == "assistant":
         current = message.get("model")
         if isinstance(current, str) and current:
-          model = current
-  return user_text, anchor_id, user_time, model
+          latest = current
+          if user_text is not None:
+            model = current
+  # 只有文字、沒呼叫工具的回合，Stop 時這輪回覆常還沒寫進 transcript（2026-10-13 decisions.jsonl 2/2 的
+  # model:unknown 都是這種回合），所以退回上一輪的模型；代價是 /model 切換後第一個純文字回合按舊模型判。
+  return user_text, anchor_id, user_time, model or latest
 
 
 def normalized_model(value):
@@ -121,11 +131,45 @@ def active_model(payload, transcript_model, user_time):
   return cached if cached_time >= submitted else ""
 
 
+def safe_root(root):
+  root.mkdir(mode=0o700, exist_ok=True)
+  info = root.lstat()
+  return stat.S_ISDIR(info.st_mode) and info.st_uid == os.getuid() and not info.st_mode & 0o077
+
+
+def task_summary(tasks):
+  if not isinstance(tasks, list):
+    return repr(type(tasks).__name__)
+  return [{"type": t.get("type"), "status": t.get("status")} if isinstance(t, dict) else repr(type(t).__name__) for t in tasks]
+
+
+# 寫不進去就算了：診斷 log 不能讓提醒失效，也不能卡住 Stop（FIFO／symlink／hard link 一律拒寫）。
+def log_decision(root, payload, outcome):
+  try:
+    if not safe_root(root):
+      return
+    crons = payload.get("session_crons")
+    record = {
+      "ts": datetime.now().astimezone().isoformat(timespec="seconds"),
+      "session_id": payload.get("session_id"),
+      "prompt_id": payload.get("prompt_id"),
+      "outcome": outcome,
+      "background_tasks": task_summary(payload.get("background_tasks")),
+      "session_crons": len(crons) if isinstance(crons, list) else repr(type(crons).__name__),
+    }
+    fd = os.open(root / "decisions.jsonl", os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600)
+    with os.fdopen(fd, "a", encoding="utf-8") as log:
+      info = os.fstat(log.fileno())
+      if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_nlink != 1 or info.st_size > LOG_LIMIT:
+        return
+      log.write(json.dumps(record, ensure_ascii=False) + "\n")
+  except (OSError, ValueError, TypeError, UnicodeError):
+    return
+
+
 def mark_once(root, session_id, prompt_id):
   try:
-    root.mkdir(mode=0o700, exist_ok=True)
-    info = root.lstat()
-    if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
+    if not safe_root(root):
       return False
     name = hashlib.sha256(session_id.encode()).hexdigest() + ".json"
     fd = os.open(root / name, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600)
@@ -153,26 +197,31 @@ def main():
     payload = json.load(sys.stdin)
     if not isinstance(payload, dict) or payload.get("hook_event_name") != "Stop" or payload.get("agent_id"):
       return
-    tasks = payload.get("background_tasks")
-    crons = payload.get("session_crons")
-    if not isinstance(tasks, list) or not isinstance(crons, list) or tasks or crons:
-      return
-    session_id = payload.get("session_id")
-    prompt_id = payload.get("prompt_id")
-    transcript = payload.get("transcript_path")
     text = payload.get("last_assistant_message")
-    if not all(isinstance(value, str) and value for value in (session_id, prompt_id, transcript, text)):
-      return
-    if not english_dominant(text):
-      return
-    user_text, anchor_id, user_time, transcript_model = transcript_turn(transcript, prompt_id)
-    if user_text is None or not isinstance(anchor_id, str) or not user_wants_chinese(user_text):
-      return
-    if active_model(payload, transcript_model, user_time) != OPUS:
+    if not isinstance(text, str) or not english_dominant(text):
       return
     root = Path(os.environ.get("OPUS_CHINESE_STOP_STATE_DIR", str(Path.home() / ".claude/hooks/state/opus-chinese-stop")))
-    if not mark_once(root, session_id, anchor_id):
+    fields = {name: payload.get(name) for name in ("session_id", "prompt_id", "transcript_path")}
+    missing = [name for name, value in fields.items() if not isinstance(value, str) or not value]
+    if missing:
+      log_decision(root, payload, "missing:" + ",".join(missing))
       return
+    session_id, prompt_id, transcript = fields.values()
+    user_text, anchor_id, user_time, transcript_model = transcript_turn(transcript, prompt_id)
+    if user_text is None or not isinstance(anchor_id, str):
+      log_decision(root, payload, "no_human_turn")
+      return
+    if not user_wants_chinese(user_text):
+      log_decision(root, payload, "english_requested")
+      return
+    model = active_model(payload, transcript_model, user_time)
+    if model != OPUS:
+      log_decision(root, payload, "model:" + (model or "unknown"))
+      return
+    if not mark_once(root, session_id, anchor_id):
+      log_decision(root, payload, "already_reminded")
+      return
+    log_decision(root, payload, "reminded")
     print(json.dumps({"hookSpecificOutput": {"hookEventName": "Stop", "additionalContext": REMINDER}}, ensure_ascii=False))
   except (OSError, ValueError, TypeError, AttributeError, UnicodeError):
     return

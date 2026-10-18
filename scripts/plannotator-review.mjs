@@ -2,10 +2,11 @@
 import { constants } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { chmod, lstat, mkdir, mkdtemp, open, readdir, realpath, writeFile } from 'node:fs/promises'
+import { homedir } from 'node:os'
 import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 
-const productionTrialRoot = '~/Desktop/projects/.claude/trials/plannotator-visual-gate'
-const productionArchifyTrialRoot = '~/Desktop/projects/.claude/trials/archify-visual-gate'
+const productionTrialRoot = join(homedir(), 'Desktop/projects/.claude/trials/plannotator-visual-gate')
+const productionArchifyTrialRoot = join(homedir(), 'Desktop/projects/.claude/trials/archify-visual-gate')
 const productionReviewTimeoutMs = 30 * 60 * 1000
 const productionIdentity = {
   schemaVersion: 1,
@@ -15,7 +16,7 @@ const productionIdentity = {
   versionOutput: 'plannotator 0.27.8',
 }
 const shaPattern = /^[a-f0-9]{40}$/
-const productionArchifyPinnedSha = 'e1ac748f19cf805e44bf74fb93c796662152e273'
+const productionArchifyPinnedSha = '1c2b42d660e4a7571813fb43839c79e3e9ca7720'
 const gitEnvironment = Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.startsWith('GIT_')))
 gitEnvironment.PATH = '/usr/bin:/bin'
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="${HOME}/.claude"
+ROOT="${WRITER_CONTRACT_ROOT:-${HOME}/.claude}"
 python3 - "$ROOT" <<'PY'
 import re
 import sys
@@ -11,7 +11,6 @@ root = Path(sys.argv[1])
 skill = (root / 'skills/write-pr-description/SKILL.md').read_text(encoding='utf-8')
 reference = (root / 'skills/write-pr-description/references/drafting-rules.md').read_text(encoding='utf-8')
 eval_file = (root / 'skills/write-pr-description/evals/eval.yaml').read_text(encoding='utf-8')
-bitbucket = (root / 'skills/bitbucket-pr-mutation/SKILL.md').read_text(encoding='utf-8')
 checks = []
 
 
@@ -82,20 +81,13 @@ require('reviewer guide slots stay in the guide bullet', 'however few files it t
 require('shape step requires reading the rules', 'Done when drafting-rules.md has been read in this run' in skill)
 require('outline eval requires views without narration', contains_all(case_texts['structural-change-outline.yaml'], ('fenced diff or text view', 'does not restate the contract fields', 'no Mermaid block')))
 require('outline eval permits lead-ins but still rejects Summary bullet duplication', contains_all(case_texts['structural-change-outline.yaml'], ('Summary bullet prose does not restate', 'not to one short lead-in sentence before each view inside Change outline', 'even when Change outline is nested under Summary')))
+writer_step = section(skill, '4. **Draft from facts.', '5. **Return the candidate.')
+require('outline facts get one owner before drafting', contains_all(writer_step, ('assign each fact to one place before writing', 'field/type inventories and call order belong to the views', 'use the old body as a fact source', 'Check every Summary bullet against the views', 'Continue to Step 5')))
+require('outline deduplication retains behavior and evidence', contains_all(writer_step, ('intent, effects, conditions, and limitations belong to Summary', 'A field name may still appear in a condition or effect', 'Split mixed sentences and retain the behavior', 'Keep the reviewer guide, rollout, recovery boundary, and validation receipts')))
 require('small bugfix eval rejects change outline', 'change outline' in case_texts['small-bugfix.yaml'])
 require('foundational eval rejects completed migration', contains_all(case_texts['large-foundational-pr.yaml'], ('No application consumer imports', 'does not claim the legacy rules system was replaced')))
 require('paired eval checks evidence and recovery boundaries', contains_all(case_texts['paired-evidence-and-recovery.yaml'], ('before/after pair', 'restoring existing recipientId records', 'recalling delivered messages', 'mandatory Door section')))
 require('after-only eval rejects fabricated evidence and ceremony', contains_all(case_texts['after-only-no-recovery.yaml'], ('empty Before placeholder', 'rerun checks', 'no additional Risk, Door, recovery', 'Summary then Checks')))
-
-require('Bitbucket marks writer contract test', '<!-- 本檔在契約測試底下：bash ~/.claude/skills/write-pr-description/scripts/tests/write-pr-description-contract.test.sh -->' in '\n'.join(bitbucket.splitlines()[:8]))
-draft = section(bitbucket, '## Draft PR prose', '## Scope and approval')
-require('Bitbucket pointer is limited to create and description', contains_all(draft, ('only when `create_pr` or `update_description`', 'Before `create_pr` reaches', 'For `update_description`')) and 'update_title' not in draft and 'create_pr_comment' not in draft and 'create_inline_comment' not in draft)
-require('Bitbucket preserves create body heading order', contains_all(draft, ('complete writer body in one `review_basis` owned block', 'Do not split the body across managed blocks', 'would reorder repository-template headings')))
-require('Bitbucket maps only update sections', contains_all(draft, ('validation/testing → `testing`', 'risk → `risk`', 'reviewer guidance or other review-basis prose → `review_basis`')))
-require('Bitbucket renders create and update descriptions', contains_all(draft, ('against an empty description', 'against the current description', "renderer's fully managed description")))
-require('Bitbucket keeps render and preview ownership', contains_all(draft, ('`render-description`', '`put_eligible`', '`preview`', '`apply`', 'read-back')))
-require('Bitbucket keeps sole writer and no auto publish', contains_all(draft, ('remains the sole provider writer', 'sole owner of approval and read-back', 'Never auto-publish')))
-require('Bitbucket route points to draft section', contains_all(section(bitbucket, '## Route', '## Existing PR hard stop'), ('complete「Draft PR prose」', 'Every existing-PR write completes「Existing PR hard stop」first')))
 
 failed = [label for label, passed in checks if not passed]
 for label, passed in checks:

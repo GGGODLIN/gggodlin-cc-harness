@@ -102,7 +102,7 @@ v2.1.212 當初改的是 `/fork` **slash command**（把對話複製進新的背
 
 1. 同一 `session_id` 的 transcript 中，top-level assistant 成功呼叫 `Skill(review-implement)`。
 2. 該 `Skill` tool_use 後有唯一 matching、non-error 的 tool_result；runtime result 可用 `success:true` 且 `commandName:"review-implement"` 證明成功。
-3. 同一 stage result 後只接受一個 top-level user selection：既有 axis 字、固定字母，或包含明確 model／axis 的自然語言；字母仍須和該 invocation 後唯一的固定選單綁定。`照推薦`／未指定 model 沿用本輪矩陣標出的推薦 seat，`skip`／`d` 不授權 reviewer，多個 user selection 使 invocation stale。
+3. 同一 stage result 後只接受一個 top-level user selection：既有 axis 字、固定字母，或包含明確 model／axis 的自然語言；字母仍須和該 invocation 後唯一的固定選單綁定。`照推薦`／未指定 model 沿用本輪矩陣標出的推薦 seat，`skip`／`d` 不授權 reviewer，多個 user selection 使 invocation stale。例外：review-implement 自動選軸派出的 `opus` seat 不等 user selection；T2 gate 對這種 seat 只留 `would_deny` 稽核列並放行。fable seat 仍須本條的明選。
 4. Agent description 放單一 `<review-implement-selection:v1 model=opus|fable axis=scope|yagni>`；fable seat 另放 `<fable-ok>`。既有 `<review-implement-fable:v1 axis=scope|yagni>` 只作 fable 相容快捷方式，marker 不構成授權。
 5. `tool_input.model` 必須等於 marker 的 logical model、reviewer 必須是 `routed-judge`，且同一 Run 不得重派相同 model／axis seat。
 
@@ -223,6 +223,7 @@ Workflow specific 細節（哪些 phase 算機械 / Search vs Fetch downgrade ta
 - 不需加 `<routed:>` token（E1 pass）；`routed-mech` 例外，description 必須有 `<mech-ok>`
 - 不需在 opts 指定 model（agent 預設處理）
 - 視情況可加 model override（如 `parallel-search` 預設 haiku、main 想用 sonnet）
+- 如果派的是審查程式碼的 reviewer（code-reviewer、typescript-reviewer、python-reviewer、security-reviewer），就在派工前讀 `~/.claude/references/review-dispatch-principles.md`：範圍三欄、底線、兩層授權與未完成揭露。
 
 ## 回報合約：輸出長度上限
 

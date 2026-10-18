@@ -1,6 +1,7 @@
 派 subagent 時沒指定模型，會默默繼承 main 的（可能最貴的）模型；這支 gate 要求派工符合模型路由規則。
 
 **安裝**：把 `hooks/T2-routing-gate.sh` 複製到 `~/.claude/hooks/T2-routing-gate.sh`，保留執行權限。
+同時把同資料夾用到的 `hooks/review-spec-dual-permit.py`、`hooks/review-spec-yagni-permit.py` 複製到 `~/.claude/hooks/`，並把 `agents/routed-*.md` 複製到 `~/.claude/agents/`（啟用 `routed-enforce.on` 白名單強制時會讀取該目錄下的 agent 定義）。
 
 **註冊**：在 `~/.claude/settings.json` 的 `hooks` 加入下列項目（與公開版 `settings.json` 相同）：
 - `PreToolUse`（matcher `Agent`）：`~/.claude/hooks/fable-gate.sh ~/.claude/hooks/T2-routing-gate.sh`

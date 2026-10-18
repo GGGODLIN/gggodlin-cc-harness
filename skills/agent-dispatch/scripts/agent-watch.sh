@@ -33,7 +33,8 @@ if [ "$BACKEND" = herdr ]; then
     worker_result=$(herdr agent get "$WORKER_PANE" 2>&1)
     worker_rc=$?
     if [ "$worker_rc" -eq 0 ]; then
-      worker_info=$(printf '%s' "$worker_result" | python3 -c 'import json,sys; d=json.load(sys.stdin); a=d.get("result",{}).get("agent",{}); p=a.get("pane_id",""); s=(a.get("agent_session") or {}).get("value",""); state="match" if p==sys.argv[1] and s==sys.argv[2] else "mismatch"; print("\t".join((state,p,s))) if d.get("ok") is not False and p and s else sys.exit(1)' "$WORKER_PANE" "$SESSION" 2>/dev/null) || worker_info=""
+      # pi 的 live session 是紀錄檔路徑（檔名結尾 _<uuid>.jsonl），收據的 session_id 是 uuid，所以也接受以該 uuid 結尾的路徑。
+      worker_info=$(printf '%s' "$worker_result" | python3 -c 'import json,sys; d=json.load(sys.stdin); a=d.get("result",{}).get("agent",{}); p=a.get("pane_id",""); s=(a.get("agent_session") or {}).get("value",""); state="match" if p==sys.argv[1] and (s==sys.argv[2] or s.endswith("_"+sys.argv[2]+".jsonl")) else "mismatch"; print("\t".join((state,p,s))) if d.get("ok") is not False and p and s else sys.exit(1)' "$WORKER_PANE" "$SESSION" 2>/dev/null) || worker_info=""
       if [ -n "$worker_info" ]; then
         IFS=$'\t' read -r worker_state live_pane live_session <<< "$worker_info"
       fi

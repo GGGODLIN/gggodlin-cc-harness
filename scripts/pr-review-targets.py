@@ -29,6 +29,19 @@ DOC_SUFFIXES = (".md", ".mdx", ".rst", ".txt", ".adoc")
 FILE_COUNT_THRESHOLD = 15
 DIFF_LINES_THRESHOLD = 800
 REVIEW_SET_CAPACITY_KEY = "review_set"
+# 席位資料取自 finalize 寫進狀態檔的 selection cell（seat、angle、選填 model）。
+# 只有這張表內、seat 與 angle 成對、且 model 沒指向別家的 cell 算 Claude 席；其餘一律當外部額度席，
+# 因為把外部席誤當 Claude 席會讓它不經使用者點頭就被放行，反過來只是多問一次。
+CLAUDE_SEAT_ANGLES = {
+  "opus/typescript-reviewer": "context-aware primary",
+  "opus/python-reviewer": "context-aware primary",
+  "opus/code-reviewer": "context-aware primary",
+  "opus/security-reviewer": "security",
+  "opus/spec-compliance-reviewer": "formal spec",
+}
+CLAUDE_MODEL = re.compile(r"^(claude-)?opus(-\d+)*$", re.IGNORECASE)
+# 只有文件寫明的裁決值才算使用者裁決過；null、空字串或其他值都留在未裁決，Claude 席才不會跳過裁決自動派出。
+ADJUDICATION_VALUES = {"accept-incomplete"}
 MATERIALS_DIRNAME = "materials"
 SINCE_VALUE = re.compile(r"^[0-9a-f]{7,64}$")
 NAME_STATUS_KINDS = {
@@ -772,6 +785,32 @@ def read_state(path):
     return None
 
 
+def is_claude_cell(cell):
+  if not isinstance(cell, dict):
+    return False
+  seat = cell.get("seat")
+  expected_angle = CLAUDE_SEAT_ANGLES.get(seat) if isinstance(seat, str) else None
+  if expected_angle is None or cell.get("angle") != expected_angle:
+    return False
+  model = cell.get("model")
+  return model in (None, "") or (isinstance(model, str) and bool(CLAUDE_MODEL.match(model)))
+
+
+def claude_seats_only(state):
+  selection = state.get("selection")
+  if not isinstance(selection, list):
+    return False
+  # 矩陣 cell 帶 status；沒選的 cell 不算派出，和 pr-review-cc-group-flow 的 selected_cells 同一判定。
+  chosen = [cell for cell in selection
+            if not isinstance(cell, dict) or cell.get("status") in (None, "selected")]
+  return bool(chosen) and all(is_claude_cell(cell) for cell in chosen)
+
+
+def capacity_settled(state):
+  capacity = state.get("capacity")
+  return isinstance(capacity, dict) and capacity.get("adjudication_required") is False and not capacity.get("unresolved")
+
+
 def dispatch_decision(state, confirmed):
   if state.get("cancelled"):
     return {"allowed": False, "reason": "cancelled"}
@@ -781,11 +820,14 @@ def dispatch_decision(state, confirmed):
     return {"allowed": False, "reason": "preparation-blocked"}
   if not state.get("selection_count"):
     return {"allowed": False, "reason": "selection-required"}
-  if state.get("capacity", {}).get("adjudication_required"):
+  capacity = state.get("capacity")
+  if isinstance(capacity, dict) and capacity.get("adjudication_required"):
     return {"allowed": False, "reason": "awaiting-adjudication"}
-  if not confirmed:
-    return {"allowed": False, "reason": "awaiting-confirmation"}
-  return {"allowed": True, "reason": "confirmed"}
+  if confirmed:
+    return {"allowed": True, "reason": "confirmed"}
+  if claude_seats_only(state) and capacity_settled(state):
+    return {"allowed": True, "reason": "claude-seats-auto"}
+  return {"allowed": False, "reason": "awaiting-confirmation"}
 
 
 def apply_selection(state, selection, adjudication):
@@ -795,8 +837,8 @@ def apply_selection(state, selection, adjudication):
   targets = state.get("targets") or []
   per_target, gapped = capacity_report(targets)
   review_set = aggregate_capacity_report(targets)
-  unresolved = [identity for identity in gapped if identity not in adjudication]
-  if review_set["chunked"] and REVIEW_SET_CAPACITY_KEY not in adjudication:
+  unresolved = [identity for identity in gapped if adjudication.get(identity) not in ADJUDICATION_VALUES]
+  if review_set["chunked"] and adjudication.get(REVIEW_SET_CAPACITY_KEY) not in ADJUDICATION_VALUES:
     unresolved.append(REVIEW_SET_CAPACITY_KEY)
   if not gapped and not review_set["chunked"]:
     decision = "within-threshold"

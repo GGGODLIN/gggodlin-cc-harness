@@ -6,6 +6,7 @@ import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import test from "node:test";
 import { handleHook } from "../src/hooks.mjs";
+import { appendAudit } from "../src/storage.mjs";
 import { summarizeAudit } from "../src/trial-report.mjs";
 
 const execFileAsync = promisify(execFile);
@@ -488,4 +489,27 @@ test("summarizeAudit counts superseded injections and classifies checkpoint outc
     completedNoInjection: 1,
     noCompletion: 1
   });
+});
+
+test("injection rows carrying anchor fields stay valid and still match their checkpoint", () => {
+  const rows = [
+    checkpointRow(0),
+    injectionRow(1, { anchor: "pinned", anchorCharacters: 120 }),
+    checkpointRow(2),
+    injectionRow(3, { anchor: "nudge", anchorCharacters: 0 })
+  ];
+  const summary = summarizeAudit(rows);
+  assert.equal(summary.invalidRows, 0);
+  assert.equal(summary.matchedCheckpointInjections, 2);
+});
+
+test("audit writes drop anchor values outside the enum", async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), "compact-guard-anchor-audit-"));
+  await appendAudit(injectionRow(1, { anchor: "/Users/someone/rubric.md", anchorCharacters: -5 }), { stateDir });
+  await appendAudit(injectionRow(2, { anchor: "pinned", anchorCharacters: 40 }), { stateDir });
+  const [bad, good] = (await readFile(join(stateDir, "audit.jsonl"), "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+  assert.equal("anchor" in bad, false);
+  assert.equal("anchorCharacters" in bad, false);
+  assert.equal(good.anchor, "pinned");
+  assert.equal(good.anchorCharacters, 40);
 });

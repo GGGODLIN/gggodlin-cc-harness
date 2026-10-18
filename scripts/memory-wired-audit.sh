@@ -93,8 +93,41 @@ def is_script(fn):
 # test 檔引用 hook 不算接線，state/ 是 hook 的執行紀錄，也不算。
 sources = [(p, read(p)) for p in settings]
 sources += [(p, read(p)) for p in walk(hooks_dir, is_script, skip_dirs=("state", "__pycache__"))]
+launchd_dir = os.environ.get("WIRED_LAUNCHD_DIR", os.path.expanduser("~/Library/LaunchAgents"))
+if os.path.isdir(launchd_dir):
+    sources += [(p, read(p)) for p in walk(launchd_dir, lambda f: f.endswith(".plist"))]
 sources += [(p, read(p)) for p in walk(commands_dir, lambda f: f.endswith(".md"))]
 sources += [(p, read(p)) for p in walk(skills_dir, lambda f: f.endswith(".md"))]
+# rules/、references/、agents/ 的 md 與 ~/.zshrc alias 也會引用 scripts／hooks／tools：
+# 2026-10-16 抽查 10 條 UNWIRED 有 6 條是這幾類假陽性（upstream-pr-bundle.sh、gpt-model-scan.py、cli-radar.sh…）。
+root_dir = os.path.dirname(os.path.normpath(memory_dir))
+for sub in ("rules", "references", "agents"):
+    d = os.path.join(root_dir, sub)
+    if os.path.isdir(d):
+        sources += [(p, read(p)) for p in walk(d, lambda f: f.endswith(".md"))]
+# workflows/ 的 .sh／.js 會呼叫 scripts/ 內腳本（2026-10-17：failure-mode-daily.py 只被 workflows/failure-mode-daily.sh 呼叫，被判 UNWIRED）。
+workflows_dir = os.path.join(root_dir, "workflows")
+if os.path.isdir(workflows_dir):
+    sources += [(p, read(p)) for p in walk(workflows_dir, is_script)]
+zshrc = os.environ.get("WIRED_ZSHRC", os.path.expanduser("~/.zshrc"))
+if os.path.isfile(zshrc):
+    sources.append((zshrc, read(zshrc)))
+# scripts/ 與 workflows/ 內的檔只在「自己已被上面的來源點名」時才算來源（一層傳遞）：
+# 腳本間互呼叫（例如 A.sh → B.sh、lib/resolve-account.sh → usage-color.sh）原本看不到
+#（2026-10-15 抽查 10 條 UNWIRED 有 3 條是這種假陽性）；但沒人接線的 wrapper 提到某工具不能反過來
+# 讓那個工具變 OK（dcg 事故：wrapper 從 settings 拆線後，記憶還寫著要過 dcg），所以不整個目錄照單全收。
+base_text = "\n".join(text for _, text in sources)
+def transitive(dir_path, prefix):
+    out = []
+    if not os.path.isdir(dir_path):
+        return out
+    for p in walk(dir_path, is_script, skip_dirs=("tests", "__pycache__")):
+        rel = os.path.relpath(p, dir_path)
+        if prefix + rel in base_text:
+            out.append((p, read(p)))
+    return out
+sources += transitive(scripts_dir, "scripts/")
+sources += transitive(os.path.join(root_dir, "workflows"), "workflows/")
 
 tools = set()
 for fn in os.listdir(bin_dir):

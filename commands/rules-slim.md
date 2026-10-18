@@ -8,7 +8,7 @@ description: rules-size channel 報 CLAUDE.md 或 rules/common 超門檻後，�
 
 為何固化：rules-size channel 每週二量得出「超標幾個 byte」，量不出「該砍哪一段」，報告因此進 digest 就沉底——CLAUDE.md 自 2026-08-04 起連續超標數週未被處理。本 command 是那個環節缺的消費端。
 
-**既判優先**是本 command 的核心紀律：`~/.claude/rule-review/` 已經把 always-on 層切成 190 條並判過決。任何新判定之前先查既有判決還剩什麼沒落地——不只為了省工，更因為同一條規則被判兩次時兩次結論可能不一致，而使用者已經對第一次的結論拍板過。
+**既判優先**是本 command 的核心紀律：`~/.claude/rule-review/` 已經把 always-on 層切成 190 條並判過決（原作者 2026-08-25 一次性歷史盤點產物，公開版不附；外部採用者無此目錄時，略過 Step 2 與 Step 3 的 `collection.jsonl`／`split-rules.py` 比對，直接對全檔執行 Step 3 四條判定）；任何新判定之前先查既有判決還剩什麼沒落地——不只為了省工，更因為同一條規則被判兩次時兩次結論可能不一致，而使用者已經對第一次的結論拍板過。
 
 ## 接在哪
 

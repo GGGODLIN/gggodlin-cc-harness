@@ -17,7 +17,7 @@ IMPLEMENT="$ROOT/skills/implement/SKILL.md"
 PRREVIEW="$ROOT/commands/pr-review.md"
 LOCAL="$ROOT/workflows/local-analysis.js"
 WRAPPER="$ROOT/workflows/failure-mode-daily.sh"
-TRIALREVIEW="$HOME/Desktop/projects/.claude/commands/trial-review.md"
+TRIALREVIEW="$ROOT/folder-level/.claude/commands/trial-review.md"
 PASS=0
 FAIL=0
 
@@ -65,7 +65,7 @@ check "兩種模式都走到 append" "$IMPLEMENT" 'Inline 與 Subagent-Driven �
 check "拿不到驗收清單註明缺驗收依據" "$IMPLEMENT" '拿不到票的驗收清單（票檔缺失）時，finding 保留並註明「缺驗收依據」，不標記、不 append'
 
 echo "[03] pr-review 標記與 append"
-check_absent "分類段不在 Step 2.8 內（2.8 會逐字進 reviewer prompt）" "$PRREVIEW" '### 失敗模式標記（主 session 事後分類'
+check_absent "分類段不在 Step 2.8 內（2.8 的主題組由 reviewer 載入，分類是主 session 的事）" "$PRREVIEW" '### 失敗模式標記（主 session 事後分類'
 check "Step 4.9 是事後分類不是偵測" "$PRREVIEW" '## Step 4.9: 失敗模式標記'
 check "分類不新增偵測" "$PRREVIEW" '對已產出的 finding 做分類標記，不新增偵測'
 check "有 spec 沒驗收項比照沒有" "$PRREVIEW" '有 spec 但沒有驗收項（brainstorm、design、日期檔名的 plan）比照沒有處理'

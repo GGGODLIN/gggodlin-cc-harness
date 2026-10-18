@@ -93,3 +93,7 @@ rjyo/moshi/moshi-hook
 # mcp：cua-driver 是 stdio 註冊、exec ~/.local/bin/cua-driver（非 npx 釘版），版本由它自己的
 # check_for_update 工具管；依「stdio 非 npx 先全忽略」慣例，2026-09-30 歸忽略
 cua-driver
+
+# mcp：code_search 是 stdio 註冊、exec 自建 ~/Desktop/projects/code-search-mcp/dist/index.js（非 npx 釘版），版本隨該 repo git 走；
+# 依「stdio 非 npx 先全忽略」慣例（同 cua-driver 2026-09-30），2026-10-15 歸忽略
+code_search

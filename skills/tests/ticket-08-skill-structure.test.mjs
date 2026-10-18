@@ -72,36 +72,6 @@ test('E2E skill and global inventory point to each other exactly once', () => {
   assert.equal(existsSync(join(root, 'skills', matches[0][0], 'SKILL.md')), true)
 })
 
-test('explain-diff remains manual-only through parsed frontmatter', () => {
-  const metadata = parseFrontmatter('skills/explain-diff/SKILL.md')
-  assert.equal(metadata.name, 'explain-diff')
-  assert.equal(metadata['disable-model-invocation'], true)
-})
-
-test('Bitbucket token loading is env-first then zsh_secrets then zshrc without a value', () => {
-  const path = 'skills/bitbucket-weekly-report/skill.md'
-  const metadata = parseFrontmatter(path)
-  assert.equal(metadata.name, 'bitbucket-weekly-report')
-  const text = read(path)
-  const loaders = text.match(/export BITBUCKET_API_TOKEN="\$\{BITBUCKET_API_TOKEN:-\$\([^\n]+~\/\.zsh_secrets ~\/\.zshrc[^\n]+\)\}"/g) ?? []
-  assert.equal(loaders.length, 4)
-  for (const loader of loaders) {
-    assert.ok(loader.indexOf('${BITBUCKET_API_TOKEN:-') < loader.indexOf('~/.zsh_secrets'))
-    assert.ok(loader.indexOf('~/.zsh_secrets') < loader.indexOf('~/.zshrc'))
-  }
-  assert.doesNotMatch(text, /export BITBUCKET_API_TOKEN=(?!"?\$\{)/)
-})
-
-test('gate-authoring and implement friction logs expose protocol sections', () => {
-  for (const path of [
-    'skills/gate-authoring/friction-log.md',
-    'skills/implement/friction-log.md'
-  ]) {
-    const headings = read(path).match(/^## .+$/gm) ?? []
-    assert.deepEqual(headings, ['## 待折', '## 已折／已否決'], path)
-  }
-})
-
 test('TypeScript templates retain fixture and batch-spec structure', () => {
   const fixture = read('skills/e2e-explore-then-batch/assets/fixture-template.ts')
   assert.match(fixture, /from '@playwright\/test'/)

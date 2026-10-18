@@ -162,74 +162,7 @@ Keep SKILL.md body to the essentials and under 500 lines to minimize context blo
 
 **Key principle:** When a skill supports multiple variations, frameworks, or options, keep only the core workflow and selection guidance in SKILL.md. Move variant-specific details (patterns, examples, configuration) into separate reference files.
 
-**Pattern 1: High-level guide with references**
-
-```markdown
-# PDF Processing
-
-## Quick start
-
-Extract text with pdfplumber:
-[code example]
-
-## Advanced features
-
-- **Form filling**: See [FORMS.md](FORMS.md) for complete guide
-- **API reference**: See [REFERENCE.md](REFERENCE.md) for all methods
-- **Examples**: See [EXAMPLES.md](EXAMPLES.md) for common patterns
-```
-
-Claude loads FORMS.md, REFERENCE.md, or EXAMPLES.md only when needed.
-
-**Pattern 2: Domain-specific organization**
-
-For Skills with multiple domains, organize content by domain to avoid loading irrelevant context:
-
-```
-bigquery-skill/
-├── SKILL.md (overview and navigation)
-└── reference/
-    ├── finance.md (revenue, billing metrics)
-    ├── sales.md (opportunities, pipeline)
-    ├── product.md (API usage, features)
-    └── marketing.md (campaigns, attribution)
-```
-
-When a user asks about sales metrics, Claude only reads sales.md.
-
-Similarly, for skills supporting multiple frameworks or variants, organize by variant:
-
-```
-cloud-deploy/
-├── SKILL.md (workflow + provider selection)
-└── references/
-    ├── aws.md (AWS deployment patterns)
-    ├── gcp.md (GCP deployment patterns)
-    └── azure.md (Azure deployment patterns)
-```
-
-When the user chooses AWS, Claude only reads aws.md.
-
-**Pattern 3: Conditional details**
-
-Show basic content, link to advanced content:
-
-```markdown
-# DOCX Processing
-
-## Creating documents
-
-Use docx-js for new documents. See [DOCX-JS.md](DOCX-JS.md).
-
-## Editing documents
-
-For simple edits, modify the XML directly.
-
-**For tracked changes**: See [REDLINING.md](REDLINING.md)
-**For OOXML details**: See [OOXML.md](OOXML.md)
-```
-
-Claude reads REDLINING.md or OOXML.md only when the user needs those features.
+三種拆分範式的完整範例（高層導覽＋references／按領域或變體分目錄／條件式細節）在 [references/progressive-disclosure-patterns.md](references/progressive-disclosure-patterns.md)；如果要把 SKILL.md 拆成多檔，就在動手前讀它，對照自己屬於哪一型。
 
 **Important guidelines:**
 
@@ -392,13 +325,21 @@ After testing the skill, users may request improvements. Often this happens righ
 1. Use the skill on real tasks
 2. Notice struggles or inefficiencies
 3. Identify how SKILL.md or bundled resources should be updated
-4. Follow the RED → GREEN → REFACTOR behavior validation below; the GREEN step owns the first text change.
+4. Follow the RED → GREEN → REFACTOR behavior validation below; the GREEN step owns the first text change. A mechanical edit takes the three deterministic checks at the top of that section instead.
 
 ### RED → GREEN → REFACTOR：行為驗證
 
 Text changes need behavior evidence because a static contract can confirm wording is present but cannot show that a fresh agent follows it under pressure. Keep the loop tight:
 
-1. **RED** — Before changing skill text, have a fresh agent run the scenario against the pre-change skill and record the observed behavior. If wording was already changed, restore the pre-change version and discard the untested wording before collecting this baseline. The RED scenario must be 同型 with the production call path: same prompt text, same input shape, and the agent judges on its own. 設計 fixture 前，先找出會在受測規則之前處理輸入的條件；只在合成資料中滿足未受測的前置條件，不把待驗規則或答案寫進 fixture，也不繞過真實權限。若 runner 因另一條前置規則而未到達受測決策點，記為無效 baseline，修正 fixture 後再跑 RED。 If RED does not turn red, estimate the original failure rate and the statistical power of this n, and record the run as an 無效 baseline — never treat "no red" as evidence the change is already fixed. When the file under test is one this same task just created, it is already live in the agent's skill／command list: a RED runner can find it and follow it, which yields a second GREEN rather than a baseline. Close both routes in the RED prompt — the file's directory and the Skill／slash-command invocation path — and treat a run whose trace shows the runner read the file under test as an 無效 baseline, the same as a run that never turned red. 節錄式 runner 只收到手貼內容時，證據副檔必須先寫明節錄邊界；它只對節錄內行為有判讀效力，節錄外偏差一律標 `out-of-scope`、不得當成 finding。若無效 baseline 的原因是 production worker 不可實例化，而非樣本量不足，直接標「行為驗證不可得」並停止補跑；把落地保證改放在 caller 對 sentinel／artifact 產物的確定性檢查，文字強化只記為未驗證。行為驗證碰到 Self-Verify「一次 auditor」硬限制時，不得另開例外來繞過；同型 production auditor 結構上叫不到時，使用最接近的合法 runner，明寫 worker mismatch 與證據降級。
+**A mechanical edit takes deterministic checks instead of the loop.** An edit is mechanical when it only renames, re-points a path, link or pointer, and changes nothing about what an agent decides or does; adding a step, a rule, a condition or a trigger is not mechanical, and an edit you cannot classify is not mechanical. A fresh runner is the wrong instrument here: it usually works around a broken path and reports success. Run all three checks and keep their output:
+
+1. Every path, file and link on each changed line exists (`test -e` or `ls`, one per reference, run from the directory the line's reader resolves it against).
+2. Every changed command is checked against `--help` or its source for its subcommands and flags.
+3. `command grep -rn` the old name or path across the skill and its callers returns nothing left behind.
+
+Any failure is fixed and the three checks run again. Done when all three pass with their output recorded; no RED, GREEN or REFACTOR runner is dispatched.
+
+1. **RED** — Before changing skill text, have a fresh agent run the scenario against the pre-change skill and record the observed behavior. If wording was already changed, restore the pre-change version and discard the untested wording before collecting this baseline. The RED scenario must be 同型 with the production call path: same prompt text, same input shape, and the agent judges on its own. 設計 fixture 前，先找出會在受測規則之前處理輸入的條件；只在合成資料中滿足未受測的前置條件，不把待驗規則或答案寫進 fixture，也不繞過真實權限。若 runner 因另一條前置規則而未到達受測決策點，記為無效 baseline，修正 fixture 後再跑 RED。 If RED does not turn red, estimate the original failure rate and the statistical power of this n, and record the run as an 無效 baseline — never treat "no red" as evidence the change is already fixed. Then stop the loop: do not run GREEN or REFACTOR on a failure no run has shown. Report 「無法證明有問題」 with the run, the estimate and the fixture, and let the user decide whether to change the text anyway, collect more evidence, or drop it. A RED that missed only because its fixture leaked the answer or stopped before the decision point is fixed and re-run once; that is not a second chance for a scenario that simply did not fail. When the file under test is one this same task just created, it is already live in the agent's skill／command list: a RED runner can find it and follow it, which yields a second GREEN rather than a baseline. Close both routes in the RED prompt — the file's directory and the Skill／slash-command invocation path — and treat a run whose trace shows the runner read the file under test as an 無效 baseline, the same as a run that never turned red. 節錄式 runner 只收到手貼內容時，證據副檔必須先寫明節錄邊界；它只對節錄內行為有判讀效力，節錄外偏差一律標 `out-of-scope`、不得當成 finding。若無效 baseline 的原因是 production worker 不可實例化，而非樣本量不足，直接標「行為驗證不可得」並停止補跑；把落地保證改放在 caller 對 sentinel／artifact 產物的確定性檢查，文字強化只記為未驗證。行為驗證碰到 Self-Verify「一次 auditor」硬限制時，不得另開例外來繞過；同型 production auditor 結構上叫不到時，使用最接近的合法 runner，明寫 worker mismatch 與證據降級。
 2. **GREEN** — Give the same scenario to another fresh agent using the changed skill. Compare behavior, not just quoted instructions; the scenario should show the intended correction. 如果本次新增或修改 CLI 用法，就在驗收文字前，用該環境的 --help 或原始碼逐項核對子指令、旗標與列舉值；只查本次改動，不掃全庫。記下實際查詢與輸出；這只證明用法有效，不替代實際執行的行為證據。 When the scenario requires filesystem, settings, process, or another external action, require 外部可觀察 evidence: a tool receipt and the expected sentinel／artifact. `tool_uses=0` or a missing expected artifact makes the run `invalid`; agent final 自述不算行為證據. Replace it with a fresh runner that can execute and leave the required evidence. Frame every runner as a 行為單元測試: state that it must not start the command's full infrastructure, and give an explicit output shape plus a line cap (for example ≤30 lines) so the runner cannot expand into unbounded work.
 3. **REFACTOR** — Add a new pressure or loophole scenario that could pass while evading the intent. After the fix, rerun the original scenario and every regression scenario, then keep only wording that survives all of them.
 
@@ -470,13 +411,7 @@ Static validation, including grep or a contract test, does not replace behaviora
 13. **同段不混 instruction altitude**（2026-07-12 加；源自同 repo context-fundamentals）——高海拔原則式（「保持簡潔」）與低海拔硬規則式（「≤120 字元」）不要交錯擠同段：混層 = conflicting signals，模型會把原則過度執行成硬規則、或把硬規則打折成建議。例外（好模式不算混層）：硬規則緊跟它所量化的原則（原則 → 自己的量化下限）。寫/改 skill 段落時自查一輪；CLAUDE.md / rules 等 config 同判準（見 memory `_index_config_authoring_discipline`）
 
 14. **環境即權威、文件只 cache 查不到的**（2026-08-06 加；源自 mattpocock/skills writing-for-agents v1.2）——package.json scripts / config 檔 / 目錄佈局 / `--help` 輸出本身就是權威來源，文件重述它們 = 一次 lookup 的 cache，只在 lookup 昂貴時才值得寫（且會 stale）。該 cache 的是 agent 用查的查不到的東西：不成文慣例、選擇背後的理由、config 不會招認的 gotcha。限定：「理由」的落點仍照三層分工（always-on 留指令不留原因、path-scoped 克制、完整理由歸 memory）——本條管「要不要寫」，不改變「寫到哪」
-15. **Collie Agent 面板清單**——自寫的全域 skill／command 若能由使用者輸入 `/name` 呼叫，就要讓手機的面板也找得到；Collie 不讀 Claude 的安裝目錄，只讀執行中實例的 `commands.toml`。在上述 authoring 與驗證後，依序收尾：
-    1. 新建、改名、改描述或退役時，確認這個入口目前能否從 Claude TUI 手動呼叫；`user-invocable: false`、專案限定與第三方原樣安裝者不自動加到全域面板。找到執行中 Collie 的設定目錄（Herdr plugin 可用 `herdr plugin config-dir herdr.collie`）；找不到就回報未同步，不把 repo 範例檔當成已生效設定。
-    2. 讀現有 `commands.toml`，只新增／更新本次仍可呼叫的 `[[commands]]`；改名或退役時，移除對應舊名稱。以 `scope = "claude"` 限定 Claude pane，不碰其他 rows、shipped catalog 或 actions row。描述只放能展示給讀取 Collie 的裝置看的文字，不放 secret；既有同名 row 先比對，不重複新增。
-    3. 讀回設定檔並查 Collie 的 `/api/config` 中 `operatorCommands`，對照這個名稱應出現或消失的結果。若 loopback 回 `403 identity required`，先找環境既有的已授權前門（例如既有 tailnet 入口）讀同一份 live config；不得自行偽造身份 header。沒有已授權前門、實例不可連或資料未更新時，才明寫哪一步未驗證，不宣稱手機已看到。
-    **完成條件：**本次改動的每個全域入口都已對到設定與實例回應，或逐一標明不適用／無法存取。
-
-三判準跑完（含官方 Step 1-6 的 authoring 本體）→ 依上方「RED → GREEN → REFACTOR：行為驗證」跑完本輪，再接下方「診斷：6 種失敗模式」段逐條自檢一輪 → 摩擦盤點、帳本盤點 → 接第 15 項 Collie 面板清單後收工。摩擦盤點：本次 authoring 有無預見或撞到的摩擦 → append 被改 skill 的 `friction-log.md`，無主的落 `~/.claude/friction/workflow-general.md`；建新 skill 時順手評估要不要給它配 `friction-log.md`（規則與門檻見 `~/.claude/friction/PROTOCOL.md`）；無摩擦不留紀錄。帳本盤點：本次 authoring 有無引入會被 append、供未來 agent 讀的檔案或目錄 → 登記 registry 或標明純 log；無則不留紀錄。這兩步都是 authoring 動線的最後一段、不是參考資料。Codex 已於 2026-09-20 停用，不補 `~/.codex` 端入口。
+三判準跑完（含官方 Step 1-6 的 authoring 本體）→ 依上方「RED → GREEN → REFACTOR：行為驗證」跑完本輪（機械替換改跑同段的三項程式檢查），再接下方「診斷：6 種失敗模式」段逐條自檢一輪 → 摩擦盤點、帳本盤點後收工。Collie 手機面板不用手動同步：fork 的 bridge 直接讀 Claude Code 會載入的 skill 與 command 檔（Collie ADR 9009）。摩擦盤點：本次 authoring 有無預見或撞到的摩擦 → append 被改 skill 的 `friction-log.md`，無主的落 `~/.claude/friction/workflow-general.md`；建新 skill 時順手評估要不要給它配 `friction-log.md`（規則與門檻見 `~/.claude/friction/PROTOCOL.md`）；無摩擦不留紀錄。帳本盤點：本次 authoring 有無引入會被 append、供未來 agent 讀的檔案或目錄 → 登記 registry 或標明純 log；無則不留紀錄。這兩步都是 authoring 動線的最後一段、不是參考資料。Codex 已於 2026-09-20 停用，不補 `~/.codex` 端入口。
 
 ### 診斷：skill 寫作 / debug 時對照 6 種失敗模式
 

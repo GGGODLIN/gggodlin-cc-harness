@@ -116,6 +116,7 @@ check "ledger pointer" has "$COMMAND" "$POINTER"
 check "preflight 是編號步驟" has "$COMMAND" "1.5. **ADR lifecycle preflight"
 check "preflight 僅適用既有 STATE" has "$COMMAND" '只在既有 `docs/owner/STATE.md` 存在且 Read 成功時執行'
 check "preflight 解析 remote default ref" has "$COMMAND" "symbolic-ref --quiet --short refs/remotes/origin/HEAD"
+check "preflight 無 decisions 目錄且無歷史才 skip" has "$COMMAND" 'if [[ ! -e "$ROOT/$DECISION_PATH" ]] && [[ -z "$("${GIT[@]}" log --all --format=%H -n 1 -- "$DECISION_PATH" 2>/dev/null)" ]]; then'
 check "preflight 計算 merge-base" has "$COMMAND" "merge-base"
 check "preflight disables fsmonitor" has "$COMMAND" "core.fsmonitor=false"
 check "preflight binds worktree" has "$COMMAND" '--work-tree="$ROOT"'
@@ -455,6 +456,66 @@ if [ "$SCRIPT_READY" -eq 1 ]; then
   check_eq "change-set detection failure blocks" "1" "$RUN_RC"
   check "change-set detection failure reports BLOCKED" contains "$DETECTION_OUTPUT" "STATE_ARCHIVE: BLOCKED change-set detection failure"
   check "change-set detection failure preserves STATE bytes" check_state_unchanged "$DETECTION_REPO/docs/owner/STATE.md" "$DETECTION_REPO/docs/owner/STATE.before"
+
+  # 沒有 openspec/decisions/ 也沒有 remote 的 repo（私人治理 repo 形狀）：skip，不因 remote 解析失敗而 BLOCKED
+  NO_DIR_REPO="$TMP/no-decisions-dir"
+  NO_DIR_HOME="$TMP/no-decisions-dir-home"
+  NO_DIR_OUTPUT="$TMP/no-decisions-dir-output"
+  git init -q -b main "$NO_DIR_REPO"
+  git -C "$NO_DIR_REPO" config user.email test@example.com
+  git -C "$NO_DIR_REPO" config user.name test
+  mkdir -p "$NO_DIR_REPO/docs/owner"
+  printf '%s\n' 'STATE-SENTINEL' > "$NO_DIR_REPO/docs/owner/STATE.md"
+  git -C "$NO_DIR_REPO" add .
+  git -C "$NO_DIR_REPO" commit -qm base
+  install_checker "$NO_DIR_HOME"
+  cp "$NO_DIR_REPO/docs/owner/STATE.md" "$NO_DIR_REPO/docs/owner/STATE.before"
+  run_script "$NO_DIR_REPO" "$NO_DIR_HOME" "$NO_DIR_OUTPUT" real
+  check_eq "no decisions dir and no remote continues" "0" "$RUN_RC"
+  check "no decisions dir reports skip" contains "$NO_DIR_OUTPUT" "STATE_ARCHIVE: no decision changes; checker skipped"
+  check "no decisions dir does not report BLOCKED" bash -c "! grep -qF 'STATE_ARCHIVE: BLOCKED' '$NO_DIR_OUTPUT'"
+  check "no decisions dir skips checker" test ! -e "$NO_DIR_REPO/checker.log"
+  check "no decisions dir preserves STATE bytes" check_state_unchanged "$NO_DIR_REPO/docs/owner/STATE.md" "$NO_DIR_REPO/docs/owner/STATE.before"
+
+  # decisions 路徑存在但是檔案：仍 BLOCKED（skip 只給「不存在」）
+  FILE_PATH_REPO="$TMP/decisions-is-file"
+  FILE_PATH_HOME="$TMP/decisions-is-file-home"
+  FILE_PATH_OUTPUT="$TMP/decisions-is-file-output"
+  git init -q -b main "$FILE_PATH_REPO"
+  git -C "$FILE_PATH_REPO" config user.email test@example.com
+  git -C "$FILE_PATH_REPO" config user.name test
+  mkdir -p "$FILE_PATH_REPO/docs/owner" "$FILE_PATH_REPO/openspec"
+  printf '%s\n' 'STATE-SENTINEL' > "$FILE_PATH_REPO/docs/owner/STATE.md"
+  printf '%s\n' 'not a dir' > "$FILE_PATH_REPO/openspec/decisions"
+  git -C "$FILE_PATH_REPO" add .
+  git -C "$FILE_PATH_REPO" commit -qm base
+  install_checker "$FILE_PATH_HOME"
+  cp "$FILE_PATH_REPO/docs/owner/STATE.md" "$FILE_PATH_REPO/docs/owner/STATE.before"
+  run_script "$FILE_PATH_REPO" "$FILE_PATH_HOME" "$FILE_PATH_OUTPUT" real
+  check_eq "decisions path as file blocks" "1" "$RUN_RC"
+  check "decisions path as file reports BLOCKED" contains "$FILE_PATH_OUTPUT" "STATE_ARCHIVE: BLOCKED decision path is not a directory"
+  check "decisions path as file preserves STATE bytes" check_state_unchanged "$FILE_PATH_REPO/docs/owner/STATE.md" "$FILE_PATH_REPO/docs/owner/STATE.before"
+
+  # 沒有 remote、目錄在工作樹消失、但歷史有過 ADR：不得 skip（走原流程，這裡因無 remote 而 BLOCKED）
+  HIST_REPO="$TMP/no-remote-with-history"
+  HIST_HOME="$TMP/no-remote-with-history-home"
+  HIST_OUTPUT="$TMP/no-remote-with-history-output"
+  git init -q -b main "$HIST_REPO"
+  git -C "$HIST_REPO" config user.email test@example.com
+  git -C "$HIST_REPO" config user.name test
+  mkdir -p "$HIST_REPO/docs/owner" "$HIST_REPO/openspec/decisions"
+  printf '%s\n' 'STATE-SENTINEL' > "$HIST_REPO/docs/owner/STATE.md"
+  printf '%s\n' '# base' > "$HIST_REPO/openspec/decisions/0001-base.md"
+  git -C "$HIST_REPO" add .
+  git -C "$HIST_REPO" commit -qm base
+  git -C "$HIST_REPO" rm -q openspec/decisions/0001-base.md
+  git -C "$HIST_REPO" commit -qm delete-all
+  install_checker "$HIST_HOME"
+  cp "$HIST_REPO/docs/owner/STATE.md" "$HIST_REPO/docs/owner/STATE.before"
+  run_script "$HIST_REPO" "$HIST_HOME" "$HIST_OUTPUT" real
+  check_eq "no remote but decisions history does not skip" "1" "$RUN_RC"
+  check "no remote but decisions history reports BLOCKED" contains "$HIST_OUTPUT" "STATE_ARCHIVE: BLOCKED"
+  check "no remote but decisions history preserves STATE bytes" check_state_unchanged "$HIST_REPO/docs/owner/STATE.md" "$HIST_REPO/docs/owner/STATE.before"
 else
   FAIL=$((FAIL + 1))
   printf '  FAIL dynamic preflight scenarios skipped\n'

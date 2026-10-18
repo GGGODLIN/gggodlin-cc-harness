@@ -115,6 +115,31 @@ git diff --check
 
 觀察期應分別記錄 Claude Code、ccp-gpt、Codex CLI 與本機 Codex Desktop 的自然 compact 事件。只看到設定檔或合成測試不等於實際派送；Codex 必須在 compact 後再送出一個使用者回合，才能驗證待處理的 `SessionStart` 已注入。Claude Code 與 ccp-gpt 若在 `PreCompact` 後由原生產品回報 `Not enough messages to compact`，該 checkpoint 必須註記為未完成的壓縮嘗試，不計入已完成壓縮的漏注入，也不可靜默刪除。沒有自然事件或 compact 後續回合的介面應延長觀察，不應直接判定保留。觀察期間另記過時結論、優先順序錯誤、壓縮被阻擋與可見 hook 錯誤。
 
+## 固定標準槽位（2026-10-13，僅 Claude）
+
+起因是 2026-10-12 有一個 session 讓 main 親自評約 400 份實驗產物，自動壓縮了 29 次。原生壓縮後補回的是最近讀過的約 5 份檔，本工具補回的是最近的對話；兩者都只看「最近」，評分標準因此一輪輪被擠出 context。
+
+做法：`src/anchor.mjs` 在 `SessionStart(source=compact)` 的成功路徑上，把下面其中一段接在恢復包之後。穩定文字在前，路徑與分鐘數放在尾端。
+
+| 情況 | 注入 | audit `anchor` |
+| --- | --- | --- |
+| main 的回覆裡有 `📌 固定標準：/絕對路徑`（取最新一行，可用反引號包住路徑） | 檔案內容，上限 3,000 字，超過就截斷並註明；先遮蔽密鑰、去掉控制字元與雙向文字 | `pinned`，另記 `anchorCharacters` |
+| 有宣告但讀不到：不存在、不是一般檔案、在 `~/.ssh`、`~/.gnupg`、`~/.aws`、`~/.config/gcloud`、`~/Library/Keychains`、`/etc` 底下，或檔名像 `.env`、`*.pem`、`*.key` | 一行「讀不到」與路徑 | `pin_unreadable` |
+| 沒有宣告，且最近兩次自動壓縮相隔不到 `COMPACT_GUARD_FAST_MINUTES`（預設 60） | 提醒 agent 寫固定標準檔並用 📌 宣告，同時評估改派 subagent | `nudge` |
+
+- **間隔怎麼算**：本次壓縮的 boundary 可能還沒寫進紀錄檔，所以本次的時間點用 checkpoint 的 `capturedAt`。壓縮本身約要 5 分鐘，所以算出的間隔會略短，偏向早響。手動壓縮不算本次。
+- **門檻依據**：門檻 60 分鐘由使用者拍板。2026-10-13 用 30 天資料檢查：一般 session 的自動壓縮間隔，最短的 5% 是 74 分鐘、中位數 196 分鐘。在 60 分鐘門檻下，只有 1777beba（第 4 次壓縮觸發）和一個 59 分鐘的灰色案例會命中。
+- **出錯時的行為**：這是提示型功能。掃描、讀檔或算間隔時出錯，都只會少掉這一段，原本的恢復包照常注入。關閉方式：`COMPACT_GUARD_ANCHOR_DISABLE=1`。
+- **audit 範圍**：audit 只記 `anchor` 列舉值與字數，不記路徑或內容。
+- **不承諾**：
+  - 宣告的檔可以很空洞，本工具不判斷內容品質。
+  - 第一次提醒最早在第二次快速壓縮後才出現，那時寫下的標準可能已經走樣。
+  - agent 可以不理提醒。
+  - 補回的內容是 agent 自己寫的資料，不是使用者的指示。
+- **驗證**：
+  - `test/anchor.test.mjs`：涵蓋門檻邊界、截斷、敏感路徑，以及「經 symlink 指向 `~/.ssh`」的情況。macOS 的 `/var` → `/private/var` 會讓只比對未解析的 home 時，敏感路徑檢查失效，這條測試會抓到。
+  - 用 1777beba 的真實紀錄檔驗證：第 4 次壓縮觸發提醒，第 3 次不觸發。掃完 115MB 紀錄檔約 0.46 秒。
+
 ## Codex 壓縮後即時注入：已查證不可行（2026-07-23）
 
 無人值守時段的 compact 無法在完成當下注入恢復內容。openai/codex source（commit 4462b9d，並比對 tag rust-v0.144.4 行為一致）證明 PostCompact 是 Stateless hook：`parse_post_compact` 的輸出結構沒有 additionalContext 欄位（codex-rs/hooks/src/engine/output_parser.rs）、純 stdout 被忽略（compact.rs 測試 post_compact_ignores_plain_stdout）、core 消費端只讀 should_stop（codex-rs/core/src/hook_runtime.rs run_post_compact_hooks），從不呼叫 record_additional_contexts。能寫進對話歷史的只有 SessionStart 管線（hook_runtime.rs record_additional_contexts → record_conversation_items）。

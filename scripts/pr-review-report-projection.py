@@ -57,6 +57,7 @@ GROUP_KEEP_TITLES = (
   PRIOR_REVIEW_TITLE,
   ATTRIBUTION_TITLE,
   *INLINE_TITLES,
+  "這次審查範圍",
 )
 LOCATION_HEADERS = ("group_id", "finding_uid", "target_identity", "file", "line", "source")
 LINE_SENTINEL = "需人工確認（anchor 未在綁定來源中比中或證據 binding 失效）"
@@ -71,6 +72,7 @@ KEEP_TITLES = (
   "本輪未做/限制（對帳）",
   "沒做的部分",
   "沒做的部分（結案對帳）",
+  "這次審查範圍",
   "Review continuity",
   "Review continuity（產報告前重驗）",
 )

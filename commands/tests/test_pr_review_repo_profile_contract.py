@@ -177,6 +177,8 @@ class PrReviewRepoProfileContractTest(unittest.TestCase):
     shared = self.section("#### Shared prompt", "### Codex Review")
     self.assertIn("conventions_docs", shared)
     self.assertIn("沒做的部分", shared)
+    self.assertIn("不得用來豁免本 PR 自己的程式碼", shared)
+    self.assertIn("origin/$BASE_BRANCH", shared)
     for name, block in (
       ("codex", self.section("### Codex Review", "### Gemini Pro / Flash Review")),
       ("gemini", self.section("### Gemini Pro / Flash Review", "## Step 4")),

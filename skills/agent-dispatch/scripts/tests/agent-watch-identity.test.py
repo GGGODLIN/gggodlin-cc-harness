@@ -26,6 +26,15 @@ worker_pane = os.environ.get("STUB_WORKER_PANE", "w1:p2")
 worker_session = os.environ.get("STUB_WORKER_SESSION", "worker-first")
 main_session = os.environ.get("STUB_MAIN_SESSION", "main-first")
 
+def worker_session_value(value):
+  if os.environ.get("STUB_WORKER_SESSION_NULL"):
+    return None
+  if os.environ.get("STUB_PI"):
+    return {"agent": "pi", "kind": "path", "source": "herdr:pi", "value": value}
+  if os.environ.get("STUB_CODEX"):
+    return {"agent": "codex", "kind": "id", "source": "herdr:codex", "value": value}
+  return {"value": value}
+
 if args[:2] == ["pane", "get"]:
   emit({"result": {"pane": {"pane_id": "w1:p1", "workspace_id": "w1"}}})
 elif args[:2] == ["tab", "create"]:
@@ -43,7 +52,7 @@ elif args[:2] == ["agent", "get"]:
   if target == "w1:p1":
     emit({"result": {"agent": {"name": "main", "pane_id": "w1:p1", "agent_session": {"value": main_session}}}})
   else:
-    current = {"pane_id": worker_pane, "agent_session": {"value": worker_session}}
+    current = {"pane_id": worker_pane, "agent_session": worker_session_value(worker_session)}
     if not os.environ.get("STUB_WORKER_NAMELESS"):
       current["name"] = worker
     emit({"result": {"agent": current}})
@@ -54,7 +63,7 @@ elif args[:2] == ["agent", "wait"]:
   if os.environ.get("STUB_WAIT_NAME_INVALID") and args[2] != worker_pane:
     emit({"ok": False, "error": {"code": "agent_not_found"}})
     sys.exit(1)
-  emit({"result": {"agent": {"name": worker, "pane_id": worker_pane, "agent_status": "done", "agent_session": {"value": worker_session}}}})
+  emit({"result": {"agent": {"name": worker, "pane_id": worker_pane, "agent_status": "done", "agent_session": worker_session_value(worker_session)}}})
 elif args[:2] == ["agent", "prompt"]:
   if args[2] == "w1:p1" and os.environ.get("STUB_PROMPT_FAIL"):
     sys.exit(1)
@@ -85,8 +94,8 @@ class HerdrWatcherIdentityTest(unittest.TestCase):
   def start_worker(self):
     return subprocess.run(["bash", str(SCRIPTS / "start-worker.sh"), "demo", str(self.root), str(self.brief), "--no-watch"], env=self.env, capture_output=True, text=True, timeout=10)
 
-  def watch(self, env=None):
-    return subprocess.run(["bash", str(SCRIPTS / "agent-watch.sh"), "herdr", "demo", "w1:p1", str(self.log), "worker-first", str(self.root), "main-first", "w1:p2"], env=env or self.env, capture_output=True, text=True, timeout=10)
+  def watch(self, env=None, session="worker-first"):
+    return subprocess.run(["bash", str(SCRIPTS / "agent-watch.sh"), "herdr", "demo", "w1:p1", str(self.log), session, str(self.root), "main-first", "w1:p2"], env=env or self.env, capture_output=True, text=True, timeout=10)
 
   def calls(self, command=None):
     if not self.stub_log.exists():
@@ -179,6 +188,65 @@ class HerdrWatcherIdentityTest(unittest.TestCase):
     self.assertEqual(len(self.main_prompts()), 1)
     self.assertIn("未送達", self.log.read_text())
     self.assertEqual(self.calls(["notification", "show"]), [])
+
+  UUID = "019f3a2c-7d41-7b8e-9c10-5a2e4f6b8d90"
+
+  def codex_env(self, **extra):
+    return {**self.env, "STUB_CODEX": "1", "STUB_WORKER_SESSION": self.UUID, **extra}
+
+  def test_codex_matching_uuid_sends_normal_status(self):
+    result = self.watch(self.codex_env(), session=self.UUID)
+    self.assertEqual(result.returncode, 0, result.stderr)
+    self.assertEqual(len(self.main_prompts()), 1)
+    self.assertIn("stopped, status=done", self.main_prompts()[0])
+    self.assertNotIn("異常", self.main_prompts()[0])
+
+  def test_codex_replaced_uuid_sends_anomaly(self):
+    result = self.watch(self.codex_env(STUB_WORKER_SESSION="019f3a2c-0000-7000-8000-000000000000"), session=self.UUID)
+    self.assertEqual(result.returncode, 0, result.stderr)
+    self.assertEqual(len(self.main_prompts()), 1)
+    self.assertIn("異常", self.main_prompts()[0])
+    self.assertNotIn("stopped, status=done", self.main_prompts()[0])
+
+  def test_codex_null_session_at_stop_is_unverified_not_complete(self):
+    result = self.watch(self.codex_env(STUB_WORKER_SESSION_NULL="1"), session=self.UUID)
+    self.assertEqual(result.returncode, 0, result.stderr)
+    self.assertEqual(len(self.main_prompts()), 1)
+    self.assertIn("未驗證", self.main_prompts()[0])
+    self.assertNotIn("stopped, status=done", self.main_prompts()[0])
+
+  PI_PATH = "/stub/.pi/agent/sessions/--w--/2026-10-18T00-00-00-000Z_" + UUID + ".jsonl"
+
+  def pi_env(self, live=PI_PATH):
+    return {**self.env, "STUB_PI": "1", "STUB_WORKER_SESSION": live}
+
+  def test_pi_receipt_uuid_matches_live_session_path(self):
+    result = self.watch(self.pi_env(), session=self.UUID)
+    self.assertEqual(result.returncode, 0, result.stderr)
+    self.assertEqual(len(self.main_prompts()), 1)
+    self.assertIn("stopped, status=done", self.main_prompts()[0])
+    self.assertNotIn("異常", self.main_prompts()[0])
+
+  def test_pi_full_path_as_session_still_matches(self):
+    result = self.watch(self.pi_env(), session=self.PI_PATH)
+    self.assertEqual(result.returncode, 0, result.stderr)
+    self.assertIn("stopped, status=done", self.main_prompts()[0])
+
+  def test_pi_live_path_of_another_uuid_sends_anomaly(self):
+    other = "/stub/.pi/agent/sessions/--w--/2026-10-18T00-00-00-000Z_019f3a2c-0000-7000-8000-000000000000.jsonl"
+    result = self.watch(self.pi_env(other), session=self.UUID)
+    self.assertEqual(result.returncode, 0, result.stderr)
+    self.assertEqual(len(self.main_prompts()), 1)
+    self.assertIn("異常", self.main_prompts()[0])
+    self.assertNotIn("stopped, status=done", self.main_prompts()[0])
+
+  def test_pi_uuid_must_be_the_whole_filename_suffix(self):
+    near = "/stub/.pi/agent/sessions/--w--/2026-10-18T00-00-00-000Z_x" + self.UUID + ".jsonl.bak"
+    result = self.watch(self.pi_env(near), session=self.UUID)
+    self.assertEqual(result.returncode, 0, result.stderr)
+    self.assertIn("異常", self.main_prompts()[0])
+    self.assertNotIn("stopped, status=done", self.main_prompts()[0])
+
 
 if __name__ == "__main__":
   unittest.main()

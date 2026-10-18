@@ -15,7 +15,7 @@ MATERIALS_DIRNAME = "materials"
 CHANNELS_DIRNAME = "channels"
 SEAT_ANGLE = {
   "gemini-pro": {"seat": "agy", "angle": "Gemini Pro", "source": "gemini",
-                 "command": "agy", "default_model": "Gemini 3.1 Pro (High)"},
+                 "command": "agy", "default_model": "Gemini 4 Argon (High)"},
   "gemini-flash": {"seat": "agy", "angle": "Gemini Flash", "source": "gemini",
                    "command": "agy", "default_model": None},
   "web-gpt": {"seat": "web-gpt", "angle": "web GPT Pro", "source": "web",

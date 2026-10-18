@@ -130,6 +130,28 @@
       "owner": "skill authoring"
     },
     {
+      "path": "~/Desktop/projects/collie-example-owner/docs/owner/retro/checkpoint.md",
+      "kind": "state",
+      "threshold": [{"metric": "size", "unit": "KB", "operator": ">", "value": 40}],
+      "action": "提醒將已停止追加的 session 水位移到最近 run 的來源清單，保留活的水位；不自動修改",
+      "owner": "collie-retro"
+    },
+    {
+      "path": "~/Desktop/projects/collie-example-owner/docs/owner/retro/LESSONS.md",
+      "kind": "state",
+      "threshold": [{"metric": "size", "unit": "KB", "operator": ">", "value": 40}],
+      "action": "提醒將已處置且低頻的教訓下放到歷史 run；保留穩定 ID 與來源，不自動刪除",
+      "owner": "collie-retro"
+    },
+    {
+      "path": "~/Desktop/projects/collie-example-owner/docs/owner/retro/runs/**",
+      "kind": "pure-log"
+    },
+    {
+      "path": "~/Desktop/projects/collie-example-owner/docs/owner/retro/baseline/**",
+      "kind": "pure-log"
+    },
+    {
       "path": "~/Desktop/projects/example-owner-blog/docs/owner/blog-mechanisms.md",
       "kind": "state",
       "threshold": [

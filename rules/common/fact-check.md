@@ -11,7 +11,7 @@
 5. **WebSearch 必配 browser SERP — ticket model** — 兩軌都跑（WebSearch API + LCU 的 Google SERP），同 query 先實際讀回搜尋頁，再 call WebSearch；ticket 只用於這輪配對，不因換 browser 入口取消查證。
 6. **不要把退役工具當 future-proof example** — 舉例前檢查工具是否還在維護（gh releases / 官網存在 / community 活躍）；退役工具當「以後可以用」等於 hallucinate 選項。
 7. **SaaS 政策必須實測官方 UI、不只信第三方文章** — SaaS 政策文件 lag、部落格更 lag；引用政策前先進官方 dashboard 實測 or 讀官方 blog 最新一篇。
-8. **讀內容不靠 WebFetch；WebFetch 4xx → 必觸發 browser 升級** — WebFetch 回的是小模型改寫、不是原文：要讀整篇或引用頁面上的數字／日期／原句，用網址抓取退路（見 WIRING.md「非官方內容抓取」）存檔後 Read（輸出已是正文），WebFetch 只做導航（找連結、確認頁面在、找該讀哪段）。WebFetch 4xx / 封鎖 / 空 body → 網址抓取退路（見 WIRING.md「非官方內容抓取」）→ exit 75/1 升 LCU MCP（`mcp__lcu__js`）；LCU 不可用就停止並回報具體阻塞，不改走 OBU／Agent Chrome，也不就此宣告內容不可得。
+8. **讀內容不靠 WebFetch；WebFetch 4xx → 必觸發 browser 升級** — 使用者直接交付的 X／Twitter 貼文或長文研究連結，先用 LCU 讀正文、程式碼與外鏈；需要留言、串文或引用時補 X／Twitter 抓取退路（見 WIRING.md「非官方內容抓取」），缺少內容就明寫缺口。日報／workflow 批次來源維持既有路線。WebFetch 回的是小模型改寫、不是原文：公開 HTML 研究頁預設先用 Firecrawl 的既有登入 Playground（正式 LCU，Scrape／Markdown），核對本次 sourceURL、正文、程式碼、表格與來源連結；沒有本次結果、拒絕、額度不足或缺內容時，才接網址抓取退路（見 WIRING.md「非官方內容抓取」）。需要本人登入狀態／視覺／互動時直接用正式 LCU；Reddit 用現有專用路徑，官方原生 Markdown 直接讀。Firecrawl 不傳登入 cookies、私人檔案或憑證，新增權限／premium／付款確認照既有邊界；LCU 不可用時回報並可用現有腳本取公開內容，不啟動其他瀏覽器後端。WebFetch 只做導航。其他頁面與既有批次來源用網址抓取退路（見 WIRING.md「非官方內容抓取」）存檔後 Read；腳本 exit 75/1 或仍缺關鍵內容時升正式 LCU，LCU 仍不可用就回報具體缺口，不宣告內容不存在。
 9. **Session topic shift → 重新 fact-check** — 對話中途換 topic（從 X repo 轉到 Y 版本、從 A 政策轉到 B），舊 topic 的 fact 不代表新 topic 也對；換 topic = 重新查。
 10. **個人歷史 query 並行查 wiki + memory** — 如果要回顧使用者的歷史、既有決策或經驗，就同時查 `~/.claude/wiki/` + `~/.claude/memory/`；如果問本人目前能否使用新功能，就查目前帳號、設定或即時資格回應，不因「我的」啟動歷史檢索。
 11. **乾淨自動路徑卡住 → 換來源類型、不宣告「不可得」** — WebFetch 掛 → chrome；chrome 掛 → gh CLI；gh 掛 → 直接讀 repo local clone。用完所有「來源類型」再宣告不可得。不要用「查不到」把工作 offload 給使用者。

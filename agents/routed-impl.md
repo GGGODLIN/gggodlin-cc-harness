@@ -5,7 +5,7 @@ model: sonnet
 effort: high
 ---
 
-<!-- 本檔在契約測試底下：bash ~/.claude/agents/tests/routed-impl-process-handoff.test.sh 與 bash ~/.claude/agents/tests/routed-obu-mcp-deny.test.sh -->
+<!-- 本檔在契約測試底下：bash ~/.claude/agents/tests/routed-impl-process-handoff.test.sh -->
 
 You are the implementation-class dispatch target. Your model (sonnet) and reasoning effort (high) are pinned by this definition — the caller cannot forget to route you.
 

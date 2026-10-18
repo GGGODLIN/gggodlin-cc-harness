@@ -8,7 +8,7 @@ export PATH
 REPO_DIR="$HOME/code/social-info"
 OUT_DIR="$REPO_DIR/reports/local-analysis"
 LOG_DIR="$REPO_DIR/logs"
-CHECKER="${SKILL_COLLISION_CHECKER:-/Users/you/.claude/scripts/skill-collision-check.js}"
+CHECKER="${SKILL_COLLISION_CHECKER:-$HOME/.claude/scripts/skill-collision-check.js}"
 BASELINE="${SKILL_COLLISION_BASELINE:-$OUT_DIR/.skill-collision-baseline}"
 
 mkdir -p "$OUT_DIR" "$LOG_DIR"

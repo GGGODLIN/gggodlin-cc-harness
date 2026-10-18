@@ -7,7 +7,7 @@
 INPUT="$(cat)"
 SID=$(printf '%s' "$INPUT" | jq -r '.session_id // empty' 2>/dev/null)
 MODEL=""
-T2_HOOK=${FABLE_GATE_T2_HOOK_PATH:-/Users/you/.claude/hooks/T2-routing-gate.sh}
+T2_HOOK=${FABLE_GATE_T2_HOOK_PATH:-$HOME/.claude/hooks/T2-routing-gate.sh}
 # 主：statusline wrapper 落的 per-session cache（跟 statusline model pill 同源、每次 render 刷新）
 if [ -n "$SID" ] && [ -f "/tmp/cc-widget-cache/model-${SID}.txt" ]; then
   MODEL=$(cat "/tmp/cc-widget-cache/model-${SID}.txt" 2>/dev/null)

@@ -48,6 +48,15 @@ assert_grep "non-text conflicts require more evidence" 'binary.*rename.*submodul
 assert_grep "resolution is staged one file at a time" 'Stage that file alone'
 assert_grep "unresolved conflicts are rechecked" 'Re-check unresolved conflicts after each file'
 assert_order "summary precedes per-file detail" '^1\. \*\*Start with a compact summary' '^3\. \*\*Inspect one conflicted file'
+# Added 2026-10-14: a merge whose tests were green had silently dropped one side's change in four
+# places (Collie upstream 1.21.0); only a per-file review against both sides found them.
+assert_grep "conflicted paths are kept for the review" 'Keep the list of conflicted paths'
+assert_grep "review uses three diffs per file" 'base to ours.*base to theirs.*base to the result'
+assert_grep "reviewer has no conversation context" 'fresh reviewer.*no conversation context'
+assert_grep "reviewer looks for a disappeared side" 'whose change disappeared'
+assert_grep "mechanical conflicts are checked by a script" 'mechanical.*checked by a script, not an agent'
+assert_order "checks precede the side review" '^6\. Discover the project' '^7\. \*\*Review every conflicted file'
+assert_order "side review precedes finishing" '^7\. \*\*Review every conflicted file' '^8\. \*\*Finish the merge'
 
 printf 'PASS=%s FAIL=%s\n' "$PASS" "$FAIL"
 

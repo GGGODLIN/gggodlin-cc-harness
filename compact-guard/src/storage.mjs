@@ -38,7 +38,8 @@ export const AUDIT_ENUM_VALUES = Object.freeze({
     "missing_checkpoint",
     "checkpoint_read_failed",
     "postcompact_failed"
-  ])
+  ]),
+  anchor: Object.freeze(["pinned", "pin_unreadable", "nudge"])
 });
 const AUDIT_ENUMS = Object.fromEntries(
   Object.entries(AUDIT_ENUM_VALUES).map(([field, values]) => [field, new Set(values)])
@@ -49,6 +50,7 @@ const COUNT_AUDIT_FIELDS = new Set([
   "messageCount",
   "entryCount",
   "packetCharacters",
+  "anchorCharacters",
   "summaryCharacters",
   "summaryBytes",
   "checkpointTermCount",

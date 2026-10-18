@@ -25,6 +25,14 @@ MODEL = 'type-safe/jev-latest:free'
 BASE = 'https://api.experientiallabs.ai'
 TIMEOUT = 1.5
 THRESHOLD = 0.5
+# 第二腿 Drex（nace，從贈額扣款、不在 free_guard 範圍）：Jev 免費層 429／逾時／冷卻中／免費價查核失敗才問。
+# 選 v2.0 不選 v1.5：2026-10-17 用本 hook 的 packet 對 120 個真實回合並列，v2.0 在 0.5 門檻觸發 11 次對 Jev 16 次、
+# 一致 107/120；v1.5 要 0.8 才對齊，而且多抓的是結案狀態回報。題目與門檻沿用、不另校。
+DREX_MODEL = 'drex-v2.0'
+DREX_BASE = 'https://console.nace.ai'
+DREX_USD_PER_INPUT_TOKEN = 6e-8  # console.nace.ai/docs/drex/reference/pricing：60 nUSD／input token，output 免費
+# 這些 Jev 失敗才換腿；nonzero_cost／missing_zero_cost_evidence 是免費契約被破壞，照舊停用、不讓 Drex 蓋過去。
+JEV_FALLS_TO_DREX = ('quota_cooldown', 'missing_key', 'free_lane_not_confirmed', 'unexpected_model')
 # 題目唯一來源；凍結靠 auto-memory-jev.md 的 Locked 欄，hook 不自驗。
 QUESTION_FILE = Path(__file__).with_name('auto-memory-jev-question.json')
 COMPANY = re.compile(r'acme|oldco|oldco-shop|Desktop[/\\-]work|work-user|example-work-account|公司付', re.I)
@@ -244,8 +252,6 @@ def reserve(directory, size):
     state = json.loads(directory.read('budget.json') or '{}')
     now = datetime.now(timezone.utc)
     day, hour = now.strftime('%Y-%m-%d'), now.strftime('%Y-%m-%dT%H')
-    if state.get('cooldown_until', 0) > time.time():
-      raise ValueError('quota_cooldown')
     if state.get('day') != day:
       state.update(day=day, daily_calls=0, daily_bytes=0)
     if state.get('hour') != hour:
@@ -259,6 +265,59 @@ def reserve(directory, size):
     for name in ('daily_bytes', 'hourly_bytes'):
       state[name] += size
     directory.write('budget.json', dump(state))
+
+
+def jev_cooling(directory):
+  # 冷卻只鎖 Jev 腿；預算（reserve）兩腿共用，所以不放在這裡
+  return json.loads(directory.read('budget.json') or '{}').get('cooldown_until', 0) > time.time()
+
+
+def ask_jev(directory, candidate, questions):
+  if jev_cooling(directory):
+    raise ValueError('quota_cooldown')
+  body = {'model': MODEL, 'state': candidate, 'questions': questions}
+  base, key = endpoint()
+  free_guard(directory, base, key)
+  try:
+    data = http(base, '/v1/systemone', key, body)
+  except urllib.error.HTTPError as error:
+    error.close()
+    if error.code == 429:
+      cooldown(directory)
+    raise
+  usage = data.get('usage') or {}
+  cost = usage.get('cost')
+  if not is_zero(cost):
+    try:
+      paid = not isinstance(cost, bool) and math.isfinite(float(cost)) and float(cost) > 0
+    except (ValueError, TypeError):
+      paid = False
+    cooldown(directory, paid=paid)
+    raise ValueError('nonzero_cost' if paid else 'missing_zero_cost_evidence')
+  if data.get('model') not in ('jev-latest', MODEL, 'type-safe/jev-latest'):
+    raise ValueError('unexpected_model')
+  return data, MODEL
+
+
+def drex_endpoint():
+  test_url = os.environ.get('JEV_MEMORY_DREX_TEST_URL', '') if os.environ.get('JEV_MEMORY_TEST_MODE') == '1' else ''
+  if test_url:
+    if not re.fullmatch(r'http://127\.0\.0\.1:\d+', test_url):
+      raise ValueError('invalid_test_endpoint')
+    return test_url, 'test-only-not-a-secret'
+  key = subprocess.run(['security', 'find-generic-password', '-s', 'nace-api-key', '-w'],
+                       capture_output=True, text=True, timeout=1, check=True).stdout.strip()
+  if not key:
+    raise ValueError('missing_drex_key')
+  return DREX_BASE, key
+
+
+def ask_drex(candidate, questions):
+  base, key = drex_endpoint()
+  data = http(base, '/v1/systemone', key, {'model': DREX_MODEL, 'state': candidate, 'questions': questions})
+  if data.get('model') != DREX_MODEL:
+    raise ValueError('unexpected_model')
+  return data, DREX_MODEL
 
 
 def cooldown(directory, paid=False):
@@ -293,29 +352,18 @@ def run_stop(payload, directory, state, name):
   if fingerprint in state.get('delivered', []):
     raise ValueError('packet_repeat')
   questions = json.loads(QUESTION_FILE.read_text())
-  body = {'model': MODEL, 'state': candidate, 'questions': questions}
-  base, key = endpoint()
-  free_guard(directory, base, key)
-  reserve(directory, len(dump(body).encode()))
+  reserve(directory, len(dump({'model': MODEL, 'state': candidate, 'questions': questions}).encode()))
   started = time.monotonic()
   try:
-    data = http(base, '/v1/systemone', key, body)
-  except urllib.error.HTTPError as error:
-    error.close()
-    if error.code == 429:
-      cooldown(directory)
-    raise
+    data, judge = ask_jev(directory, candidate, questions)
+  except ValueError as error:
+    if str(error) not in JEV_FALLS_TO_DREX:
+      raise
+    data, judge = ask_drex(candidate, questions)
+  except (OSError, subprocess.CalledProcessError):
+    # HTTPError／URLError／socket timeout 都是 OSError；Keychain 讀不到 Jev key 是 CalledProcessError
+    data, judge = ask_drex(candidate, questions)
   usage = data.get('usage') or {}
-  cost = usage.get('cost')
-  if not is_zero(cost):
-    try:
-      paid = not isinstance(cost, bool) and math.isfinite(float(cost)) and float(cost) > 0
-    except (ValueError, TypeError):
-      paid = False
-    cooldown(directory, paid=paid)
-    raise ValueError('nonzero_cost' if paid else 'missing_zero_cost_evidence')
-  if data.get('model') not in ('jev-latest', MODEL, 'type-safe/jev-latest'):
-    raise ValueError('unexpected_model')
   score = data['answers']['direct_nudge']['noul']
   if isinstance(score, bool) or not isinstance(score, (int, float)) or not math.isfinite(score) or not 0 <= score <= 1:
     raise ValueError('invalid_probability')
@@ -332,8 +380,10 @@ def run_stop(payload, directory, state, name):
     directory.write(name, dump(state))
   safe_usage = {k: v for k, v in usage.items() if k in ('input_tokens', 'output_tokens', 'cost')
                 and isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)}
+  if judge == DREX_MODEL and isinstance(safe_usage.get('input_tokens'), int):
+    safe_usage['cost_usd_est'] = round(safe_usage['input_tokens'] * DREX_USD_PER_INPUT_TOKEN, 8)
   audit(payload, 'pending' if score >= THRESHOLD else 'quiet', turn=current['turn'][:16],
-        score=score, model=MODEL, usage=safe_usage, ms=round((time.monotonic()-started)*1000, 1))
+        score=score, model=judge, usage=safe_usage, ms=round((time.monotonic()-started)*1000, 1))
 
 
 def run_deliver(payload, directory, state, name):

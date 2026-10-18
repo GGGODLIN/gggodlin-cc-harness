@@ -85,7 +85,30 @@ class PrReviewTargetsContractTest(unittest.TestCase):
     self.assertIn("authorize-dispatch", step)
     self.assertIn("awaiting-confirmation", step)
     self.assertIn("selection-required", step)
-    self.assertIn("status=READY` 且已取得明確確認前不得進入 Step 3", step)
+    self.assertIn("`authorize-dispatch` 回 `allowed:true` 前不得進入 Step 3", step)
+
+  def test_authorization_splits_claude_seats_from_extra_quota_seats(self):
+    step = self.finalize()
+    self.assertIn("review-dispatch-principles.md", step)
+    self.assertIn("兩層授權", step)
+    self.assertIn("claude-seats-auto", step)
+    self.assertIn("只選 Claude 側席位且沒有未裁決的容量超界", step)
+    self.assertIn("不需要使用者確認", step)
+    self.assertIn("Codex、Gemini、web GPT Pro、任何 Fable 席", step)
+    self.assertIn("一律當外部額度席，回 `awaiting-confirmation`", step)
+    self.assertIn("判不出來時多問一次，不當成 Claude 側席位放行", step)
+    self.assertIn("缺 `selection` 或 `capacity` 資料時回 `awaiting-confirmation`，不放行", step)
+    for seat in ("typescript-reviewer", "python-reviewer", "code-reviewer",
+                 "security-reviewer", "spec-compliance-reviewer"):
+      with self.subTest(seat=seat):
+        self.assertIn(seat, step)
+
+  def test_capacity_adjudication_still_outranks_claude_only_auto_release(self):
+    step = self.finalize()
+    self.assertIn("不論選的是哪一層席位都回 `awaiting-adjudication`", step)
+    self.assertIn("確認不能代替裁決", step)
+    self.assertIn("需要等裁決的席位不派", step)
+    self.assertIn("列為未完成", step)
 
   def test_command_examples_use_the_returned_canonical_state_path(self):
     step = self.preparation()

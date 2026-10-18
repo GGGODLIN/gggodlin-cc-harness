@@ -49,6 +49,12 @@ fi
 if [[ -e "$ROOT/$DECISION_PATH" && ! -d "$ROOT/$DECISION_PATH" ]]; then
   BLOCKED 'decision path is not a directory'
 fi
+if [[ ! -e "$ROOT/$DECISION_PATH" ]] && [[ -z "$("${GIT[@]}" log --all --format=%H -n 1 -- "$DECISION_PATH" 2>/dev/null)" ]]; then
+  # 目錄不存在、而且整個 repo 歷史從未碰過這個路徑 ⇒ 不可能有 numbered ADR 來源，remote 與 merge-base 不需要解析。
+  # 只看工作樹不夠：整批 ADR 被 git rm 後目錄也會消失，那種情況要照原流程走到 rename/delete 的 BLOCKED
+  printf '%s\n' 'STATE_ARCHIVE: no decision changes; checker skipped'
+  exit 0
+fi
 resolve_remote_default_ref() {
   local ref branch
   ref=$("${GIT[@]}" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null) || ref=''
@@ -159,7 +165,8 @@ printf '%s\n' 'STATE_ARCHIVE: ADR preflight PASS'
 exit 0
 ```
 
-   - Git 固定清除 `GIT_DIR`／`GIT_WORK_TREE`／`GIT_INDEX_FILE`，綁定 canonical `ROOT` worktree 並停用 `core.fsmonitor`；`REMOTE_DEFAULT_REF` 與 merge-base 任一步失敗都是 `BLOCKED`
+   - Git 固定清除 `GIT_DIR`／`GIT_WORK_TREE`／`GIT_INDEX_FILE`，綁定 canonical `ROOT` worktree 並停用 `core.fsmonitor`；`REMOTE_DEFAULT_REF` 與 merge-base 任一步失敗都是 `BLOCKED`（只在 `openspec/decisions/` 目錄存在時解析）
+   - `openspec/decisions/` 不存在**且 repo 歷史從未有過這個路徑**（`git log --all -- openspec/decisions` 空；例如只放私人治理檔、沒有 remote 的 acme 父層）時直接輸出 `STATE_ARCHIVE: no decision changes; checker skipped`，不解析 remote 預設分支與 merge-base——沒有目錄又沒有歷史就不可能有 numbered ADR 來源。目錄在工作樹消失但歷史有它（整批 ADR 被刪）仍走原流程、照樣 `BLOCKED`；路徑存在但不是目錄仍 `BLOCKED`（2026-10-13 起）
    - source set 是三批 NUL-delimited 結果的 union：`BASE..index` committed＋staged A/M、unstaged A/M、untracked A（含 ignored）；只收直接位於 `openspec/decisions/` 且符合 numbered ADR filename 的來源
    - numbered ADR rename／delete、decision path 變成非 directory、change-set detection failure、checker missing executable，或 checker 任一非零 exit 都 `BLOCKED`
    - 有 source changes 時 checker 只收到 deduplicated changed source files；沒有 decision changes 時輸出 `STATE_ARCHIVE: no decision changes; checker skipped`，不呼叫 checker，因此 unchanged legacy violation 不阻擋

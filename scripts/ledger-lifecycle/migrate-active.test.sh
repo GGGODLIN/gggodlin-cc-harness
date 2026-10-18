@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -u
 
-SCRIPT="${ACTIVE_MIGRATION_SCRIPT:-/Users/you/.claude/scripts/ledger-lifecycle/migrate-active.py}"
+SCRIPT="${ACTIVE_MIGRATION_SCRIPT:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/migrate-active.py}"
 TMP=$(mktemp -d /tmp/migrate-active-test.XXXXXX)
 trap 'rm -rf "$TMP"' EXIT
 PASS=0

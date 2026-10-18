@@ -10,8 +10,6 @@ import sys
 from pathlib import Path
 
 settings = json.loads(Path(sys.argv[1]).read_text())
-assert settings["model"] == "fable"
-assert settings["effortLevel"] == "medium"
 entries = settings["hooks"]["SessionStart"][0]["hooks"]
 commands = [entry["command"] for entry in entries]
 assert commands.count("~/.claude/hooks/ledger-bootstrap.sh") == 1

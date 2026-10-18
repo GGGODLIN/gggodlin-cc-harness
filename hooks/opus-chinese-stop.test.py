@@ -72,12 +72,15 @@ class OpusChineseStopTest(unittest.TestCase):
   def test_previous_stop_hook_does_not_suppress_first_reminder(self):
     self.assertIn("additionalContext", self.run_hook(stop_hook_active=True)["hookSpecificOutput"])
 
-  def test_background_wait_does_not_prompt_a_new_answer(self):
-    self.assertEqual(self.run_hook(background_tasks=[{"status": "running"}]), {})
-    self.assertEqual(self.run_hook(session_crons=[{"recurring": False}]), {})
-    self.assertEqual(self.run_hook(background_tasks=None), {})
-    self.assertEqual(self.run_hook(session_crons=None), {})
-    self.assertIn("additionalContext", self.run_hook()["hookSpecificOutput"])
+  # 2026-10-13 前這裡斷言「背景任務在跑就不提醒」；fa52de65 06:47 實例證明那條放行讓英文結案整段漏掉。
+  def test_background_wait_still_reminds_and_says_keep_waiting(self):
+    output = self.run_hook(background_tasks=[{"type": "local_bash", "status": "running"}])
+    self.assertIn("等它的通知", output["hookSpecificOutput"]["additionalContext"])
+    for fields in ({"session_crons": [{"recurring": False}]}, {"background_tasks": None}, {"session_crons": None}):
+      prompt_id = f"33333333-0000-4000-8000-{len(self.transcript.read_text()):012d}"
+      self.records("繼續", prompt_id=prompt_id)
+      with self.subTest(fields=fields):
+        self.assertIn("additionalContext", self.run_hook(prompt_id=prompt_id, **fields)["hookSpecificOutput"])
 
   def test_new_prompt_can_remind_again(self):
     self.run_hook()
@@ -91,9 +94,13 @@ class OpusChineseStopTest(unittest.TestCase):
     return prompt_id
 
   def test_notification_final_after_background_wait_reminds_once_per_human_prompt(self):
-    self.assertEqual(self.run_hook(background_tasks=[{"status": "running"}]), {})
-    first = self.notify()
-    self.assertIn("additionalContext", self.run_hook(prompt_id=first)["hookSpecificOutput"])
+    self.assertIn("additionalContext", self.run_hook(background_tasks=[{"status": "running"}])["hookSpecificOutput"])
+    self.assertEqual(self.run_hook(prompt_id=self.notify()), {})
+    self.assertEqual(self.run_hook(prompt_id=self.notify()), {})
+
+  def test_notification_reminds_when_human_turn_was_not_reminded(self):
+    self.assertEqual(self.run_hook(CHINESE), {})
+    self.assertIn("additionalContext", self.run_hook(prompt_id=self.notify())["hookSpecificOutput"])
     self.assertEqual(self.run_hook(prompt_id=self.notify()), {})
 
   def test_notification_after_reminded_human_turn_stays_quiet(self):
@@ -112,8 +119,63 @@ class OpusChineseStopTest(unittest.TestCase):
     self.records("請幫我結案")
     self.assertEqual(self.run_hook(prompt_id=self.notify(model="gpt-6-sol")), {})
 
-  def test_notification_still_waits_for_background_work(self):
-    self.assertEqual(self.run_hook(prompt_id=self.notify(), background_tasks=[{"status": "running"}]), {})
+  def test_notification_with_background_work_reminds(self):
+    output = self.run_hook(prompt_id=self.notify(), background_tasks=[{"status": "running"}])
+    self.assertIn("additionalContext", output["hookSpecificOutput"])
+
+  def log_rows(self):
+    log = self.state / "decisions.jsonl"
+    return [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
+
+  def test_log_records_outcome_and_task_kinds_only_for_english(self):
+    tasks = [{"id": "b1", "type": "dream", "status": "running", "description": "secret words", "command": "rm x"}]
+    self.run_hook(background_tasks=tasks, session_crons=[{"id": "c1"}])
+    self.run_hook(background_tasks=tasks)
+    self.run_hook(CHINESE)
+    rows = self.log_rows()
+    self.assertEqual([r["outcome"] for r in rows], ["reminded", "already_reminded"])
+    self.assertEqual(rows[0]["background_tasks"], [{"type": "dream", "status": "running"}])
+    self.assertEqual(rows[0]["session_crons"], 1)
+    self.assertEqual(rows[0]["prompt_id"], PROMPT)
+    self.assertNotIn("secret words", (self.state / "decisions.jsonl").read_text())
+
+  def test_log_names_each_pass_reason(self):
+    self.run_hook(prompt_id=None)
+    self.run_hook(prompt_id="44444444-0000-4000-8000-000000000001")
+    self.transcript.unlink()
+    self.records("請用英文回答這個問題")
+    self.run_hook()
+    self.transcript.unlink()
+    self.records("請幫我結案", model="gpt-6-sol")
+    self.run_hook()
+    self.assertEqual(
+      [r["outcome"] for r in self.log_rows()],
+      ["missing:prompt_id", "no_human_turn", "english_requested", "model:gpt-6-sol"],
+    )
+
+  def test_log_size_cap_stops_writing_but_still_reminds(self):
+    self.state.mkdir(mode=0o700)
+    log = self.state / "decisions.jsonl"
+    log.write_text("x" * (512 * 1024 + 1))
+    os.chmod(log, 0o600)
+    self.assertIn("additionalContext", self.run_hook()["hookSpecificOutput"])
+    self.assertEqual(log.stat().st_size, 512 * 1024 + 1)
+
+  def test_log_symlink_fifo_hardlink_do_not_block_or_write_outside(self):
+    self.state.mkdir(mode=0o700)
+    log = self.state / "decisions.jsonl"
+    elsewhere = self.root / "elsewhere"
+    elsewhere.write_text("unchanged")
+    log.symlink_to(elsewhere)
+    self.assertIn("additionalContext", self.run_hook()["hookSpecificOutput"])
+    self.assertEqual(elsewhere.read_text(), "unchanged")
+    for make in (lambda: os.mkfifo(log), lambda: os.link(elsewhere, log)):
+      log.unlink()
+      make()
+      next_prompt = f"55555555-0000-4000-8000-{len(self.transcript.read_text()):012d}"
+      self.records("繼續", prompt_id=next_prompt)
+      self.assertIn("additionalContext", self.run_hook(prompt_id=next_prompt)["hookSpecificOutput"])
+      self.assertEqual(elsewhere.read_text(), "unchanged")
 
   def test_unknown_turn_origin_does_not_trigger(self):
     self.transcript.unlink()
@@ -158,6 +220,26 @@ class OpusChineseStopTest(unittest.TestCase):
     next_prompt = "63495c45-711b-43b6-b1e4-3ff42d8fe0e8"
     self.records("我希望你不要用英文，用中文回答", prompt_id=next_prompt)
     self.assertIn("additionalContext", self.run_hook(prompt_id=next_prompt)["hookSpecificOutput"])
+
+  def bare_prompt(self, text, prompt_id):
+    with self.transcript.open("a") as f:
+      f.write(json.dumps({"type": "user", "promptId": prompt_id, "origin": {"kind": "human"}, "message": {"content": text}}, ensure_ascii=False) + "\n")
+
+  # fa52de65 07:20、07:32：純文字回合在 Stop 時還沒寫進 transcript，舊版判 model:unknown 放行。
+  def test_text_only_turn_not_yet_in_transcript_uses_previous_model(self):
+    next_prompt = "66666666-0000-4000-8000-000000000001"
+    self.bare_prompt("所以現在怎麼樣了", next_prompt)
+    self.assertIn("additionalContext", self.run_hook(prompt_id=next_prompt)["hookSpecificOutput"])
+    rows = self.log_rows()
+    self.assertEqual(rows[-1]["outcome"], "reminded")
+
+  def test_text_only_turn_after_other_model_stays_quiet(self):
+    self.transcript.unlink()
+    self.records("請幫我結案", model="gpt-6-sol")
+    next_prompt = "66666666-0000-4000-8000-000000000002"
+    self.bare_prompt("所以現在怎麼樣了", next_prompt)
+    self.assertEqual(self.run_hook(prompt_id=next_prompt), {})
+    self.assertEqual(self.log_rows()[-1]["outcome"], "model:gpt-6-sol")
 
   def test_other_model_and_subagent_do_not_trigger(self):
     self.transcript.unlink()

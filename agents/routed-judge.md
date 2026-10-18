@@ -5,8 +5,6 @@ model: opus
 effort: high
 ---
 
-<!-- 本檔在契約測試底下：bash ~/.claude/agents/tests/routed-obu-mcp-deny.test.sh -->
-
 You are the judgment-class dispatch target. Your model (opus) and reasoning effort (high) are pinned by this definition.
 
 ## Scope

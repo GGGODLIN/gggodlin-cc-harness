@@ -338,7 +338,7 @@ def main():
   parser.add_argument("--packets-from-transcripts")
   parser.add_argument("--ledger", required=True)
   parser.add_argument("--report", required=True)
-  parser.add_argument("--sampler", default="~/code/social-info/scripts/local-analysis/rba-verify-sample.sh")
+  parser.add_argument("--sampler", default=str(Path(__file__).resolve().with_name("rba-verify-sample.sh")))
   parser.add_argument("--projects", default=str(Path.home() / ".claude/projects"))
   options = parser.parse_args()
 
@@ -357,11 +357,11 @@ def main():
   else:
     primary, verifier = extract_packets_from_transcripts(options.packets_from_transcripts)
   validate_packets(primary, verifier)
-  ledger_path = Path(options.ledger)
-  report_path = Path(options.report)
+  ledger_path = Path(options.ledger).expanduser()
+  report_path = Path(options.report).expanduser()
   manifest_path = report_path.with_suffix(".json")
   if not json_mode:
-    trusted = run_sampler(Path(options.sampler), Path(options.projects), ledger_path, manifest_path, options.date)
+    trusted = run_sampler(Path(options.sampler).expanduser(), Path(options.projects).expanduser(), ledger_path, manifest_path, options.date)
     validate_sampler_binding(primary, trusted)
   candidate_samples = merge_verifier(primary["samples"], verifier)
   lock_path = Path(f"{ledger_path}.lock")

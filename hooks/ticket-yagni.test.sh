@@ -168,6 +168,9 @@ TICKET_YAGNI_FAIL_OPEN=0 hook gate "$(gate_input Edit "$T03" "$DONE_LINE" $SESSI
 check "G14 fail-closed policy: stale pending -> deny" 'echo "$OUT" | grep -q deny'
 hook gate "$(gate_input Edit "$T12" "$DONE_LINE" $SESSION)"
 check "G10 unregistered ticket -> deny with remedy" "echo \"\$OUT\" | grep -q deny && echo \"\$OUT\" | grep -q '沒有登記' && echo \"\$OUT\" | grep -q -- '--manual'"
+# 2026-10-14：Inline（沒有 worker）時補救指令要直接可跑——票檔與 worktree 填好、不要求不存在的 worker worktree
+REPO_TOP=$(git -C "$REPO" rev-parse --show-toplevel)
+check "G10b unregistered remedy is runnable for Inline: ticket-file + toplevel worktree filled, no worker placeholder" "echo \"\$OUT\" | grep -qF -- '--ticket-file $T12' && echo \"\$OUT\" | grep -qF -- '--worktree $REPO_TOP ' && ! echo \"\$OUT\" | grep -qF '<worker worktree>' && echo \"\$OUT\" | grep -q '開工前'"
 hook gate "$(gate_input Edit "$T12" '**Status:** implementation complete — thin runner verified' $SESSION)"
 check "G11 boundary: R1-style 'implementation complete' counts as completion" 'echo "$OUT" | grep -q deny'
 hook gate "$(gate_input Write "$T12" "# 12\n\n$DONE_LINE\n" $SESSION)"

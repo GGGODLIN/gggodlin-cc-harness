@@ -12,7 +12,7 @@ PATH="/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:~/.local/bin"
 export PATH
 
 # 以下 RULES_SIZE_* / SESSION_AUDIT_* 覆寫只給測試把路徑導到臨時目錄用。
-REPO_DIR="${RULES_SIZE_REPO_DIR:-/Users/you/code/social-info}"
+REPO_DIR="${RULES_SIZE_REPO_DIR:-$HOME/code/social-info}"
 OUT_DIR="$REPO_DIR/reports/local-analysis"
 LOG_DIR="$REPO_DIR/logs"
 
@@ -27,7 +27,7 @@ LOG="$LOG_DIR/local-analysis-rules-size-$DATE.log"
 # 單檔理想 <300 行、prompt 周邊位置（開頭/結尾）注意力較高。
 # byte cap 是 proxy——若未來要調 cap，用「指令條數」重新換算而非直接放大 bytes。
 # 2026-09-22 使用者拍板 CLAUDE.md cap 12288 → 14000：09-03 瘦身到 13058 後三週長回 13718，選擇認了不再砍。
-CLAUDE_HOME="${RULES_SIZE_CLAUDE_HOME:-/Users/you/.claude}"
+CLAUDE_HOME="${RULES_SIZE_CLAUDE_HOME:-$HOME/.claude}"
 CLAUDE_MD="$CLAUDE_HOME/CLAUDE.md"
 CLAUDE_CAP="${RULES_SIZE_CLAUDE_CAP:-14000}"   # 14KB（2026-09-22 起）
 RULE_CAP="${RULES_SIZE_RULE_CAP:-9728}"        # 9.5KB

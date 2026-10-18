@@ -6,7 +6,7 @@ import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
-const names = ['e2e-route', 'e2e-contract', 'e2e-tester-army', 'e2e-explore-then-batch']
+const names = ['e2e-route', 'e2e-contract', 'e2e-explore-then-batch']
 const texts = Object.fromEntries(names.map(name => [name, readFileSync(join(root, 'skills', name, 'SKILL.md'), 'utf8')]))
 
 test('契約與執行入口保留可呼叫的合法 frontmatter', () => {
@@ -38,7 +38,7 @@ test('路由有工作種類分支且兩工具引用相同契約', () => {
   assert.match(texts['e2e-route'], /work-kind=contract/)
   assert.match(texts['e2e-route'], /Skill\(e2e-contract\)/)
   assert.match(texts['e2e-route'], /普通工作/)
-  for (const name of ['e2e-tester-army', 'e2e-explore-then-batch']) {
+  for (const name of ['e2e-explore-then-batch']) {
     assert.match(texts[name], /mode=contract/)
     assert.match(texts[name], /\/skills\/e2e-contract\/references\/execution-contract\.md/)
     assert.match(texts[name], /不回 route 重試或降級普通模式/)

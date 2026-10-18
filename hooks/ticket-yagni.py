@@ -857,7 +857,14 @@ def cmd_gate(inp):
       entries.append({'agent_id': 'manual', 'ts': manual_dir.stat().st_mtime, 'run_id': decision['run_id']})
     if not entries:
       audit('gate-deny-unregistered', session=session, ticket=ticket, file=fpath)
-      return deny(f'票 {ticket} 沒有登記 worker，YAGNI 未審，不能標完成。派工 description 帶「Ticket {ticket}」才會自動登記。{remedy}')
+      # Inline（main 自己做、沒有 worker）沒有 worker worktree 與 dispatch base；給一條填好的指令，
+      # 只留 base 要人填 —— runner 比 base 到目前工作樹，base 用整條 branch 會把別張票算進來
+      top = git_toplevel(str(inp.get('cwd') or '')) or '<repo 根目錄>'
+      inline = (f'補救（Inline、沒有 worker）：python3 {RUNNER} --manual --session {session} --ticket {ticket} '
+                f'--ticket-file {fpath} --worktree {top} --base <這張票開工前的 HEAD>，跑完再改 Status。'
+                f'base 用開工前記下的 HEAD；沒記到就用這張票第一個 commit 的前一個。已經開始下一張票的話，'
+                f'--worktree 改成停在這張票最後一個 commit 的臨時 detached worktree，否則後面的票會被算進來。停用開關：touch {OFF}')
+      return deny(f'票 {ticket} 沒有登記 worker，YAGNI 未審，不能標完成。派工 description 帶「Ticket {ticket}」才會自動登記。{inline}')
     entry = sorted(entries, key=lambda e: e.get('ts', 0))[-1]
     sdir = state_dir(session, entry.get('run_id') or decision['run_id'], ticket, entry['agent_id'])
     verdict = sdir / 'verdict.json'

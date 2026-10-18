@@ -17,11 +17,14 @@ argument-hint: "[tier 1-4 | yagni] [spec 路徑，省略則取最新 local spec]
 - 第一個 token 是 `yagni` → 走下方「YAGNI 軸」段；其餘 token 當 spec 路徑
 - 第一個 token 不是數字 → 整串當 spec 路徑
 - 都沒給 → 目標 spec = cwd 下**最新**的 OpenSpec `openspec/changes/*/design.md`、`openspec/changes/*/proposal.md` 或 local scratch `.scratch/*/spec.md`（依 mtime 取最新；無輸出就問使用者要審哪份）
-- 沒給 Tier → 印「Tier 選單」+ 複雜度提示，等使用者選；**不要自己預設高 Tier**。若使用者選 Tier 3，回傳可直接貼上的 `/review-spec 3 <spec 絕對路徑>` 並停止本輪；特權雙跑只接受原 command 同時明列 Tier 3 與 spec 路徑，不把後續裸 `3` 當授權。
+- 沒給 Tier → 不等使用者回覆：main 依「Tier 選單」的「什麼時候選」欄，在第 1、2 級之間自選（符合第 1 級那句選 1、符合第 2 級那句選 2），開跑前寫明「選了第 N 級、依「什麼時候選」哪一句、為什麼」，接著照該級流程執行。自選只限第 1、2 級之間，不自己選第 3、4 級或 yagni。
+- 沒給 Tier 時，另外對照選單第 3、4 級的「什麼時候選」：符合第 3 級（動核心架構／碰生產資料／跨既有 domain model）→ 照常先跑自選的第 1 或第 2 級，並在自選級別的 review surface 時，結尾附推薦：可直接貼上的 `/review-spec 3 <spec 絕對路徑>`；符合第 4 級（賭很大的關鍵決策）→ 同樣先跑自選級別，結尾附推薦：可直接貼上的 `/review-spec 4 <spec 絕對路徑>`，並提醒外部席要使用者自己選。推薦只是建議，**不簽發 permit**，不呼叫 `review-spec-dual-permit.py issue`；特權雙跑只接受使用者親手送出、同時明列 Tier 3 與 spec 路徑的原 command，不把自選流程或後續裸 `3` 當授權。
+- 使用者在 to-spec 落檔後的入口選單回覆選第 3 級時，回傳可直接貼上的 `/review-spec 3 <spec 絕對路徑>` 並停止本輪，語意不變。
+- 明列級別（`1`–`4`、`yagni`）的叫用照原流程執行，不經自選、不重選級別。
 
 command **路徑無關**：任何 spec / plan / PRD 都能審，不綁定特定 workflow。預設 local artifacts 使用 OpenSpec 的 `openspec/changes/<change>/design.md` 或 `openspec/changes/<change>/proposal.md`、無 OpenSpec 時的 `.scratch/<feature>/spec.md`；若目標是 plan / tasks，只接受 OpenSpec 的 `openspec/changes/<change>/design.md` 或 `openspec/changes/<change>/tasks.md`。Tier 1／2／4 先 `Read` 目標 spec 全文再動作；Tier 3 先完成下方可信 permit preflight，才讀取 spec。
 
-## Tier 選單（沒給 Tier 時印這段給使用者選）
+## Tier 選單（沒給 Tier 時，main 依「什麼時候選」欄自選第 1、2 級；第 3、4 級只推薦）
 
 | Tier | 機制                                          | 什麼時候選                                    |
 | ---- | --------------------------------------------- | --------------------------------------------- |
@@ -31,7 +34,7 @@ command **路徑無關**：任何 spec / plan / PRD 都能審，不綁定特定 
 | 4    | 外部跨模型暗門（codex-rescue）                | 賭很大的關鍵決策才手動升                      |
 | yagni | 需求定價軸（獨立跑，不與 T1–T4 疊加）        | spec 是模型代寫、要審「值不值得」而非「對不對」 |
 
-預設別逼高 Tier — 重 gate 跑久了使用者會懶得等、退回橡皮圖章，gate 本身被蓋章。
+預設別逼高 Tier — 重 gate 跑久了使用者會懶得等、退回橡皮圖章，gate 本身被蓋章。自選只到第 2 級；第 3、4 級是使用者明列才跑的席位。
 
 ## 貫穿守則（標準 Tier 1–4 全部適用；YAGNI 僅沿用守則 0 與 4）
 

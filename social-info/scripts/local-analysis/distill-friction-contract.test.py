@@ -19,7 +19,8 @@ class DistillContract(unittest.TestCase):
       self.assertNotIn(obsolete, text)
 
   def test_workflow_discovery_and_success_evidence_steps_are_preserved(self):
-    original = subprocess.check_output(['git', '-C', str(ROOT), 'show', 'HEAD:scripts/local-analysis/distill-weekly.sh'], text=True)
+    rel_source = subprocess.check_output(['git', '-C', str(ROOT), 'ls-files', '--full-name', str(SOURCE)], text=True).strip()
+    original = subprocess.check_output(['git', '-C', str(ROOT), 'show', f'HEAD:{rel_source}'], text=True)
     current = SOURCE.read_text()
     section_a = re.compile(r'## Step 1.*?(?=## Step 6 —)', re.S)
     self.assertEqual(section_a.search(current).group(), section_a.search(original).group())

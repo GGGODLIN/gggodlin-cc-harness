@@ -43,7 +43,7 @@ const INJECTION_OK_SHAPE = createShape([
   "messageCount",
   "entryCount",
   "packetCharacters"
-]);
+], ["anchor", "anchorCharacters"]);
 const INJECTION_MISSING_SHAPE = createShape(["trigger", "errorCode", "sessionHash"]);
 const INJECTION_SUPERSEDED_SHAPE = createShape(["trigger", "sessionHash"]);
 const INJECTION_INVALID_SESSION_SHAPE = createShape(["trigger", "errorCode"]);

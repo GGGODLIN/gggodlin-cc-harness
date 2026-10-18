@@ -3,7 +3,9 @@ import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
+const checkerPath = fileURLToPath(new URL('./skill-collision-check.js', import.meta.url))
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'skill-collision-check-'))
 try {
   for (const [name, description] of [
@@ -14,7 +16,7 @@ try {
     fs.mkdirSync(dir)
     fs.writeFileSync(path.join(dir, 'SKILL.md'), `---\nname: ${name}\ndescription: ${description}\n---\n`)
   }
-  const output = execFileSync('node', ['~/.claude/scripts/skill-collision-check.js', '--pairs-only', root], { encoding: 'utf8' }).trim()
+  const output = execFileSync('node', [checkerPath, '--pairs-only', root], { encoding: 'utf8' }).trim()
   assert.ok(output)
   const score = output.split('|')[2]
   assert.match(score, /^[01]\.\d{6}$/)

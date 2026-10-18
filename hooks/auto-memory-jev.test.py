@@ -10,6 +10,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import time
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -59,17 +60,30 @@ class ReminderTests(unittest.TestCase):
     self.calls = []
     self.metadata_calls = 0
     self.price = '0'
+    # Drex 第二腿：nace 回件沒有 cost 欄（計費靠 input_tokens），fixture 照真實形狀
+    self.drex_calls = []
+    self.drex_response = {'model': 'drex-v2.0', 'answers': {'direct_nudge': {'noul': 0.7}},
+                          'usage': {'input_tokens': 600, 'output_tokens': 20}}
     self.http_patch = patch.object(hook, 'http', side_effect=self.fake_http)
     self.endpoint_patch = patch.object(hook, 'endpoint', return_value=(hook.BASE, 'test-only'))
+    self.drex_endpoint_patch = patch.object(hook, 'drex_endpoint', return_value=(hook.DREX_BASE, 'test-only-drex'))
     self.http_patch.start()
     self.endpoint_patch.start()
+    self.drex_endpoint_patch.start()
     self.addCleanup(self.http_patch.stop)
     self.addCleanup(self.endpoint_patch.stop)
+    self.addCleanup(self.drex_endpoint_patch.stop)
 
   def flush(self):
     self.transcript.write_text(''.join(json.dumps(e, ensure_ascii=False) + '\n' for e in self.entries))
 
   def fake_http(self, _base, path, _key, body=None, **_kwargs):
+    if _base == hook.DREX_BASE:
+      self.assertEqual(path, '/v1/systemone')
+      self.assertEqual(body['model'], hook.DREX_MODEL)
+      self.assertEqual(_key, 'test-only-drex')
+      self.drex_calls.append(body)
+      return self.drex_response
     if path == '/api/v1/models':
       self.metadata_calls += 1
       return {'data': [{'id': hook.MODEL, 'pricing': {'prompt': self.price, 'completion': '0'}}]}
@@ -328,12 +342,6 @@ class ReminderTests(unittest.TestCase):
     self.invoke()
     self.assertEqual(len(self.calls), 2)
 
-  def test_price_guard_rejects_paid_lane(self):
-    self.price = '0.000000042'
-    with self.assertRaisesRegex(ValueError, 'free_lane_not_confirmed'):
-      self.invoke()
-    self.assertEqual(len(self.calls), 0)
-
   def test_price_cache_and_single_free_route(self):
     self.invoke()
     self.deliver()
@@ -367,19 +375,106 @@ class ReminderTests(unittest.TestCase):
       with self.assertRaisesRegex(ValueError, 'invalid_probability'):
         self.invoke()
 
-  def test_http_429_cooldown_no_retry(self):
+  def jev_fails_with(self, error):
+    # Jev 腿失敗、Drex 腿照 fixture 回答；回傳可直接餵 patch.object 的 side_effect
     def failed(_base, path, _key, body=None, **_kwargs):
-      if path == '/api/v1/models':
+      if _base == hook.DREX_BASE or path == '/api/v1/models':
         return self.fake_http(_base, path, _key, body)
       self.calls.append(body)
-      raise urllib.error.HTTPError(hook.BASE, 429, 'quota', {}, None)
-    self.http_patch.stop()
-    with patch.object(hook, 'http', side_effect=failed), self.assertRaises(urllib.error.HTTPError):
-      self.invoke()
-    self.next_turn()
-    with self.assertRaisesRegex(ValueError, 'quota_cooldown'):
-      self.invoke()
+      raise error
+    return failed
+
+  def test_jev_answers_drex_untouched(self):
+    self.invoke()
     self.assertEqual(len(self.calls), 1)
+    self.assertEqual(self.drex_calls, [])
+    self.assertEqual(self.audit_rows()[-1]['model'], hook.MODEL)
+    self.assertNotIn('cost_usd_est', self.audit_rows()[-1]['usage'])
+
+  def test_http_429_cools_jev_and_drex_answers(self):
+    self.http_patch.stop()
+    with patch.object(hook, 'http', side_effect=self.jev_fails_with(urllib.error.HTTPError(hook.BASE, 429, 'quota', {}, None))):
+      self.invoke()
+      budget = json.loads((hook.automatic_dir() / 'budget.json').read_text())
+      self.assertGreater(budget['cooldown_until'], time.time())
+      self.assertEqual(len(self.drex_calls), 1)
+      self.assertIn('pending', json.loads(self.journal().read_text()))
+      row = self.audit_rows()[-1]
+      self.assertEqual((row['status'], row['model']), ('pending', hook.DREX_MODEL))
+      self.assertEqual(row['usage']['cost_usd_est'], round(600 * hook.DREX_USD_PER_INPUT_TOKEN, 8))
+      # 冷卻中：Jev 腿不再被打（calls 仍 1），直接問 Drex；預算兩腿共用、每回合只算一次
+      self.deliver()
+      self.next_turn()
+      self.invoke()
+      self.assertEqual(len(self.calls), 1)
+      self.assertEqual(len(self.drex_calls), 2)
+      self.assertEqual(json.loads((hook.automatic_dir() / 'budget.json').read_text())['daily_calls'], 2)
+
+  def test_jev_timeout_and_missing_key_fall_to_drex(self):
+    self.http_patch.stop()
+    with patch.object(hook, 'http', side_effect=self.jev_fails_with(TimeoutError('timed out'))):
+      self.invoke()
+    self.assertEqual(len(self.drex_calls), 1)
+    self.endpoint_patch.stop()
+    self.next_turn()
+    with patch.object(hook, 'http', side_effect=self.fake_http), \
+         patch.object(hook, 'endpoint', side_effect=subprocess.CalledProcessError(44, 'security')):
+      self.invoke()
+    self.assertEqual(len(self.drex_calls), 2)
+    self.assertNotIn('cooldown_until', json.loads((hook.automatic_dir() / 'budget.json').read_text()))
+
+  def test_free_lane_not_confirmed_falls_to_drex_not_paid_jev(self):
+    self.price = '0.000000042'
+    self.invoke()
+    self.assertEqual(len(self.calls), 0)
+    self.assertEqual(len(self.drex_calls), 1)
+
+  def test_paid_jev_response_still_disables_and_never_asks_drex(self):
+    self.response['usage']['cost'] = 0.01
+    with self.assertRaisesRegex(ValueError, 'nonzero_cost'):
+      self.invoke()
+    self.assertTrue(hook.disabled())
+    self.assertEqual(self.drex_calls, [])
+
+  def test_drex_paid_usage_never_writes_disabled_or_cooldown(self):
+    self.drex_response['usage']['cost'] = 0.0000123
+    self.http_patch.stop()
+    with patch.object(hook, 'http', side_effect=self.jev_fails_with(urllib.error.HTTPError(hook.BASE, 503, 'down', {}, None))):
+      self.invoke()
+    self.assertFalse(hook.disabled())
+    self.assertNotIn('cooldown_until', json.loads((hook.automatic_dir() / 'budget.json').read_text()))
+    self.assertEqual(self.audit_rows()[-1]['model'], hook.DREX_MODEL)
+
+  def test_both_legs_down_is_unavailable_without_pending(self):
+    def both_fail(_base, path, _key, body=None, **_kwargs):
+      if path == '/api/v1/models':
+        return self.fake_http(_base, path, _key, body)
+      raise urllib.error.HTTPError(_base, 429 if _base == hook.BASE else 502, 'x', {}, None)
+    self.http_patch.stop()
+    with patch.object(hook, 'http', side_effect=both_fail), self.assertRaises(urllib.error.HTTPError):
+      self.invoke()
+    self.assertNotIn('pending', json.loads(self.journal().read_text()))
+    self.drex_endpoint_patch.stop()
+    self.next_turn()
+    with patch.object(hook, 'http', side_effect=both_fail), patch.object(hook, 'drex_endpoint', side_effect=ValueError('missing_drex_key')), \
+         self.assertRaisesRegex(ValueError, 'missing_drex_key'):
+      self.invoke()
+
+  def test_drex_unexpected_model_rejected(self):
+    self.drex_response['model'] = 'drex-v1.5'
+    self.http_patch.stop()
+    with patch.object(hook, 'http', side_effect=self.jev_fails_with(urllib.error.HTTPError(hook.BASE, 429, 'quota', {}, None))), \
+         self.assertRaisesRegex(ValueError, 'unexpected_model'):
+      self.invoke()
+    self.assertNotIn('pending', json.loads(self.journal().read_text()))
+
+  def test_kill_switch_blocks_drex_leg_too(self):
+    (hook.automatic_dir().parent / 'auto-memory-jev.disabled').parent.mkdir(parents=True, exist_ok=True)
+    (hook.automatic_dir().parent / 'auto-memory-jev.disabled').write_text('off\n')
+    self.http_patch.stop()
+    with patch.object(hook, 'http', side_effect=self.jev_fails_with(urllib.error.HTTPError(hook.BASE, 429, 'quota', {}, None))):
+      self.invoke()
+    self.assertEqual((self.calls, self.drex_calls), ([], []))
 
   def test_daily_and_hourly_budget_reserve(self):
     with common.SafeDirectory(hook.automatic_dir()) as directory:

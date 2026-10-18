@@ -2,7 +2,7 @@
 # Threat model：提示型 UserPromptSubmit hook，只防誠實但健忘的模型，不防主動規避。
 # 字串比對只認常見入口，不承諾完整語意；判不出來就放行。模型可忽略 additionalContext，這不由本 hook 保證。
 # Surface：Locked＝本 hook 與 fixture；Editable＝本次工作區草稿；Append-only＝無，本 hook 不寫 audit ledger；Human-controlled＝兩個 disabled sentinel。
-# Locked 路徑：bootstrap 走一般 commit；update 改 hook/helper/fixture 後跑 fixture；recovery 由使用者建立對應 disabled sentinel，三條路徑都留下 git 或測試痕跡。
+# Locked 路徑：bootstrap 走一般 commit；update 改 hook/fixture 後跑 fixture；recovery 由使用者建立對應 disabled sentinel，三條路徑都留下 git 或測試痕跡。
 # 繞行表：未收錄的自然語句由漏抓率腳本觀察；模型忽略提醒由人工副 KPI 觀察；英文同義句不在涵蓋範圍；通知、slash command 與長文依守衛放行。
 # 精度取捨：`看一下`／`先確認` 曾在詞表內，因精度僅 25%／37.5%（占誤觸 64%）移除——兩者是向前的祈使動詞、不指涉過去；
 # 代價是失去 4 個真命中（其中 2 個屬邊界案例），由 `之前`／`當初` 等新詞覆蓋大部分。`好像有點` 為「有點」固定詞組，
@@ -12,10 +12,6 @@
 # 固定詞組造成的誤命中（做+過濾、檢+查一下、調+查一下、用過+幾個、所以+前X、在那+之前），與 `好像有點` 同類。
 # 剝 `所以` 而非 `所以前`：後者會把「所以前幾天」吃成「幾天」、連帶弄丟 `前幾天` 這個真觸發詞。
 # 觀察窗內未處理：`派出之前` 這種「動詞＋之前」的時序副詞（ERE 無 lookbehind，兩筆樣本不足以歸納通用形狀）。
-# 2026-10-01 加 Jev 判斷（使用者拍板 b、免費來源）：詞表沒命中時同步問 recall-before-answer-jev.py，P≥0.7 注入同一段提醒。
-# 離線 329 則新樣本 Jev@0.7 漏抓 23/46、誤觸 14/37，字串 35/46、9/20；兩項 KPI 仍未達，是有限接線不是驗收。
-# 代價：詞表沒命中、300 字以內的訊息原文會送到 Experiential Labs（不保證不留存），每則多等約 0.5 秒，逾時上限約 1.5 秒。
-# 停用 Jev：建立 $STATE_DIR/recall-jev.disabled；詞表與訪談不受影響。
 # 本檔在契約測試底下：bash ~/.claude/hooks/recall-before-answer.test.sh
 set -uo pipefail
 
@@ -50,15 +46,10 @@ INTERVIEW_ENTER_PATTERN='訪談|一題一題|一項一項|訪談式'
 INTERVIEW_ENTER_NEGATION_PATTERN='不要進入訪談模式|不要訪談'
 INTERVIEW_EXIT_PATTERN='停(([[:space:][:punct:]]|[，。！？、；：…～~]|啊|呀|啦|喔|哦|吧|嘛|呢|一下)*)($|[[:space:][:punct:]，。！？、；：…～~])|不用訪談|一次問完'
 
-JEV_DISABLED="${RECALL_JEV_DISABLED_SENTINEL:-$STATE_DIR/recall-jev.disabled}"
-RECALL_JEV_CMD="${RECALL_JEV_CMD:-/usr/bin/python3 $HOME/.claude/hooks/recall-before-answer-jev.py}"
-
 RECALL_ENABLED=1
 INTERVIEW_ENABLED=1
-JEV_ENABLED=1
 [ -f "$RECALL_DISABLED" ] && RECALL_ENABLED=0
 [ -f "$INTERVIEW_DISABLED" ] && INTERVIEW_ENABLED=0
-[ -f "$JEV_DISABLED" ] && JEV_ENABLED=0
 
 SAFE_SESSION_ID="$SESSION_ID"
 case "$SAFE_SESSION_ID" in
@@ -98,10 +89,6 @@ if [ "$RECALL_ENABLED" -eq 1 ]; then
     RECALL_SCAN=${RECALL_SCAN//$strip_phrase/}
   done
   HIT=$(printf '%s' "$RECALL_SCAN" | grep -oE "$RECALL_PATTERN" | head -n 1 || true)
-  # 詞表已命中就不問 Jev：提醒內容相同，省一次網路往返。Jev 任何失敗都不輸出，等於只剩詞表。
-  if [ -z "$HIT" ] && [ "$JEV_ENABLED" -eq 1 ]; then
-    HIT=$(printf '%s' "$PROMPT" | RECALL_JEV_SESSION="$SESSION_ID" $RECALL_JEV_CMD 2>/dev/null || true)
-  fi
   if [ -n "$HIT" ]; then
     RECALL_CONTEXT="使用者在指涉過去的工作：回答前先翻 session 紀錄／git／memory，找到或確認不存在才下判斷；憑印象回＝違規（命中：${HIT}）"
     if [ -n "$CONTEXT" ]; then

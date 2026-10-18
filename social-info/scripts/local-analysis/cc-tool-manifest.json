@@ -125,11 +125,6 @@
     "source": "sops"
   },
   {
-    "name": "ollama",
-    "manager": "brew",
-    "source": "ollama"
-  },
-  {
     "name": "opa",
     "manager": "brew",
     "source": "opa"

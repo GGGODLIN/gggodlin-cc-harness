@@ -1,6 +1,6 @@
 import fs from 'node:fs'
 
-const source = fs.readFileSync('~/.claude/workflows/local-analysis.js', 'utf8')
+const source = fs.readFileSync(new URL('../local-analysis.js', import.meta.url), 'utf8')
 const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor
 const compile = () => new AsyncFunction(
   'args',
@@ -22,21 +22,17 @@ const DAILY_CHANNELS = [
   'skill-desc-quality',
   'recap',
   'bumblebee',
-  'symlink',
   'path-rot',
   'tool-updates',
   'skill-collision',
   'agnix',
   'ledger-lifecycle',
-  'codex-cdp',
-  'free-pool',
   'skill-changes',
   'failure-mode',
+  'hash-reflow',
 ]
 const INTERVAL_CHANNEL = 'evidence-level'
 const WEEKLY_CHANNELS = [
-  'deep-research-pending',
-  'codemap',
   'distill',
   'recurring-errors',
   'rba-verify',
@@ -234,6 +230,13 @@ const runWorkflow = async (inputArgs, resultOverrides = {}, runtime = {}) => {
     if (options.schema?.required?.includes('silent')) {
       return { ok: true, silent: false }
     }
+    if (options.schema?.required?.includes('report_markdown')) {
+      return {
+        summary: `${options.label} summary`,
+        report_markdown: `# ${options.label}\n\n## Summary\n`,
+        deferred_writeback: '',
+      }
+    }
     return { summary: `${options.label} summary` }
   }
   const parallel = (thunks) => Promise.all(thunks.map((thunk) => thunk()))
@@ -264,28 +267,17 @@ const failureRun = await runWorkflow(
   { date: '2026-07-29', weekday: 3 },
   { bumblebee: null }
 )
-const memoryRecoveryRun = await runWorkflow(
+const memoryFailureRun = await runWorkflow(
   { date: '2026-07-29', weekday: 3 },
   {
     memory: null,
-    'memory-recovery': { ok: true, summary: 'recovered memory summary' },
   }
 )
-const REPORT_DIR = '~/code/social-info/reports/local-analysis'
-const llmCheckCall = silentRun.calls.find((call) => call.options.label === 'llm-report-check')
-const llmCheckedPaths = [...(llmCheckCall?.prompt.matchAll(/'([^']+\.md)'/g) ?? [])].map((m) => m[1])
-const missingReportRun = await runWorkflow(
+const memoryInvalidSchemaRun = await runWorkflow(
   { date: '2026-07-29', weekday: 3 },
   {
-    'llm-report-check': {
-      present: llmCheckedPaths.filter((path) => path !== `${REPORT_DIR}/2026-07-29-memory.md`),
-      missing: [`${REPORT_DIR}/2026-07-29-memory.md`],
-    },
+    memory: { summary: 'only summary' },
   }
-)
-const spoofedReportCheckRun = await runWorkflow(
-  { date: '2026-07-29', weekday: 3 },
-  { 'llm-report-check': { present: [], missing: ['/tmp/not-a-channel.md'] } }
 )
 const runnerFailureRun = await runWorkflow(
   { date: '2026-07-29', weekday: 3 },
@@ -294,8 +286,8 @@ const runnerFailureRun = await runWorkflow(
 const spoofedIdentityRun = await runWorkflow(
   { date: '2026-07-29', weekday: 3 },
   {
-    bumblebee: { channel: 'symlink', report_path: '/tmp/spoofed.md', ok: true, silent: false },
-    symlink: null,
+    bumblebee: { channel: 'path-rot', report_path: '/tmp/spoofed.md', ok: true, silent: false },
+    'path-rot': null,
   }
 )
 const forceRun = await runWorkflow({ date: '2026-07-29', weekday: 3, force_shell: true })
@@ -584,8 +576,8 @@ const barrierDownstreamPositions = barrierRun.calls
   .map((call, index) => call.options.label === 'evidence-level-reaudit-preparer' || call.options.label === 'evidence-level-reaudit' || call.options.label === 'evidence-level-finalizer' ? index : null)
   .filter((index) => index != null)
 const normalShellCall = silentRun.calls.find((call) => call.options.label === 'bumblebee')
-const memoryRecoveryCalls = memoryRecoveryRun.calls.filter((call) => call.options.label === 'memory' || call.options.label === 'memory-recovery')
-const memoryRecoveryChannel = memoryRecoveryRun.result.channels.find((channel) => channel.key === 'memory')
+const memoryCall = silentRun.calls.find((call) => call.options.label === 'memory')
+const memoryPendingReport = silentRun.result.pending_reports.find((channel) => channel.key === 'memory')
 const forceShellCall = forceRun.calls.find((call) => call.options.label === 'bumblebee')
 const beadsShellCall = stringArgsRun.calls.find((call) => call.options.label === 'beads-aging')
 const ledgerLifecycleShellCall = stringArgsRun.calls.find((call) => call.options.label === 'ledger-lifecycle')
@@ -637,17 +629,17 @@ const finalizerExtraFieldRbaCalls = finalizerExtraFieldRun.calls.filter((call) =
 
 const checks = [
   ['workflow script 語法有效', syntaxValid],
-  ['字串 args 正確解析 32 個 calendar channel 並 defer 未到期 interval channel', sameMembers(stringArgsRun.result.attempted, [...DAILY_CHANNELS, ...WEEKLY_CHANNELS]) && sameMembers(stringArgsRun.result.skipped, [INTERVAL_CHANNEL]) && sameMembers(stringArgsRun.result.deferred, [INTERVAL_CHANNEL])],
-  ['字串 weekday 正規化為數字', stringWeekdayRun.result.attempted.includes('codemap')],
+  ['字串 args 正確解析 calendar channel 並 defer 未到期 interval channel', sameMembers(stringArgsRun.result.attempted, [...DAILY_CHANNELS, ...WEEKLY_CHANNELS]) && sameMembers(stringArgsRun.result.skipped, [INTERVAL_CHANNEL]) && sameMembers(stringArgsRun.result.deferred, [INTERVAL_CHANNEL])],
+  ['字串 weekday 正規化為數字', stringWeekdayRun.result.attempted.includes('distill')],
   ['非週二只跑 daily 並跳過 weekly 與未到期 interval channel', sameMembers(silentRun.result.attempted, DAILY_CHANNELS) && sameMembers(silentRun.result.skipped, [...WEEKLY_CHANNELS, INTERVAL_CHANNEL])],
   ['非法 JSON args fail-fast', malformedArgsRejected],
   ['silent shell channel 不進 reported channels', silentRun.result.ran.includes('bumblebee') && silentRun.result.silent.includes('bumblebee') && !silentRun.result.channels.some((channel) => channel.key === 'bumblebee')],
   ['失敗 channel 不冒充 ran', failureRun.result.failed.includes('bumblebee') && !failureRun.result.ran.includes('bumblebee')],
-  ['memory primary 無回傳時由 fresh finalizer 恢復', JSON.stringify(memoryRecoveryCalls.map((call) => call.options.label)) === JSON.stringify(['memory', 'memory-recovery']) && memoryRecoveryRun.result.ran.includes('memory') && !memoryRecoveryRun.result.failed.includes('memory') && memoryRecoveryChannel?.summary === 'recovered memory summary'],
-  ['memory primary prompt 禁止報告寫入後重讀', memoryRecoveryCalls[0]?.prompt.includes('寫入後不要再 Read')],
-  ['memory recovery 只讀固定報告並驗證必要結構', memoryRecoveryCalls[1]?.options.model === 'sonnet' && JSON.stringify(memoryRecoveryCalls[1]?.options.schema?.required) === JSON.stringify(['ok', 'summary']) && memoryRecoveryCalls[1]?.prompt.includes('/2026-07-29-memory.md') && memoryRecoveryCalls[1]?.prompt.includes('# Memory Audit') && memoryRecoveryCalls[1]?.prompt.includes('## Summary')],
+  ['llm channel 進入 pending_reports 待 main 落檔、不直接冒充 ran', memoryPendingReport?.report_path === '~/code/social-info/reports/local-analysis/2026-07-29-memory.md' && memoryPendingReport?.summary === 'memory summary' && !silentRun.result.ran.includes('memory')],
+  ['llm channel prompt 禁止子任務自行寫報告檔並要求回傳 report_markdown', memoryCall?.prompt.includes('不要寫報告檔') && memoryCall?.prompt.includes('report_markdown')],
+  ['llm channel 回傳 null 時進 failed 且不進 pending_reports', memoryFailureRun.result.failed.includes('memory') && !memoryFailureRun.result.pending_reports.some((channel) => channel.key === 'memory')],
   ['runner 回報失敗不進 ran', runnerFailureRun.result.failed.includes('bumblebee') && !runnerFailureRun.result.ran.includes('bumblebee')],
-  ['channel 身分綁定 workflow 設定', spoofedIdentityRun.result.ran.includes('bumblebee') && spoofedIdentityRun.result.failed.includes('symlink') && !spoofedIdentityRun.result.ran.includes('symlink')],
+  ['channel 身分綁定 workflow 設定', spoofedIdentityRun.result.ran.includes('bumblebee') && spoofedIdentityRun.result.failed.includes('path-rot') && !spoofedIdentityRun.result.ran.includes('path-rot')],
   ['report path 綁定 workflow 設定', bumblebeeChannel.report_path === '~/code/social-info/reports/local-analysis/2026-07-29-bumblebee.md'],
   ['shell channel 標記 needs_read', bumblebeeChannel.needs_read === true],
   ['一般 shell 走完整性 runner', normalShellCall.prompt.includes('run-shell-channel.sh') && normalShellCall.prompt.includes('2026-07-29 false')],
@@ -688,7 +680,7 @@ const checks = [
   ['evidence-level finalizer 從固定 transcript root 取得雙 audit、attempt nonce 與 current re-audit path', sevenDayEvidenceCalls[8]?.options.model === 'sonnet' && sevenDayEvidenceCalls[8]?.prompt.includes('--mode finalize') && sevenDayEvidenceCalls[8]?.prompt.includes("--audit-from-transcripts '~/.claude/projects/-Users-you-code-social-info'") && sevenDayEvidenceCalls[8]?.prompt.includes(`--attempt-nonce '${evidenceAttemptNonce}'`) && sevenDayEvidenceCalls[8]?.prompt.includes(`--reaudit-nonce '${evidenceReauditNonce}'`) && sevenDayReauditCall?.prompt.includes(evidenceReauditPath) && sevenDayEvidenceCalls.slice(6).every((call) => !call.prompt.includes('--reaudit-samples-path')) && !sevenDayEvidenceCalls[8]?.prompt.includes('ls -td') && !sevenDayEvidenceCalls[8]?.prompt.includes('--audit-b64') && !sevenDayEvidenceCalls[8]?.prompt.includes(evidenceChallenge) && !sevenDayEvidenceCalls[8]?.prompt.includes('draft')],
   ['evidence-level 合併後 canonical Top 2 並只傳 finalizer 值且 needs_read=false', evidenceTopTwoChannel?.summary.includes('doc-as-evidence：1、unsourced-mechanism：1') && !evidenceTopTwoChannel?.summary.includes('unsourced-number') && evidenceTopTwoChannel?.needs_read === false],
   ['evidence-level report path 與 needs_read 正確', evidenceChannel?.report_path === '~/code/social-info/reports/local-analysis/2026-07-29-evidence-level.md' && evidenceChannel?.needs_read === false],
-  ['evidence-level 到期後 reported channel count 正確', evidenceSevenDayRun.result.channels.length === DAILY_CHANNELS.length + 1],
+  ['evidence-level 到期後 reported channel 與 pending_reports 總數正確', evidenceSevenDayRun.result.channels.length + evidenceSevenDayRun.result.pending_reports.length === DAILY_CHANNELS.length + 1],
   ['evidence-level sampler 的 batch 描述欄位固定為 index／range／path／audit_nonce', JSON.stringify(Object.keys(sevenDayEvidenceCalls[1]?.options.schema?.properties?.batches?.items?.properties ?? {})) === JSON.stringify(['index', 'range', 'path', 'audit_nonce'])],
   ['evidence-level 不帶 digest 欄的 packet 走完整流程並算 ran', evidenceSevenDayRun.result.ran.includes('evidence-level') && !evidenceSevenDayRun.result.failed.includes('evidence-level')],
   ['evidence-level 舊 packet 帶互相矛盾的 digest 欄仍被讀取、欄位被忽略而不崩（F2）', legacyDigestEvidenceCalls.length === 9 && evidenceLegacyDigestRun.result.ran.includes('evidence-level') && !evidenceLegacyDigestRun.result.failed.includes('evidence-level')],
@@ -710,9 +702,7 @@ const checks = [
   ['RBA finalizer ok=false fail closed', finalizerFalseRun.result.failed.includes('rba-verify') && finalizerFalseRbaCalls.length === 3],
   ['RBA finalizer report path 不符 fail closed', finalizerWrongPathRun.result.failed.includes('rba-verify') && finalizerWrongPathRbaCalls.length === 3],
   ['RBA finalizer 額外欄位 fail closed', finalizerExtraFieldRun.result.failed.includes('rba-verify') && finalizerExtraFieldRbaCalls.length === 3],
-  ['LLM report 存在性由固定指令驗證、涵蓋全部 llm channel', llmCheckCall != null && llmCheckCall.options.model === 'sonnet' && llmCheckCall.prompt.includes('[ -s "$f" ]') && llmCheckedPaths.includes(`${REPORT_DIR}/2026-07-29-memory.md`) && llmCheckedPaths.includes(`${REPORT_DIR}/2026-07-29-wiki-lint.md`) && llmCheckedPaths.length === silentRun.result.channels.filter((channel) => channel.kind === 'llm').length],
-  ['LLM channel 自述已寫但報告缺檔 → failed、不冒充 ran', missingReportRun.result.failed.includes('memory') && !missingReportRun.result.ran.includes('memory') && !missingReportRun.result.channels.some((channel) => channel.key === 'memory') && missingReportRun.result.ran.includes('wiki-lint')],
-  ['report check 回傳非預期路徑 → 略過驗證、channel 維持自述', !spoofedReportCheckRun.result.failed.includes('memory') && spoofedReportCheckRun.result.ran.includes('memory') && spoofedReportCheckRun.logs.some((line) => line.includes('llm-report-check 回傳無效'))],
+  ['LLM channel schema 缺欄位 → failed、不冒充 ran 或 pending_reports', memoryInvalidSchemaRun.result.failed.includes('memory') && !memoryInvalidSchemaRun.result.ran.includes('memory') && !memoryInvalidSchemaRun.result.pending_reports.some((channel) => channel.key === 'memory') && memoryInvalidSchemaRun.result.pending_reports.some((channel) => channel.key === 'wiki-lint')],
   ['回傳 reconcile 指令', stringArgsRun.result.reconcile_cmd.includes('ledger-reconcile.py')],
   ['workflow 明示不產 digest', stringArgsRun.result.next_action.includes('只做偵測、不產 digest')],
 ]

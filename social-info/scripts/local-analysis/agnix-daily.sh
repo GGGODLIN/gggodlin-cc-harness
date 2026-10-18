@@ -8,7 +8,7 @@ export PATH
 REPO_DIR="$HOME/code/social-info"
 OUT_DIR="$REPO_DIR/reports/local-analysis"
 LOG_DIR="$REPO_DIR/logs"
-TARGET="${AGNIX_TARGET:-/Users/you/.claude}"
+TARGET="${AGNIX_TARGET:-$HOME/.claude}"
 AGNIX_VERSION="0.37.5"
 BASELINE="${AGNIX_BASELINE:-$OUT_DIR/.agnix-baseline}"
 
@@ -74,6 +74,20 @@ allowed_diagnostics = {
     ("warning", "vendor/sepia/skills/sepia/SKILL.md", "AS-013", "File reference 'references/voices/PERSONA-TEMPLATE.md`' is deeper than one level"),
     ("error", "vendor/sepia/.qwenpaw-plugin/plugin.json", "CC-PL-001", "plugin.json must be located in .claude-plugin/ directory"),
     ("warning", "vendor/sepia/.qwenpaw-plugin/plugin.json", "CC-PL-009", "Invalid author object: 'author.name' must be a non-empty string"),
+    # CC-AG-005：agnix 以掃描根下 .claude/skills/ 解析 agent frontmatter skills:，掃 ~/.claude 時找不到 ~/.claude/skills/review-method/SKILL.md（實際存在、CC 已載入）；
+    # 用 exact allowlist 而非停用規則，新 agent 真漏 skill 引用時仍抓得到（2026-10-17 daily-local M1）
+    ("error", "agents/advisor-seat.md", "CC-AG-005", "Referenced skill 'review-method' not found at .claude/skills/review-method/SKILL.md"),
+    ("error", "agents/architecture-critic.md", "CC-AG-005", "Referenced skill 'review-method' not found at .claude/skills/review-method/SKILL.md"),
+    ("error", "agents/acme-comment-sweeper.md", "CC-AG-005", "Referenced skill 'review-method' not found at .claude/skills/review-method/SKILL.md"),
+    ("error", "agents/code-reviewer.md", "CC-AG-005", "Referenced skill 'review-method' not found at .claude/skills/review-method/SKILL.md"),
+    ("error", "agents/evidence-level-auditor.md", "CC-AG-005", "Referenced skill 'review-method' not found at .claude/skills/review-method/SKILL.md"),
+    ("error", "agents/python-reviewer.md", "CC-AG-005", "Referenced skill 'review-method' not found at .claude/skills/review-method/SKILL.md"),
+    ("error", "agents/security-reviewer.md", "CC-AG-005", "Referenced skill 'review-method' not found at .claude/skills/review-method/SKILL.md"),
+    ("error", "agents/skill-verify-auditor.md", "CC-AG-005", "Referenced skill 'review-method' not found at .claude/skills/review-method/SKILL.md"),
+    ("error", "agents/spec-compliance-reviewer.md", "CC-AG-005", "Referenced skill 'review-method' not found at .claude/skills/review-method/SKILL.md"),
+    ("error", "agents/task-verifier.md", "CC-AG-005", "Referenced skill 'review-method' not found at .claude/skills/review-method/SKILL.md"),
+    ("error", "agents/typescript-reviewer.md", "CC-AG-005", "Referenced skill 'review-method' not found at .claude/skills/review-method/SKILL.md"),
+    ("error", "agents/upstream-pr-reviewer.md", "CC-AG-005", "Referenced skill 'review-method' not found at .claude/skills/review-method/SKILL.md"),
 }
 with open(sys.argv[2], "w") as suppressed:
     for level, file, rule, message in sorted(allowed_diagnostics):

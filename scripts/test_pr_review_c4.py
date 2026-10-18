@@ -2358,5 +2358,77 @@ class DeclaredPacketAuthorityTest(unittest.TestCase):
     )
 
 
+class SourcePreflightTest(unittest.TestCase):
+  setUp = ValidateOutputTest.setUp
+
+  def run_preflight(self, packet_value=None, context=None):
+    payload = {
+      "packet": packet() if packet_value is None else packet_value,
+      "binding_context": self.binding_context if context is None else context,
+    }
+    result = subprocess.run(
+      [sys.executable, str(MODULE_PATH), "preflight-sources"],
+      input=json.dumps(payload),
+      capture_output=True,
+      text=True,
+      check=False,
+    )
+    self.assertTrue(result.stdout, result.stderr)
+    return result.returncode, json.loads(result.stdout)
+
+  def test_accepts_normal_source_without_creating_dispatch_artifacts(self):
+    with mock.patch.object(MODULE, "issue_dispatch_permit") as issue:
+      result = MODULE.preflight_sources(packet(), self.binding_context)
+    self.assertEqual("COMPLETE", result["status"])
+    self.assertEqual("C4_SOURCE_PREFLIGHT_OK", result["reason_code"])
+    self.assertNotIn("agent", result)
+    self.assertNotIn("permit_id", result)
+    issue.assert_not_called()
+    code, cli = self.run_preflight()
+    self.assertEqual(0, code)
+    self.assertEqual(result, cli)
+
+  def test_skips_oversized_git_source_even_when_packet_is_small(self):
+    root = self.binding_context["review_root"]
+    spec = Path(root, clause()["spec_path"])
+    spec.write_text(spec.read_text() + "\n" + "x" * 120001)
+    subprocess.run(["git", "-C", root, "add", "."], check=True)
+    subprocess.run(["git", "-C", root, "commit", "-qm", "large source"], check=True)
+    self.binding_context["review_head"] = subprocess.check_output(
+      ["git", "-C", root, "rev-parse", "HEAD"], text=True,
+    ).strip()
+    self.assertTrue(MODULE.packet_valid(packet()))
+    self.assertFalse(MODULE.packet_authority_valid(self.binding_context, packet()))
+    code, result = self.run_preflight()
+    self.assertEqual(1, code)
+    self.assertEqual("SKIPPED", result["status"])
+    self.assertEqual("C4_AUTHORITY_BINDING_INVALID", result["reason_code"])
+    self.assertNotIn("agent", result)
+
+  def test_rejects_stale_quote_without_trusting_worktree(self):
+    broken = packet()
+    broken["clauses"][0]["exact_quote"] = "cancelOrder MUST return 410 when state is PENDING"
+    broken["clauses"][0]["source_excerpt"] = broken["clauses"][0]["exact_quote"]
+    Path(self.binding_context["review_root"], clause()["spec_path"]).write_text(
+      "\n" * 4 + broken["clauses"][0]["exact_quote"],
+    )
+    code, result = self.run_preflight(broken)
+    self.assertEqual(1, code)
+    self.assertEqual("C4_AUTHORITY_BINDING_INVALID", result["reason_code"])
+
+  def test_requires_target_context_for_target_qualified_packet(self):
+    qualified = packet()
+    for key in ("clauses", "spec_files", "changed_files", "evidence_bindings"):
+      for item in qualified[key]:
+        item["target_identity"] = TARGET_A
+    code, missing = self.run_preflight(qualified)
+    self.assertEqual(1, code)
+    self.assertEqual("C4_BINDING_TARGET_INVALID", missing["reason_code"])
+    context = {**self.binding_context, "targets": {TARGET_A: self.binding_context}}
+    code, accepted = self.run_preflight(qualified, context)
+    self.assertEqual(0, code)
+    self.assertEqual("C4_SOURCE_PREFLIGHT_OK", accepted["reason_code"])
+
+
 if __name__ == "__main__":
   unittest.main()

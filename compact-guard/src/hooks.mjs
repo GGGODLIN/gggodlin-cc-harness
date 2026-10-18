@@ -1,3 +1,4 @@
+import { buildAnchorBlock } from "./anchor.mjs";
 import { renderRecoveryPacket, selectEvidence } from "./text.mjs";
 import {
   extractMessages,
@@ -290,10 +291,17 @@ const handleSessionStart = async ({ vendor, input, env }, options, state) => {
       }, state);
       return EMPTY_RESULT;
     }
-    const additionalContext = renderRecoveryPacket({
+    const recoveryPacket = renderRecoveryPacket({
       ...checkpoint,
       evidence: checkpoint.entries
     });
+    let anchor = null;
+    if (vendor === "claude") {
+      try {
+        anchor = await (options?.buildAnchorBlock ?? buildAnchorBlock)({ checkpoint, env, home: options?.home });
+      } catch {}
+    }
+    const additionalContext = anchor ? `${recoveryPacket}\n\n${anchor.text}` : recoveryPacket;
     try {
       await markCheckpointInjected({
         vendor,
@@ -315,7 +323,8 @@ const handleSessionStart = async ({ vendor, input, env }, options, state) => {
       recordCount: checkpoint.recordCount,
       messageCount: checkpoint.messageCount,
       entryCount: checkpoint.entries?.length,
-      packetCharacters: additionalContext.length
+      packetCharacters: additionalContext.length,
+      ...(anchor ? { anchor: anchor.kind, anchorCharacters: anchor.characters } : {})
     }, state);
     return jsonResult({
       hookSpecificOutput: {

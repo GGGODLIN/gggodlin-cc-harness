@@ -4,7 +4,8 @@ set -u
 HOOK="$(dirname "$0")/dispatch-obligation-nudge.py"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
-export DON_TEST_MODE=1 DON_LOG="$TMP/log.jsonl" DON_STATE_DIR="$TMP/state" DON_RELAY_KEY=test-key DON_FORCE_ARM=treatment
+# selfbulk 預設關：沒帶假答案的舊案例否則會真的打本機 relay；selfbulk 段與 HTTP 案例再各自打開
+export DON_TEST_MODE=1 DON_LOG="$TMP/log.jsonl" DON_STATE_DIR="$TMP/state" DON_RELAY_KEY=test-key DON_FORCE_ARM=treatment DON_SELFBULK_DISABLE=1
 pass=0; fail=0
 ok() { pass=$((pass+1)); echo "PASS $1"; }
 ko() { fail=$((fail+1)); echo "FAIL $1: $2"; }
@@ -41,8 +42,10 @@ answer = {"trigger": {"choice": "search>2", "probabilities": {"none": 0.05, "big
 
 class Relay(BaseHTTPRequestHandler):
   def do_POST(self):
-    captured.append((self.path, json.loads(self.rfile.read(int(self.headers["Content-Length"])))))
-    body = json.dumps({"choices": [{"message": {"content": json.dumps(answer)}}]}).encode()
+    request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+    captured.append((self.path, request))
+    reply = {"q_zh": 0.95, "q_en": 0.95} if "q_en:" in request["messages"][0]["content"] else answer
+    body = json.dumps({"choices": [{"message": {"content": json.dumps(reply)}}]}).encode()
     self.send_response(200)
     self.send_header("Content-Type", "application/json")
     self.send_header("Content-Length", str(len(body)))
@@ -57,6 +60,8 @@ thread = threading.Thread(target=server.serve_forever, daemon=True)
 thread.start()
 env = dict(os.environ)
 env.pop("DON_FAKE_ANSWER", None)
+env.pop("DON_SELFBULK_DISABLE", None)
+env["DON_SELFBULK_SYNC"] = "1"
 env.update({"DON_RELAY_URL": "http://127.0.0.1:%s/v1/chat/completions" % server.server_port, "DON_MODEL": "groq-qwen-3.8-27b", "DON_LOG": str(Path(sys.argv[3]) / "cap-log.jsonl"), "DON_STATE_DIR": str(Path(sys.argv[3]) / "cap-state"), "DON_CONTROL": "0"})
 payload = {"session_id": "cap-fixture", "transcript_path": sys.argv[2], "prompt": "請核對三家官方網站並比較", "cwd": sys.argv[3]}
 try:
@@ -67,8 +72,11 @@ finally:
   thread.join(timeout=2)
 
 assert result.returncode == 0, result.stderr
-assert len(captured) == 1, captured
-path, request = captured[0]
+assert len(captured) == 2, captured
+bulk = [r for p, r in captured if "q_en:" in r["messages"][0]["content"]]
+assert len(bulk) == 1 and bulk[0]["max_tokens"] == 64 and bulk[0]["temperature"] == 0 and bulk[0]["model"] == "groq-qwen-3.8-27b", bulk
+assert "[助理最後一則回覆]" in bulk[0]["messages"][1]["content"], bulk
+path, request = next((p, r) for p, r in captured if "q_en:" not in r["messages"][0]["content"])
 assert path == "/v1/chat/completions", path
 assert request.get("max_tokens") == 256, request
 assert request["response_format"] == {"type": "json_object"}, request
@@ -78,9 +86,150 @@ assert [m["role"] for m in request["messages"]] == ["system", "user"], request
 output = json.loads(result.stdout)
 assert output["hookSpecificOutput"]["hookEventName"] == "UserPromptSubmit", output
 assert "dispatch-obligation" in output["hookSpecificOutput"]["additionalContext"], output
-row = json.loads((Path(sys.argv[3]) / "cap-log.jsonl").read_text())
+rows = [json.loads(l) for l in (Path(sys.argv[3]) / "cap-log.jsonl").read_text().splitlines()]
+row = next(r for r in rows if r["event"] == "prompt")
 assert row["result"] == "nudge" and row["pMust"] == 0.81, row
+side = next(r for r in rows if r["event"] == "selfbulk")
+assert side["result"] == "would-flag" and side["pEn"] == 0.95, side
+assert "selfbulk" not in result.stdout and "逐一" not in result.stdout, result.stdout
 EOF
+
+python3 - "$HOOK" "$T" "$TMP" <<'EOF' && ok "prompt accepts a normal relay response beyond 1.5 seconds" || ko "prompt relay budget" "see traceback"
+import json, os, subprocess, sys, threading, time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+
+answer = {"trigger": {"choice": "search>2", "probabilities": {"none": 0.05, "big": 0.02, "edit>5": 0.03, "search>2": 0.9}}, "exceptionHolds": {"probability": 0.1}}
+
+class Relay(BaseHTTPRequestHandler):
+  def do_POST(self):
+    self.rfile.read(int(self.headers["Content-Length"]))
+    time.sleep(2)
+    body = json.dumps({"choices": [{"message": {"content": json.dumps(answer)}}]}).encode()
+    try:
+      self.send_response(200)
+      self.send_header("Content-Length", str(len(body)))
+      self.end_headers()
+      self.wfile.write(body)
+    except (BrokenPipeError, ConnectionResetError):
+      pass
+
+  def log_message(self, *args):
+    pass
+
+server = ThreadingHTTPServer(("127.0.0.1", 0), Relay)
+server.daemon_threads = False
+thread = threading.Thread(target=server.serve_forever)
+thread.start()
+env = dict(os.environ)
+for name in ("DON_FAKE_ANSWER", "DON_TIMEOUT_S"):
+  env.pop(name, None)
+env.update(DON_SELFBULK_DISABLE="1", DON_CONTROL="0", DON_RELAY_URL="http://127.0.0.1:%d/v1/chat/completions" % server.server_port, DON_LOG=str(Path(sys.argv[3]) / "budget.jsonl"), DON_STATE_DIR=str(Path(sys.argv[3]) / "budget-state"))
+payload = json.dumps({"session_id": "relay-budget", "transcript_path": sys.argv[2], "prompt": "請核對三家官方網站並比較"})
+try:
+  result = subprocess.run([sys.executable, sys.argv[1], "prompt"], input=payload, text=True, capture_output=True, env=env, timeout=5)
+  assert result.returncode == 0 and "dispatch-obligation" in result.stdout, (result.returncode, result.stdout, result.stderr)
+  env["DON_TIMEOUT_S"] = "0.1"
+  failed = subprocess.run([sys.executable, sys.argv[1], "prompt"], input=payload, text=True, capture_output=True, env=env, timeout=5)
+  assert failed.returncode == 0 and failed.stdout == "", (failed.returncode, failed.stdout, failed.stderr)
+  rows = [json.loads(line) for line in Path(env["DON_LOG"]).read_text().splitlines()]
+  assert [row["result"] for row in rows] == ["nudge", "unavailable"], rows
+finally:
+  server.shutdown()
+  server.server_close()
+  thread.join()
+EOF
+
+# selfBulk 觀察題（2026-10-13）：只寫 log、永不注入；並行請求、分開冷卻、可單獨關閉
+export DON_LOG="$TMP/sb.jsonl" DON_SELFBULK_DISABLE=0 DON_SELFBULK_SYNC=1
+QUIET='{"trigger":{"choice":"none","probabilities":{"none":0.95,"big":0.02,"edit>5":0.02,"search>2":0.01}},"exceptionHolds":{"probability":0.2}}'
+sb_last() { grep '"event": "selfbulk"' "$DON_LOG" | tail -1; }
+out=$(DON_FAKE_ANSWER="$QUIET" DON_FAKE_SELFBULK='{"q_zh":0.95,"q_en":0.95}' run_prompt "$(payload_prompt "$T" "好")"); rc=$?
+[ $rc -eq 0 ] && [ -z "$out" ] && sb_last | grep -q '"result": "would-flag"' && ok "selfbulk known-bad: logged would-flag, nothing injected" || ko "selfbulk known-bad" "rc=$rc out=$out $(sb_last)"
+out=$(DON_FAKE_ANSWER="$QUIET" DON_FAKE_SELFBULK='{"q_zh":0.0,"q_en":0.0}' run_prompt "$(payload_prompt "$T" "好")")
+[ -z "$out" ] && sb_last | grep -q '"result": "quiet"' && ok "selfbulk known-good: quiet" || ko "selfbulk known-good" "$(sb_last)"
+out=$(DON_FAKE_ANSWER="$QUIET" DON_FAKE_SELFBULK='{"q_zh":0.0,"q_en":0.5}' run_prompt "$(payload_prompt "$T" "好")")
+sb_last | grep -q '"result": "would-flag"' && ok "selfbulk boundary: q_en 0.5 flags (zh ignored)" || ko "selfbulk boundary 0.5" "$(sb_last)"
+out=$(DON_FAKE_ANSWER="$QUIET" DON_FAKE_SELFBULK='{"q_zh":0.99,"q_en":0.49}' run_prompt "$(payload_prompt "$T" "好")")
+sb_last | grep -q '"result": "quiet"' && ok "selfbulk boundary: q_en 0.49 quiet even if zh high" || ko "selfbulk boundary 0.49" "$(sb_last)"
+out=$(DON_FAKE_ANSWER="$QUIET" DON_FAKE_SELFBULK='{"q_en":"x"}' run_prompt "$(payload_prompt "$T" "好")"); rc=$?
+[ $rc -eq 0 ] && sb_last | grep -q '"result": "malformed"' && ok "selfbulk malformed → logged, exit 0" || ko "selfbulk malformed" "$(sb_last)"
+before=$(grep -c '"event": "selfbulk"' "$DON_LOG")
+out=$(DON_SELFBULK_DISABLE=1 DON_FAKE_ANSWER="$QUIET" DON_FAKE_SELFBULK='{"q_zh":1,"q_en":1}' run_prompt "$(payload_prompt "$T" "好")")
+[ "$(grep -c '"event": "selfbulk"' "$DON_LOG")" -eq "$before" ] && grep -q '"result": "quiet"' "$DON_LOG" && ok "recovery: DON_SELFBULK_DISABLE=1 stops only selfbulk" || ko "selfbulk disable" "$(tail -2 "$DON_LOG")"
+out=$(DON_FAKE_ANSWER="$QUIET" DON_FAKE_SELFBULK='{"q_zh":1,"q_en":1}' run_prompt "$(payload_prompt "$T" "/compact")")
+[ "$(grep -c '"event": "selfbulk"' "$DON_LOG")" -eq "$before" ] && ok "selfbulk skipped on slash prompt" || ko "selfbulk slash" "$(sb_last)"
+mk_transcript "$TMP/noreply.jsonl" "$HUMAN"
+out=$(DON_FAKE_ANSWER="$QUIET" DON_FAKE_SELFBULK='{"q_zh":1,"q_en":1}' run_prompt "$(payload_prompt "$TMP/noreply.jsonl" "好")")
+[ "$(grep -c '"event": "selfbulk"' "$DON_LOG")" -eq "$before" ] && ok "selfbulk skipped when no prior main reply" || ko "selfbulk no reply" "$(sb_last)"
+out=$(DON_RELAY_URL="http://127.0.0.1:9/v1/chat/completions" DON_TIMEOUT_S=0.3 DON_SELFBULK_TIMEOUT_S=0.3 run_prompt "$(payload_prompt "$T" "好")"); rc=$?
+[ $rc -eq 0 ] && [ -z "$out" ] && sb_last | grep -q '"result": "unavailable"' && ok "selfbulk relay unreachable → unavailable, exit 0" || ko "selfbulk unreachable" "rc=$rc $(sb_last)"
+python3 - "$HOOK" <<'EOF' && ok "selfbulk state: all main text after last human, tail 6000" || ko "selfbulk state" "see traceback"
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("don", sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+h = lambda t: {"type": "user", "message": {"role": "user", "content": t}}
+a = lambda t: {"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": t}]}}
+s = m.self_bulk_state([h("舊問題"), a("舊回覆"), h("你審得來嗎"), a("共 399 份"), a("x" * 7000), a("由我分批審")], "好")
+assert "你審得來嗎" in s and "舊回覆" not in s and "由我分批審" in s and s.count("x") >= 5900, s[:200]
+assert m.self_bulk_state([h("只有人類")], "好") == ""
+EOF
+python3 - "$HOOK" "$TMP" <<'EOF' && ok "selfbulk 429 sets only its own cooldown" || ko "selfbulk cooldown isolation" "see traceback"
+import importlib.util, os, sys, threading, json
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
+os.environ["DON_STATE_DIR"] = str(Path(sys.argv[2]) / "cool-state")
+class R(BaseHTTPRequestHandler):
+  def do_POST(self):
+    self.rfile.read(int(self.headers["Content-Length"]))
+    body = b'{"error":{"message":"Rate limit reached"}}'
+    self.send_response(429); self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
+  def log_message(self, *a): pass
+srv = HTTPServer(("127.0.0.1", 0), R); threading.Thread(target=srv.serve_forever, daemon=True).start()
+os.environ["DON_RELAY_URL"] = "http://127.0.0.1:%d/v1/chat/completions" % srv.server_port
+os.environ.pop("DON_FAKE_SELFBULK", None)
+spec = importlib.util.spec_from_file_location("don", sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+row = m.self_bulk_row("state", "s")
+srv.shutdown()
+assert row["result"] == "unavailable" and row["reason"] == "http-429", row
+assert m.in_cooldown("selfbulk-cooldown") and not m.in_cooldown(), "cooldown leaked to the live question"
+assert m.self_bulk_row("state", "s")["reason"] == "cooldown"
+EOF
+# 正式路徑（非 SYNC）：relay 慢 2 秒時 hook 仍立刻結束，log 列由脫離的子程序事後補上
+python3 - "$HOOK" "$T" "$TMP" <<'EOF' && ok "selfbulk detached: hook returns fast, row lands later" || ko "selfbulk detached" "see traceback"
+import json, os, subprocess, sys, threading, time
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
+QUIET = {"trigger": {"choice": "none", "probabilities": {"none": 0.95, "big": 0.02, "edit>5": 0.02, "search>2": 0.01}}, "exceptionHolds": {"probability": 0.2}}
+class R(BaseHTTPRequestHandler):
+  def do_POST(self):
+    req = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+    bulk = "q_en:" in req["messages"][0]["content"]
+    if bulk:
+      time.sleep(2)
+    body = json.dumps({"choices": [{"message": {"content": json.dumps({"q_zh": 0.95, "q_en": 0.95} if bulk else QUIET)}}]}).encode()
+    self.send_response(200); self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
+  def log_message(self, *a): pass
+srv = HTTPServer(("127.0.0.1", 0), R); threading.Thread(target=srv.serve_forever, daemon=True).start()
+log = Path(sys.argv[3]) / "detached.jsonl"
+env = {k: v for k, v in os.environ.items() if k not in ("DON_FAKE_ANSWER", "DON_FAKE_SELFBULK", "DON_SELFBULK_SYNC", "DON_SELFBULK_DISABLE")}
+env.update({"DON_RELAY_URL": "http://127.0.0.1:%d/v1/chat/completions" % srv.server_port, "DON_LOG": str(log), "DON_STATE_DIR": str(Path(sys.argv[3]) / "det-state")})
+payload = {"session_id": "detached", "transcript_path": sys.argv[2], "prompt": "好", "cwd": sys.argv[3]}
+start = time.time()
+result = subprocess.run([sys.executable, sys.argv[1], "prompt"], input=json.dumps(payload), text=True, capture_output=True, env=env, timeout=5)
+elapsed = time.time() - start
+assert result.returncode == 0 and result.stdout == "", result
+assert elapsed < 1.5, elapsed
+rows = []
+for _ in range(60):
+  rows = [json.loads(l) for l in log.read_text().splitlines()] if log.exists() else []
+  if any(r["event"] == "selfbulk" for r in rows):
+    break
+  time.sleep(0.1)
+srv.shutdown()
+side = [r for r in rows if r["event"] == "selfbulk"]
+assert len(side) == 1 and side[0]["result"] == "would-flag" and side[0]["ms"] >= 1900, rows
+EOF
+export DON_LOG="$TMP/log.jsonl" DON_SELFBULK_DISABLE=1
 
 # known-bad: model says search>2 with no exception → nudge
 out=$(DON_FAKE_ANSWER='{"trigger":{"choice":"search>2","probabilities":{"none":0.05,"big":0.02,"edit>5":0.03,"search>2":0.9}},"exceptionHolds":{"probability":0.1}}' run_prompt "$(payload_prompt "$T" "可以，開始")"); rc=$?

@@ -2,6 +2,29 @@
 
 公開版 harness 的變更紀錄。每一節對應一次發布；「Unreleased」是已整備、尚未推上公開 repo 的候選。只記對讀者有意義的變動，不逐檔列 diff。
 
+## 2026-10-18
+
+### 新增
+- `references/failure-mode-taxonomy.md`：失敗模式探針表（F1–F7 問句與登記區格式骨架，補齊回流機制樞紐檔）。
+- `hooks/claim-detect-keywords.json`：`T1-claim-detect-local-first.sh` 的宣稱詞正規式與計分規則表。
+- `skills/review-method`、`review-standards/`、`references/review-dispatch-principles.md`：審查 subagent 共用方法原則、必報清單（must-report）與審查派工原則。
+- `skills/agent-dispatch/references/harness-recommendations.md`：模型 × 外殼推薦表。
+
+### 修正
+- 匯出路徑與去識別化：修正 `.sh` 預設值 `${VAR:-...}` 產生 `/Users/you/...` 與 Node.js／Python 未展開 `'~/...'` 的問題；隨附測試改用同庫相對路徑定位。
+- 公開版契約測試對齊：移除依賴私人歷史 commit 的 `hooks/taskoutput-settings-contract.test.py`，將 `review-spec`、`implement`、`e2e`、`write-pr-description`、`ledger-bootstrap`、`local-analysis` 等契約測試對齊公開版 `🔌` 接線點與白名單範圍，並修正 `scripts/failure-mode-daily.test.py` 的固定日期過期問題。
+- `install/hooks/*.md`：補齊 `T1-claim-detect-local-first`、`T1-evidence-level-detect`、`T2-routing-gate`、`checkpoint-judge`、`ledger-bootstrap`、`matt-tdd-gate` 六份安裝說明的必備隨附檔案與測試段落。
+- `commands/rules-slim.md`、`scripts/recall-before-answer-leakage.py`、`config/gpt-models.env`、`openspec/specs/harness-trust-binding/spec.md`：補註歷史盤點目錄 `rule-review/` 缺省行為、移除未匯出檔案註解並補齊 spec `Purpose` 與中性化描述。
+
+### 變更
+- `skills/agent-dispatch`：支援依任務指定 worker 外殼（預設 Claude Code，可選 Codex CLI 或 pi），派工同意門檻一併涵蓋外殼與配方。
+- `commands/pr-review.md`、`commands/review-spec.md`：審查席位推薦與選席規則更新（`review-spec` 未給級別時於 Tier 1/2 間自選，Tier 3/4 只推薦不自動簽發 permit）。
+- `rules/common/fact-check.md`、`skills/research-before-answer`：公開 HTML 研究頁與直接交付的 X 研究連結讀取流程更新。
+
+### 移除
+- `hooks/recall-before-answer-jev.py`：`recall-before-answer.sh` 簡化為關鍵字直接提醒，移除 Jev 判官依賴。
+- `skills/implement` 的 `material-preparation` 試用元件（`references/material-preparation.md`、`scripts/compose-materials.mjs` 與對應測試，試用期結案移除）。
+
 ## 2026-10-13
 
 ### 新增

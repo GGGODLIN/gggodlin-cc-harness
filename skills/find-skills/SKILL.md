@@ -1,6 +1,9 @@
 ---
 name: find-skills
 description: Use only when the user explicitly asks about extending agent capabilities or installing new skills - "find a skill for X", "is there a skill that can...", "裝個 skill 來做 X". Do not use for general how-to or technical questions (those go to normal research, not skill discovery), nor when the user just wants the task done.
+upstream: vercel-labs/skills
+upstream-path: skills/find-skills/SKILL.md
+upstream-status: needs-reconciliation
 ---
 
 # Find Skills

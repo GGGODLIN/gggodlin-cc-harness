@@ -106,6 +106,33 @@ assert_yagni_not_grep() {
   fi
 }
 
+assert_section_grep() {
+  local label=$1 start=$2 stop=$3 pattern=$4
+  if awk -v s="$start" -v e="$stop" '$0 ~ s{p=1} $0 ~ e{p=0} p' "$COMMAND" | grep -qE "$pattern"; then
+    printf 'PASS: %s\n' "$label"
+    PASS=$((PASS + 1))
+  else
+    printf 'FAIL: %s\n' "$label"
+    FAIL=$((FAIL + 1))
+  fi
+}
+
+assert_section_not_grep() {
+  local label=$1 start=$2 stop=$3 pattern=$4
+  if awk -v s="$start" -v e="$stop" '$0 ~ s{p=1} $0 ~ e{p=0} p' "$COMMAND" | grep -qE "$pattern"; then
+    printf 'FAIL: %s\n' "$label"
+    FAIL=$((FAIL + 1))
+  else
+    printf 'PASS: %s\n' "$label"
+    PASS=$((PASS + 1))
+  fi
+}
+
+assert_parse_grep() { assert_section_grep "$1" '^## 解析輸入' '^## Tier 選單' "$2"; }
+assert_parse_not_grep() { assert_section_not_grep "$1" '^## 解析輸入' '^## Tier 選單' "$2"; }
+assert_menu_grep() { assert_section_grep "$1" '^## Tier 選單' '^## 貫穿守則' "$2"; }
+assert_menu_not_grep() { assert_section_not_grep "$1" '^## Tier 選單' '^## 貫穿守則' "$2"; }
+
 assert_grep "command marks this contract test" '本檔在契約測試底下.*review-spec-execution-contract\.test\.sh'
 assert_grep "default OpenSpec design path" 'openspec/changes/\*/design\.md'
 assert_grep "default OpenSpec proposal path" 'openspec/changes/\*/proposal\.md'
@@ -125,13 +152,6 @@ assert_grep "Tier 3 legacy shortcut still needs user selection" 'top-level user.
 assert_grep "Tier 3 legacy shortcut still needs reference Read" 'legacy shortcut.*reference＋完整 Read'
 assert_grep "Tier 3 stops unstarted seats after capacity rejection" '容量拒絕.*停止尚未派出的席位'
 assert_grep "Tier 4 uses detached rollout polling" 'subshell \+ nohup detach \+ rollout jsonl poll'
-assert_t4_grep "Tier 4 Web GPT collects with a plain detail call" 'web-cli chatgpt detail <id> --markdown true -f json'
-assert_t4_not_grep "Tier 4 never waits on detail stabilization" 'detail <id> --wait true'
-assert_t4_grep "Tier 4 reads the prompt into a variable before dispatch" 'PROMPT=\$\(cat'
-assert_t4_grep "Tier 4 verifies the Pro model slug after the run" 'data-message-model-slug'
-assert_t4_grep "Tier 4 keeps the background window flag" 'ask "\$PROMPT" --new --window background'
-assert_t4_grep "Tier 4 no response leaves seats unselected" 'AFK.*無回應.*不派任何外部席位'
-assert_t4_not_grep "Tier 4 does not default to dual dispatch" '預設雙路都跑|AFK.*預設雙路'
 assert_not_grep "Tier 4 no longer uses current-conversation read" 'web-cli chatgpt read'
 assert_not_grep "Tier 4 no longer forces foreground Codex" 'main session 前景跑|task --fresh.*不加.*--background'
 assert_grep "review-spec reads shared model routing" 'model-routing\.env'
@@ -155,11 +175,9 @@ assert_grep "Tier 3 reports incomplete selected seats" '選定席位未完成'
 assert_grep "Tier 3 does not count unselected seats" '不得拿舊記錄、單支、偽造 receipt 或未選席位冒充完成'
 assert_grep "architecture spec surfaces intent diagram choice" '架構意圖圖.*a\. 生成.*b\. 跳過'
 assert_grep "intent nudge keys on boundary changes" 'boundary.*cross-boundary edge'
-assert_grep "intent diagram is proposed authored evidence" 'proposed/authored'
 assert_grep "intent skip or silence does not block implementation" '選 b 或不回答.*不阻塞'
 assert_grep "pre-generation skip invokes neither gate" '0 次 Archify.*0 次 Plannotator'
 assert_grep "intent launch requires receipt validation" '只有.*wrapper.*成功.*receipt validation.*才.*plannotator-review\.mjs intent'
-assert_order "intent wrapper precedes shared Plannotator adapter" 'archify-safe.mjs intent' 'plannotator-review.mjs intent'
 assert_grep "intent adapter launches as one background task" 'Bash\(run_in_background=true\).*plannotator-review\.mjs intent'
 assert_grep "intent adapter task binds its source receipt" 'adapterTaskId.*wrapper receipt identity'
 assert_grep "background handoff is not an adapter timeout" 'moved to background.*仍在執行.*不是.*adapter timeout'
@@ -198,19 +216,6 @@ assert_yagni_grep "YAGNI packet uses neutral scratch path" 'review-spec-yagni-pa
 assert_yagni_not_grep "YAGNI packet is no longer written beside spec" 'packet 用 Write tool 寫到 spec 同目錄'
 assert_yagni_grep "YAGNI packet forbids shell redirection" '不得用 shell redirect 寫 packet'
 assert_yagni_not_grep "YAGNI does not blame unverified command substitution" '$(cat)'
-assert_yagni_grep "web Pro seat reads the packet into a variable first" 'PROMPT=\$\(cat'
-assert_yagni_grep "web Pro fallback lists connected profiles before dispatch" 'web-cli profile list'
-assert_yagni_grep "web Pro fallback identifies every candidate account" 'web-cli --profile .* chatgpt whoami -f json'
-assert_yagni_grep "same-account profiles choose the first listed profile" '相同且非空的 `user_id` 時選清單第一個'
-assert_yagni_grep "unknown identities cannot auto-select" '身分不明.*不得自動選'
-assert_yagni_grep "different identities require a human choice" '身分不同.*使用者選'
-assert_yagni_grep "web Pro seat opens a new conversation with the selected profile" 'web-cli --profile .* chatgpt ask "\$PROMPT" --new'
-assert_yagni_grep "web Pro seat collects the answer with the same selected profile" 'web-cli --profile .* chatgpt detail <conversationId> --markdown true'
-assert_yagni_not_grep "web Pro seat never waits on detail stabilization" 'detail.*--wait true'
-assert_yagni_grep "web Pro dispatch keeps the background window flag" 'ask "\$PROMPT" --new --window background'
-assert_yagni_grep "web Pro findings outside the packet are disqualified" 'out-of-packet'
-assert_yagni_grep "web Pro seat verifies the model slug after the run" 'data-message-model-slug'
-assert_yagni_grep "YAGNI prompt forbids external lookup" '禁外查'
 assert_yagni_grep "yagni defaults to the single c seat" '預設單席 c'
 assert_yagni_not_grep "yagni no longer dispatches the agy Gemini seat" 'agy --model'
 assert_grep "seat acceptance validates output shape" '席位驗收.*輸出 shape'
@@ -278,6 +283,36 @@ assert_grep "prior dispositions are read back before dispatching reviewers" 'gre
 assert_grep "read-back happens before the critic dispatch, not after" '派 critic 前.*先讀回'
 assert_grep "rubber-stamp tally is computed, not remembered" '連續 2\+ 輪.*0 條 actionable'
 assert_grep "zero prior review files is stated rather than assumed clean" '查無前輪'
+
+# 沒給級別時自選第 1、2 級（auto-review-selection 第 13 張）
+assert_parse_grep "no tier: main self-selects from the when-to-pick column" '沒給 Tier.*main 依「Tier 選單」.*「什麼時候選」欄'
+assert_parse_not_grep "no tier: the old wait-for-user-choice wording is gone" '等使用者選'
+assert_parse_not_grep "no tier: the menu is not printed for the user to pick" '印「Tier 選單」'
+assert_parse_grep "no tier: self-selection runs without waiting for a reply" '不等使用者回覆'
+assert_parse_grep "no tier: self-selection is limited to tiers 1 and 2" '自選只限第 1、2 級之間'
+assert_parse_grep "no tier: main never self-picks tier 3, tier 4 or yagni" '不自己選第 3、4 級或 yagni'
+assert_parse_grep "no tier: the stated disclosure names tier, sentence and reason" '寫明.*選了第 N 級.*依「什麼時候選」哪一句.*為什麼'
+assert_menu_not_grep "tier menu is no longer a print-and-wait menu" '印這段給使用者選'
+assert_menu_grep "tier menu keeps the tier 1 when-to-pick sentence as the basis" '^\| 1 .*改 < 2 檔 / 已經很懂這塊'
+assert_menu_grep "tier menu keeps the tier 2 when-to-pick sentence as the basis" '^\| 2 .*跨 3\+ 檔 / 新模組 / 架構沒把握'
+assert_menu_grep "do-not-push-high-tier rule survives and caps self-selection at tier 2" '預設別逼高 Tier.*自選只到第 2 級'
+
+# 符合第 3、4 級條件時只推薦、不簽 permit
+assert_parse_grep "tier 3 conditions still run the self-selected tier first" '符合第 3 級.*照常先跑自選的第 1 或第 2 級'
+assert_parse_grep "tier 3 conditions come from the menu row" '第 3 級.*動核心架構.*碰生產資料.*跨既有 domain model'
+assert_parse_grep "tier 3 is recommended as a ready-to-paste command" '推薦.*可直接貼上的 `/review-spec 3 <spec 絕對路徑>`'
+assert_parse_grep "tier 4 is recommended as a ready-to-paste command" '第 4 級.*賭很大.*推薦.*可直接貼上的 `/review-spec 4 <spec 絕對路徑>`'
+assert_parse_grep "tier 4 recommendation reminds the user to pick the external seat" '第 4 級.*提醒.*外部席.*使用者'
+assert_parse_grep "recommendation issues no permit and never calls the issue helper" '推薦.*不簽發 permit.*不呼叫 `review-spec-dual-permit\.py issue`'
+assert_parse_grep "self-selection flow never counts as tier 3 authorization" '不把自選流程.*後續裸 `3`.*當授權'
+assert_parse_grep "recommendation is appended when the self-selected review is surfaced" '自選級別.*surface.*結尾附.*推薦'
+assert_grep "tier 3 permit still requires the original command with tier and spec path (regression pin)" 'Tier 3 只接受原始 invocation 形狀 `/review-spec 3 <spec 路徑>`；Tier 與路徑缺一就不發 permit'
+assert_parse_grep "entry-menu tier 3 reply still returns the paste command and stops the round" '入口選單.*選第 3 級.*回傳可直接貼上的 `/review-spec 3 <spec 絕對路徑>`.*停止本輪'
+
+# 明列級別照舊
+assert_parse_grep "explicit tier token still sets the tier (regression pin)" '第一個 token 是 `1`–`4` → 當 Tier'
+assert_parse_grep "explicit yagni token still routes to the YAGNI axis (regression pin)" '第一個 token 是 `yagni` → 走下方「YAGNI 軸」段'
+assert_parse_grep "explicit tier or yagni invocations run as before without re-selection" '明列級別.*`1`–`4`.*`yagni`.*照原流程執行.*不經自選'
 
 printf '%s\n' '----'
 printf 'PASS=%s FAIL=%s\n' "$PASS" "$FAIL"

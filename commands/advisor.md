@@ -3,8 +3,6 @@ description: "Use when 使用者對當前 main model 這一輪的思考品質不
 argument-hint: "[--blind|--full] [顧問代號] <要問的問題>；空參數 = 從當前 context 整理理解並列出選項"
 ---
 
-<!-- 本檔在契約測試底下：bash ~/.claude/commands/tests/advisor-codex-desktop-contract.test.sh -->
-
 # /advisor — 外包一次思考，不動整個 session 的 model
 
 切 main model 是讓整個 session 後續都變貴，只為了一次思考。這個 command 把單次判斷派給指定模型，拿回意見後由你決定聽不聽。
@@ -12,7 +10,7 @@ argument-hint: "[--blind|--full] [顧問代號] <要問的問題>；空參數 = 
 顧問只出意見、不動手 —— 但**保證強度按路徑不同**，別一視同仁：
 
 - 選項 3 用 `-s read-only`，**機制層強制**，它想動也動不了。
-- 選項 2 在 Claude Code 走獨立網頁，本來就碰不到本機；在 Codex Desktop 走 Direct Web Pro／DevSpace snapshot，controller 只建立並刪除固定的 owner-only snapshot，不對顧問暴露一般修改工具。
+- 選項 2 的本機讀取能力以當次工作區預檢為準。DevSpace 可用時走 snapshot；未連接時由 main 準備自足材料，顧問只讀 prompt，不自行探索本機。兩種模式都不提供一般修改工具。
 - **選項 1 在 Claude Code 走 Agent 時沒有這道鎖**：`advisor-seat` 帶全套工具（含 Write／Edit／Bash）。約束寫在該 agent 定義檔的 body 裡（唯讀紀律段），是**常駐的自律約束、不是機制強制**——它想動仍然動得了。Codex Desktop 改走下方獨立 Claude CLI，明確停用 Write／Edit／NotebookEdit／Bash／Agent、Chrome 與 MCP；代價是該席不能自己跑 Git／shell 查證。Step 4 第 3 段的角色文字仍是補強，不是替代。
 
 （研究結論裡最硬的一條是「看 tool 清單、不看角色名字」。這支 command 自己也適用 —— 所以上面按路徑分開講，而不是統一宣稱「顧問拿不到寫入權」。）
@@ -85,7 +83,7 @@ python3 ~/.claude/scripts/advisor-extract-context.py --out /tmp/advisor-ctx.txt
 
 超過 `--max-bytes`（預設 190000）時它會保留最近的回合並在檔首標明截斷了幾則 —— 顧問必須知道自己看到的是尾段，否則它會對「討論初期」下沒有依據的判斷。
 
-**完成條件**：材料路徑已由 context 或明確進階參數決定；對話文字模式下已跑過這支 script 並拿到它印出的實際位元組數（不是估算，也不是自己寫的抽取）。
+**完成條件**：材料路徑已由 context 或明確進階參數決定；對話文字模式下已跑過這支 script 並拿到它印出的實際位元組數（不是估算，也不是自己寫的抽取）。完成後先接「ChatGPT 工作區與材料能力預檢」，再進 Step 2。
 
 ## Step 2：讀 Fable 額度，決定推薦選項
 
@@ -130,7 +128,7 @@ jq -r '[.data.limits[]? | select(.kind == "weekly_scoped") | .percent] | max // 
 
 選項 1 且環境是 Codex Desktop 時，不用 `spawn_agent`：Codex 的 model allowlist 沒有 Fable，`advisor-seat`／`cc_flagship` 也都固定為 Astra。改用本機 Claude CLI 建立一個獨立 `advisor-seat` session；這是實際 Anthropic Fable，不是 Fable-tier 映射。Step 2 已取得 active 帳號 quota，只有低於 95% 或使用者明知額度狀態仍明確指定時才執行。
 
-1. 把 Step 4 的四段 prompt 寫入 owner-only temporary file，讀進變數後再傳；不要把 prompt 本文嵌進 shell command。Done when：prompt file 權限為 600，`FABLE_PROMPT` 來自該檔完整內容。
+1. 建 owner-only temporary file，先用 `awk 'f>=2{print} /^---$/{f++}' "$HOME/.claude/skills/review-method/SKILL.md" > <prompt-file>` 寫入方法組正文（去掉 frontmatter：prompt 以 `---` 開頭會被 CLI 當成旗標），再把 Step 4 的四段 prompt 接在後面；讀進變數後再傳，不要把 prompt 本文嵌進 shell command。方法組要放在 prompt 裡，因為 `--agent` 讓 advisor-seat 當主執行緒時定義檔的 `skills:` 不會預先載入，`--append-system-prompt-file` 附上的內容也沒進 context（2026-10-16 CC 2.1.301 實測）；少了它 advisor-seat 只會回 `未完成：方法組未載入`。Done when：prompt file 權限為 600、開頭是方法組正文且含 `載入標記：review-method/v1 loaded`，`FABLE_PROMPT` 來自該檔完整內容。
 2. 執行一次，不重送：
 
 ```bash
@@ -187,7 +185,7 @@ grep -o -E '"(model|reasoning_effort|sandbox_policy)"[^,}]{0,40}' \
 
 選 2 還是 3 的一句話判準：**需要核對證據就走 3，只需要想清楚就走 2**。
 
-選項 1 與 3 既然能自己查，就在 prompt 裡給它 session jsonl 路徑，讓它自己找執行證據（見 Step 1）。選項 2 拿不到那層，所以別叫它判斷「你的驗證做得夠不夠」——它只能就送進去的文字論述。
+選項 1 與 3 既然能自己查，就在 prompt 裡給它 session jsonl 路徑，讓它自己找執行證據（見 Step 1）。選項 2 若採材料模式，就由 main 先查證並內嵌必要的原始輸出、相關程式碼與反例；顧問只能評估提供的證據，不能把缺少的本機查證當作已完成。
 
 **同模型排除**：main 自己就是 Fable 時，不要推薦選項 1。那種情況下「換一顆腦袋」是假的，同一個模型不會有不同盲區。改推 2 或 3，或明確講清楚這次是同模型複查、不是第二意見。
 
@@ -212,11 +210,11 @@ grep -o -E '"(model|reasoning_effort|sandbox_policy)"[^,}]{0,40}' \
 
 plugin 那條路整體不可觀測：失敗時看不出為什麼，成功時也證明不了參數有生效。附帶一筆：`426 Upgrade Required, ws://127.0.0.1:17841/v1/responses` 這個錯誤是假警報，CLI 會降級成 HTTP 後正常完成 —— 別因為看到它就以為壞了。
 
-**完成條件**：使用者已選定顧問（可回「照推薦」或用自然語言選擇），或已有明確進階參數；推薦本身不算選定。材料不足、未回答或取消時不派工。選項 1 在 Claude Code 的 description 內確實含 `<fable-ok>`、且已確認 main 本身不是 Fable；選項 1 在 Codex Desktop 的 terminal receipt 已核對 first-party `claude-fable-*`、非空結果與 session id；選項 2 走 Direct Web Pro（Codex Desktop 與 Claude Code 共用同一套判定）的 terminal receipt 必須同時記錄 `sourceThreadId exact`、`transport=direct`、`model/resolvedModel=gpt-6-pro`、`power=pro`、`submitted=true`、`terminalAsyncStatus=4`、非空 answer、`devspaceUsed=true`、`devspaceScopeClosed=true`、`devspaceCoverage` 的 `openScope`／`statPath`／`queryJsonl`／`closeScope` 全為 true、`snapshotMode=0600`、`snapshotDeleted=true`、`quickChatUiUsed=false`、`uiFallback=false`、`resubmitCount=0`，以及非空的 `conversationId` 與 `streamRequestId`；在 Claude Code 環境另外確認命令帶了 `--sessions-root ~/.claude/projects`、`--source-thread-id` 是當前 CC session id，且前置的 main renderer 計數為 1；保存 native conversationId 只供使用者明確要求的 follow-up，不做清單差集或標題匹配，也不自動 follow-up；選項 3 的情況下跑完已用上面那條 grep 從 rollout 檔看到 `model`、`reasoning_effort`、`sandbox_policy` 三個實際值（不是「我帶了旗標」，是「它真的收到了」）。
+**完成條件**：使用者已選定顧問（可回「照推薦」或用自然語言選擇），或已有明確進階參數；推薦本身不算選定。材料不足、未回答或取消時不派工。選項 1 在 Claude Code 的 description 內確實含 `<fable-ok>`、且已確認 main 本身不是 Fable；選項 1 在 Codex Desktop 的 terminal receipt 已核對 first-party `claude-fable-*`、非空結果與 session id；選項 2 走 Direct Web Pro（Codex Desktop 與 Claude Code 共用同一套判定）的 terminal receipt 必須同時記錄 `sourceThreadId exact`、`transport=direct`、`model/resolvedModel=gpt-6-pro`、`power=pro`、`submitted=true`、`terminalAsyncStatus=4`、非空 answer、`quickChatUiUsed=false`、`uiFallback=false`、`resubmitCount=0`，以及非空的 `conversationId` 與 `streamRequestId`，並確認本次工作區及材料模式。snapshot 模式另外要求 `devspaceUsed=true`、`devspaceScopeClosed=true`、四項 `devspaceCoverage` 全 true、`snapshotMode=0600`、`snapshotDeleted=true`；材料模式確認 main 已把必要原文內嵌且 receipt 沒有宣稱本機探索。在 Claude Code 環境確認 `--source-thread-id` 是當前 CC session id；snapshot 模式另外帶 `--sessions-root ~/.claude/projects`，且前置的 main renderer 計數為 1；保存 native conversationId 只供使用者明確要求的 follow-up，不做清單差集或標題匹配，也不自動 follow-up；選項 3 的情況下跑完已用上面那條 grep 從 rollout 檔看到 `model`、`reasoning_effort`、`sandbox_policy` 三個實際值（不是「我帶了旗標」，是「它真的收到了」）。
 
 ## Step 4：打包問題
 
-給顧問的 prompt 固定四段，缺一段就補。無參數 path 以 Step 0 整理出的自由文字任務目的為準，不把它改寫成要求使用者記住的固定分類：
+給顧問的 prompt 固定四段，缺一段就補。無參數 path 以 Step 0 整理出的自由文字任務目的為準，不把它改寫成要求使用者記住的固定分類。ChatGPT 材料模式先完成「ChatGPT 工作區與材料能力預檢」第 3–5 點：main 實際讀來源並內嵌正文，不能只列路徑或承諾稍後由 GPT 探索。
 
 1. **要判斷什麼** — 一句話講清楚要回答的問題與任務目的。若是獨立出方案，明確要它自己提出方案；若是挑戰目前草案，明確要它找草案盲點與更小替代。提問／對話文字材料要**明確要它找我容易漏掉的角度**，而不是只重跑我的推理看結論同不同；盲審材料相反 —— 要它獨立走一遍並給出自己的方案。
 2. **脈絡** — 按任務目的與材料路徑給：
@@ -239,7 +237,7 @@ plugin 那條路整體不可觀測：失敗時看不出為什麼，成功時也�
 
 ## Step 5：呈現回答
 
-顧問的意見原文貼給使用者，然後用一句話標出它跟我的看法哪裡不同。
+顧問的意見原文貼給使用者，然後用一句話標出它跟我的看法哪裡不同。ChatGPT 材料模式先附當次工作區與「僅依提供材料判斷，未自行查本機」，不能把其意見寫成已探索 repo 或已獨立驗證本機。
 
 選項 2 的 receipt 帶 `snapshotProof` 時，原文前先寫一行讀取範圍：`mismatch` 寫「Pro 只讀到快照第 `snapshotLinesReached` 行（共 `snapshotLineCount` 行），之後的對話它沒看到」，`missing` 寫「Pro 沒回報讀到第幾行」，`verified` 不用寫。這行是告示、不是收件失敗：本席過不過只看上面第 4 點的條件，答案照常呈現、照常進 Step 6。為什麼要寫：快照讀不完時，漏掉的通常是最近的脈絡，使用者要知道顧問的判斷少看了哪一段。
 

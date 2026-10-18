@@ -305,9 +305,9 @@ def select_candidate(candidates, rows, title_to_key, signature_to_key, legacy_by
 def main():
   parser = argparse.ArgumentParser()
   parser.add_argument("--date", required=True)
-  parser.add_argument("--report", required=True, type=Path)
-  parser.add_argument("--ledger", type=Path, default=DEFAULT_LEDGER)
-  parser.add_argument("--aliases", type=Path, default=DEFAULT_ALIASES)
+  parser.add_argument("--report", required=True, type=lambda p: Path(p).expanduser())
+  parser.add_argument("--ledger", type=lambda p: Path(p).expanduser(), default=DEFAULT_LEDGER)
+  parser.add_argument("--aliases", type=lambda p: Path(p).expanduser(), default=DEFAULT_ALIASES)
   args = parser.parse_args()
   run_date = parse_calendar_date(args.date, "--date")
   if args.report.name != f"{args.date}-recurring-errors.md":

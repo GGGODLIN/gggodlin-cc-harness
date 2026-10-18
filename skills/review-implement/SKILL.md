@@ -11,9 +11,9 @@ description: "Use after a spec-backed implementation reaches closeout and before
 
 把 review-implement 放在 implement closeout 完成測試、code review、修正與 local commits 後，final push／PR handback／archiving 前，當成唯讀的 post-implementation acceptance gate。Scope 檢查實作是否留在已接受的決策內；YAGNI 檢查 final diff 能否縮小而仍滿足同一組 confirmed acceptance。兩軸分開，Main 保留 evidence verification 與決策責任。
 
-## 1. 先問軸與模型，再鎖定 target
+## 1. 自動選軸與 Opus 席，揭露後鎖定 target
 
-1. 本 Step 1 是唯一的 user-facing SSOT。Stage 啟動後，在任何 reviewer dispatch 前先逐字輸出固定三句，再輸出角度建議、模型矩陣與推薦理由，最後顯示選單並等待回答：
+1. 本 Step 1 是唯一的 user-facing SSOT。Stage 啟動後，在任何 reviewer dispatch 前先逐字輸出固定三句，再輸出自動選軸結果、角度建議、模型矩陣與推薦理由，最後顯示選單。輸出完不等回答，直接接第 2 步；選單只是讓使用者改選或 skip 的入口，不是 gate：
 
    ```text
    剛完成 implement、測試與 commit。
@@ -21,18 +21,20 @@ description: "Use after a spec-backed implementation reaches closeout and before
    選 a/all 跑兩軸；選 b/scope 或 c/yagni 跑單軸；選 d/skip 只記 WAIVED，不跑 review。
    ```
 
-   一般 spec-backed work 建議 `scope`。符合任一 long-axis signal 時建議 `all`：存在 wayfinder、ticket count >= 3、工作跨過 session／resume boundary、或 code review 產生至少 3 個 confirmed core findings。這是角度建議，不是模型能力排名。
+   軸由推薦規則自動決定：一般 spec-backed work 跑 `scope`。符合任一 long-axis signal 時跑 `all`：存在 wayfinder、ticket count >= 3、工作跨過 session／resume boundary、或 code review 產生至少 3 個 confirmed core findings。這是角度建議，不是模型能力排名。
 
-   先把 Scope／YAGNI 當工作目的、把 model／execution path 當執行選擇，列出本次可配矩陣。模型／執行路徑為列，當次適用審查角度為欄；每個 cell 都標 `推薦`、`可選`、`需補材料／工具` 或 `不可用`：
+   自動選出的軸一律用 Claude 側的 Opus 席（`routed-judge`／`opus`）：`scope` 派 `opus/scope`，`all` 派 `opus/scope` 與 `opus/yagni`。揭露要寫明選了哪軸、哪幾席、依哪一條訊號（沒有 long-axis signal 就寫「無 long-axis signal」）。Fable 席耗外部額度，只列為推薦或可選，Fable seat 只在使用者明選時才派；沒有回答就不派、也不擋收尾。使用者若已在 invocation 或同輪訊息說 skip 或指定 seat，以使用者說的為準，不套自動選擇。
+
+   先把 Scope／YAGNI 當工作目的、把 model／execution path 當執行選擇，列出本次可配矩陣。模型／執行路徑為列，當次適用審查角度為欄；每個 cell 都標 `推薦`、`可選`、`需補材料／工具` 或 `不可用`。自動選出軸上的 Opus cell 標 `推薦` 並註明「自動派」，未選軸上的 Opus cell 標 `可選`：
 
    | 執行路徑／logical model（resolved model） | Scope | YAGNI |
    | --- | --- | --- |
    | `routed-judge`／`fable`（`fable`；native 從 model options cache 解出，vendor 從既有 mapping 取值） | `<本輪狀態>` | `<本輪狀態>` |
    | `routed-judge`／`opus`（`opus`；native 從 model options cache 解出，vendor 從既有 mapping 取值） | `<本輪狀態>` | `<本輪狀態>` |
 
-   這兩列是本 stage 已有的完整執行路徑，不是固定推薦；每次依本次任務與材料，在每個 cell 填一個 `推薦`、`可選`、`需補材料／工具` 或 `不可用`。例如本輪若因沿用既有 Fable route 而推薦 fable，可把 fable cell 填 `推薦`、opus cell 填 `可選`；這只是示例，不是預設或能力排名。若某列缺 mapping、材料或工具能力，就在該 cell 寫明原因，不隱藏也不靜默換列。只知道 logical alias 時把 resolved model 寫成 `unknown`。推薦理由只能引用材料完整性、本地讀取需求或是否需要獨立觀點；同級模型是選用前提，不把名稱或階級寫成量測排名。
+   這兩列是本 stage 已有的完整執行路徑，不是固定推薦；每次依本次任務與材料，在每個 cell 填一個 `推薦`、`可選`、`需補材料／工具` 或 `不可用`。例如本輪若需要獨立觀點，可把 fable cell 填 `推薦`（仍不自動派，等使用者明選）；這只是示例，不是預設或能力排名。若某列缺 mapping、材料或工具能力，就在該 cell 寫明原因，不隱藏也不靜默換列。只知道 logical alias 時把 resolved model 寫成 `unknown`。推薦理由只能引用材料完整性、本地讀取需求或是否需要獨立觀點；同級模型是選用前提，不把名稱或階級寫成量測排名。
 
-   矩陣完整呈現後、固定選單前，另輸出一行 `Recommended seats: <model>/<axis>[, ...]`；這行只列本輪標為 `推薦` 的 seat，供使用者回「照推薦」時綁定當次選擇。使用者可用自然語言回「照推薦」、「scope 用 opus」、「all 都用 opus」或「scope 用 opus 和 fable」，也可明說增減角度。這幾種句型整句就是選擇本身，後面不要再接問句或補充——授權 gate 對整句比對，「all，但都用 opus 行嗎」這種帶尾綴的回答會被判成未綁定選擇而擋下，得重跑選單。只回 `scope`／`yagni`／`all` 或固定字母時，使用本輪矩陣標成推薦的 seat，不暗加其他可選 seat。Controller 將回答整理成當輪的 `<model, axis>` seat 清單，未明說的 seat 不啟動；不要求使用者重打 flags 或 command 參數。
+   矩陣完整呈現後、固定選單前，另輸出一行 `Recommended seats: <model>/<axis>[, ...]`；這行只列本輪標為 `推薦` 的 seat，供使用者回「照推薦」時綁定當次選擇。使用者可用自然語言回「照推薦」、「scope 用 opus」、「all 都用 opus」或「scope 用 opus 和 fable」，也可明說增減角度；派出後才到的回答只增加尚未派出的 seat（例如補選 Fable），已派的 seat 不重派。這幾種句型整句就是選擇本身，後面不要再接問句或補充——授權 gate 對整句比對，「all，但都用 opus 行嗎」這種帶尾綴的回答會被判成未綁定選擇而擋下，得重跑選單。只回 `scope`／`yagni`／`all` 或固定字母時，使用本輪矩陣標成推薦的 seat，不暗加其他可選 seat。Controller 將自動選擇與使用者回答整理成當輪的 `<model, axis>` seat 清單，未明說且非自動選出的 seat 不啟動；不要求使用者重打 flags 或 command 參數。
 
    ```text
    Choose review axes:
@@ -42,13 +44,13 @@ description: "Use after a spec-backed implementation reaches closeout and before
    d. skip
    ```
 
-   只接受 top-level user 的完整 axis、固定字母或包含明確 model／axis 的自然語言；把字母轉成 semantic axis 後再寫 report。沒有回答就停止，不代選。完成條件：聊天中有逐字固定選單、角度與模型推薦、以及 top-level user 的選擇 evidence；report 記錄 semantic axes 與 selected seats。
+   使用者的回答只接受 top-level user 的完整 axis、固定字母或包含明確 model／axis 的自然語言；把字母轉成 semantic axis 後再寫 report。沒有回答不阻擋：Opus 席照推薦已派，Fable 席沒被明選就不派，Run 照常往下走。完成條件：聊天中有逐字固定選單、自動選軸揭露、角度與模型推薦；使用者若有回答，其選擇 evidence 也記下；report 記錄 semantic axes 與 selected seats。
 
-2. 回答為 `skip` 時直接接第 8 節，寫入 `WAIVED`，不要求 target、model 或 reviewer input。其他回答才確認 stable `base_sha` 與 `head_sha` 都是 target feature 的 commit，並以該 range 讀 final diff。target-scope 只要仍在未 commit 的 working tree，就把 Run 記為 `BLOCKED`，不審 moving target，也不先設 speculative size gate。
+2. 使用者說 `skip` 時直接接第 8 節，寫入 `WAIVED`，不要求 target、model 或 reviewer input。其他情況（含沒有回答）才確認 stable `base_sha` 與 `head_sha` 都是 target feature 的 commit，並以該 range 讀 final diff。target-scope 只要仍在未 commit 的 working tree，就把 Run 記為 `BLOCKED`，不審 moving target，也不先設 speculative size gate。
 
    完成條件：非 skip Run input 有可重現的 target、`base_sha`、`head_sha` 與 selected seats；若任一不穩定，report 有 `BLOCKED` event 且沒有 reviewer output；skip 直接產生 `WAIVED` event。
 
-3. 一個 feature 只使用一份 report：OpenSpec 變更寫到 `openspec/changes/<change>/review-implement.md`，scratch feature 寫到 `.scratch/<feature>/review-implement.md`。新 Run 先 append input 與 start event，再 dispatch。
+3. 一個 feature 只使用一份 report：OpenSpec 變更寫到 `openspec/changes/<change>/review-implement.md`，scratch feature 寫到 `.scratch/<feature>/review-implement.md`。新 Run 先 append input 與 start event，再 dispatch；start event 記選擇來源（auto 或 user）。
 
    完成條件：目標路徑唯一，且當前 Run 的 target、commit range、spec、tickets、selected axes 與 selected seats 已落檔。
 
@@ -70,7 +72,7 @@ description: "Use after a spec-backed implementation reaches closeout and before
 
 Scope／YAGNI 是工作目的，model／execution path 是 seat 選擇。這個 stage 目前列出 `routed-judge` 的 `fable` 與 `opus` 兩條既有路徑；把 logical model 與 resolved model 分開記錄。native 路徑從既有 model options cache 解出值，vendor 路徑取既有 mapping；只知道 alias 時記 `unknown`，派工完成後再以 subagent jsonl 的 `message.model` 記錄實際值。缺 mapping、材料或工具能力的 cell 不派工，保留不可用原因。
 
-每個 selected seat 使用同一個 reviewer type，description 的 selection marker 綁定該 seat：
+每個 selected seat 使用同一個 reviewer type，description 的 selection marker 綁定該 seat。自動選出的 Opus 席不等使用者回答就派；派工檢查 hook 對沒有使用者選擇的 Opus 席只留 `would_deny` 稽核列並放行，這是預期行為，不補使用者選擇、不改 marker、不換 `subagent_type`：
 
 ```text
 Agent(
@@ -84,7 +86,7 @@ Agent(
 Fable seat 使用 `model: "fable"` 與 `<fable-ok> <review-implement-selection:v1 model=fable axis=scope>`；YAGNI 只把 `axis=scope` 換成 `axis=yagni`。既有 `<review-implement-fable:v1 axis=scope|yagni>` 仍可讀作相容快捷方式，但新選用一律記 generic selection marker。不要改成其他 `subagent_type`、裸 Fable 或新的 permit 機制。
 
 - 每個 `<model, axis>` selected seat 恰派一次；同一 axis 可選兩個不同 model，不能因推薦而暗加另一席。
-- 選 `scope` 或 `yagni` 時只派該軸已選 seat；選 `all` 時平行派出本輪明確選定的 seat，不把 `all` 擴成未列出的模型或配對。兩個不同 model 的 prompt 不放對方 output、finding 或結論。
+- 選 `scope` 或 `yagni` 時只派該軸已選 seat；選 `all` 時平行派出本輪 selected 的 seat（自動選出的 Opus 席，加使用者明選的 seat），不把 `all` 擴成未列出的模型或配對。兩個不同 model 的 prompt 不放對方 output、finding 或結論。
 - 同一 report Run 的 failed-seat retry 先以新的成功 `Skill(review-implement)` invocation 重新顯示同一份矩陣與固定選單；使用者重選後只派失敗的 `<model, axis>` seat，成功 seat 不重派。保留每次 dispatch 的 logical／resolved model、selected seat 與 agent result。
 
 完成條件：每個 selected seat 恰有一個獨立 dispatch，報告只列本輪 selected seats；retry event 只增加失敗 seat，且同一 assistant response 啟動的平行 seat 互不共享 output。
@@ -178,7 +180,9 @@ Reviewer 與 review-implement 不修改 production code。Main 將 accepted scop
 
 使用者選 `skip` 或固定選單的 `d` 時不派 reviewer，寫入一個 explicit `WAIVED` Run event，`selected_axes: none`、`selected_seats: none`，並將 Scope 與 YAGNI axis 記為 `waived`。回覆可以說 review 已 waived，不可以宣稱 review `PASS`。
 
-完成條件：skip Run 有使用者選項 evidence、Run status 是 `WAIVED`，且沒有 reviewer output 或 PASS claim。
+Opus 席派出後才收到 `skip`：已派的 seat 不中止、照常完成並記錄，各軸 status 照實寫 `completed` 或 `failed`；Events 另記一筆使用者 waive（時間與原話），Run 記下使用者的 waive，Run status 寫 `WAIVED`，Summary 註明已派 seat 與其結果，不宣稱 `PASS`。已回來的 findings 仍照第 5 節記錄並揭露，不因 waive 刪除。
+
+完成條件：skip Run 有使用者選項 evidence、Run status 是 `WAIVED`，且沒有 reviewer output 或 PASS claim；派出後才 skip 的 Run 有已派 seat 的結果、使用者 waive 的 event，且沒有 PASS claim。
 
 ## 首版邊界
 
