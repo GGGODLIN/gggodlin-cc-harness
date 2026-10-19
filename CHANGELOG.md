@@ -2,6 +2,15 @@
 
 公開版 harness 的變更紀錄。每一節對應一次發布；「Unreleased」是已整備、尚未推上公開 repo 的候選。只記對讀者有意義的變動，不逐檔列 diff。
 
+## Unreleased
+
+### 新增
+- `examples/memory/feedback_memory_cluster_maintenance.md`、`examples/memory/_index_example_cluster.md`：補齊兩層記憶索引維護規範範例（含 `## Tier 1:` 動態注入段落）與子索引範例，並在 `README.md` 元件分類地圖補上跨 session 記憶提醒入口。
+
+### 變更
+- `hooks/auto-memory-jev.py`、`install/hooks/auto-memory-jev.py.md`：試用期 KEEP 結案後移除目錄白名單與公司字樣限制、放寬為整機主對話適用；補齊安裝說明中的 `hooks/memory_reminder_common.py`、兩層記憶規範檔與 Keychain 金鑰依賴。
+- `skills/deep-research`：移除試用期 KILL 結案的 `hyperresearch` 選項 4 接線。
+
 ## 2026-10-18
 
 ### 新增

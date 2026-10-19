@@ -68,6 +68,7 @@ It is a reference, not a product. You can install single pieces, but nothing gua
    - 宣稱詞本地偵測與證據層級判官：[`install/hooks/T1-claim-detect-local-first.sh.md`](/install/hooks/T1-claim-detect-local-first.sh.md)、[`install/hooks/T1-evidence-level-detect.sh.md`](/install/hooks/T1-evidence-level-detect.sh.md)
    - Subagent 路由與高單價模型守門：[`references/subagent-routing.md`](/references/subagent-routing.md)、[`install/hooks/T2-routing-gate.sh.md`](/install/hooks/T2-routing-gate.sh.md)、[`install/hooks/fable-gate.sh.md`](/install/hooks/fable-gate.sh.md)
 4. **四大回饋帳本與跨壓縮守衛**：
+   - 跨 session 兩層記憶提醒（背景小模型判官＋手動收尾檢查點）：[`install/hooks/auto-memory-jev.py.md`](/install/hooks/auto-memory-jev.py.md)、[`install/hooks/checkpoint-judge.sh.md`](/install/hooks/checkpoint-judge.sh.md)、[`examples/memory/`](/examples/memory/)
    - 壓縮前後保留原始證據：[`compact-guard/README.md`](/compact-guard/README.md)（可獨立安裝）
    - 觀察期帳本、摩擦協議與失敗模式分類表：[`examples/trials/`](/examples/trials/)、[`friction/PROTOCOL.md`](/friction/PROTOCOL.md)、[`references/failure-mode-taxonomy.md`](/references/failure-mode-taxonomy.md)、[`install/hooks/ledger-bootstrap.sh.md`](/install/hooks/ledger-bootstrap.sh.md)
 
@@ -161,7 +162,7 @@ It is a reference, not a product. You can install single pieces, but nothing gua
 - [`commands/`](commands/) — 64 個檔案；內含 `advisor-flow.svg`、`advisor.md`、`advisor.overview.md`、`aside.md`、`aside.md.LICENSE`、`daily-local.md`、`docs.md`、`docs.md.LICENSE`…（共 39 項）
 - [`compact-guard/`](compact-guard/) — 23 個檔案；內含 `README.md`、`bin/`、`docs/`、`package.json`、`src/`、`test/`
 - [`config/`](config/) — 1 個檔案；內含 `gpt-models.env`
-- [`examples/`](examples/) — 8 個檔案；內含 `friction/`、`memory/`、`tool-upgrade-notes/`、`trials/`、`wiki/`
+- [`examples/`](examples/) — 10 個檔案；內含 `friction/`、`memory/`、`tool-upgrade-notes/`、`trials/`、`wiki/`
 - [`folder-level/`](folder-level/) — 17 個檔案；內含 `.claude/`、`CLAUDE.md`
 - [`friction/`](friction/) — 1 個檔案；內含 `PROTOCOL.md`
 - [`hooks/`](hooks/) — 110 個檔案；內含 `T1-claim-detect-local-first.llm.test.sh`、`T1-claim-detect-local-first.sh`、`T1-claim-detect-local-first.test.sh`、`T1-evidence-level-detect.sh`、`T1-evidence-level-detect.test.sh`、`T1-evidence-level-fixtures/`、`T1-evidence-level-prompt-v2.txt`、`T1-system-prompt-v5d.txt`…（共 106 項）

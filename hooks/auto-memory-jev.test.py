@@ -297,13 +297,22 @@ class ReminderTests(unittest.TestCase):
       self.assertIn('[auto-memory:jev:long]', self.deliver())
     self.assertEqual(len(self.calls), 1)
 
-  def test_company_and_secret_rejected_before_clipping(self):
-    for message in ('company acme requirement', 'do not save this preference',
-                    'sk-' + 'a' * 32, 'safe beginning' + 'x'*10000 + ' gsk_' + 'b'*32 + 'x'*10000):
+  def test_secret_and_private_rejected_before_clipping(self):
+    for message in ('do not save this preference',
+                    'sk-' + 'a' * 32, 'safe beginning' + 'x'*10000 + ' gsk_' + 'b'*32 + 'x'*10000,
+                    '{"password":"abcdefghijklmnopqrstuvwx"}'):
       context = hook.snapshot(str(self.transcript))
       context['records'][-1]['user'] = message
       with self.assertRaises(ValueError):
         hook.packet(context, self.final)
+    # 上一輪說「不要記」時，下一輪的 packet 不得把上一輪的 user/assistant 帶進 previous_* 外送
+    self.entries = [user('別記這件事：內部臨時測試數字 9527', 'human-1'),
+                    assistant('好的，這筆不會記。', 'assistant-1'),
+                    user('For future sessions, always run lint before commit.', 'human-2'),
+                    assistant(self.final, 'assistant-2')]
+    self.flush()
+    state = hook.packet(hook.snapshot(str(self.transcript)), self.final)
+    self.assertEqual((state['previous_user'], state['previous_assistant']), ('', ''))
     self.assertEqual(len(self.calls), 0)
 
   def test_manual_and_memory_write_exclusion(self):
@@ -317,15 +326,21 @@ class ReminderTests(unittest.TestCase):
     with self.assertRaisesRegex(ValueError, 'already_handled'):
       hook.packet(context, self.final)
 
-  def test_scope_symlink_company_and_invalid_session(self):
-    company = self.home / 'Desktop/work/company'
-    company.mkdir(parents=True)
-    link = self.cwd / 'company-link'
-    link.symlink_to(company, target_is_directory=True)
-    for cwd in (company, link):
-      self.assertEqual(self.invoke(cwd=str(cwd)), '')
+  def test_whole_machine_cwd_allowed_and_subagent_or_invalid_session_skipped(self):
+    # 2026-10-19 KEEP 結案後放寬整機：工作目錄與公司字樣不再擋，僅攔非法 session_id 與 subagents 路徑
+    work_cwd = self.home / 'Desktop/work/company'
+    work_cwd.mkdir(parents=True)
+    self.entries = [user('For company acme repos, always run schema checks before migration.'), assistant(self.final)]
+    self.flush()
+    self.assertEqual(self.invoke(cwd=str(work_cwd)), '')
+    self.assertEqual(len(self.calls), 1)
+    self.assertIn('[auto-memory:jev:long]', self.invoke('deliver', cwd=str(work_cwd), prompt='Next work task in acme.'))
+    subagent_tx = self.home / '.claude/projects/personal/subagents/agent-1.jsonl'
+    subagent_tx.parent.mkdir(parents=True)
+    subagent_tx.write_text(self.transcript.read_text())
+    self.assertEqual(self.invoke(transcript_path=str(subagent_tx)), '')
     self.assertEqual(self.invoke(session_id='../escape'), '')
-    self.assertEqual(len(self.calls), 0)
+    self.assertEqual(len(self.calls), 1)
 
   def test_kill_switch_bootstrap_update_recovery(self):
     with patch.dict(os.environ, {'JEV_MEMORY_DISABLE': '1'}):
@@ -421,6 +436,11 @@ class ReminderTests(unittest.TestCase):
          patch.object(hook, 'endpoint', side_effect=subprocess.CalledProcessError(44, 'security')):
       self.invoke()
     self.assertEqual(len(self.drex_calls), 2)
+    self.next_turn('Another preference after keychain timeout.')
+    with patch.object(hook, 'http', side_effect=self.fake_http), \
+         patch.object(hook, 'endpoint', side_effect=subprocess.TimeoutExpired('security', 1)):
+      self.invoke()
+    self.assertEqual(len(self.drex_calls), 3)
     self.assertNotIn('cooldown_until', json.loads((hook.automatic_dir() / 'budget.json').read_text()))
 
   def test_free_lane_not_confirmed_falls_to_drex_not_paid_jev(self):

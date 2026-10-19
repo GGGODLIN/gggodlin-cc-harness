@@ -10,7 +10,7 @@ Threat model: 提示型、防漂移，只協助誠實但可能忘記回查 memor
 - 手動 checkpoint 與自動消費共用 `memory_reminder_common.py` 的完整／簡短記憶 checklist、`hooks/state/long_injected_<session>` 紀錄。原手動觸發、block、Git closeout 與 trigger sentinel 不共用給自動入口。
 - 完整規範初次、超過既有 50-turn refresh window、或壓縮後補送；只在輸出完整提醒時記錄。簡短提醒不假稱不存在的完整版已注入。
 - agent 身分靠 payload `agent_id`／`agent_type` 與 subagents 路徑；不以 `CLAUDE_CODE_CHILD_SESSION` 排除，因為 Native 2.1.289 的 root SDK session 也帶 `1`（隔離 harness 已驗）。不是全部外部 worker CLI 的可靠身分識別。
-- 新 trial 限個人 `Desktop/projects`／`.claude` cwd 的主 session；公司／敏感封包、明確要求 memory／closeout、觀察到 memory 寫入的回合不送。沒有語意 keyword 前置篩選。
+- 適用整機 Claude Code 主 session（2026-10-19 KEEP 結案後拿掉 trial 期間的個人目錄白名單與公司字樣過濾，比照 T1-evidence-level）；含金鑰／私鑰的敏感封包、使用者明示不要記、明確要求 memory／closeout、或觀察到 memory 寫入的回合不送。沒有語意 keyword 前置篩選。
 
 ## 免費與限額
 
@@ -18,14 +18,14 @@ Jev 腿只允許固定 Experiential `/v1/systemone` 與 `type-safe/jev-latest:fr
 
 Drex 腿不是免費：從 nace 帳號的贈額扣款（2026-10-11 開戶 US$25、三個月有效，之後每月 US$5；drex-v2.0 每 input token 60 nUSD、output 免費，見 console.nace.ai/docs/drex/reference/pricing）。`free_guard` 與零 cost 檢查只管 Jev 腿；Drex 回件沒有 cost 欄，hook 用 input_tokens 算 `cost_usd_est` 記進 log，不寫 disabled sentinel、不啟動冷卻。贈額用盡時 nace 回錯誤，hook 記 `unavailable`，不自動儲值。
 
-分類 API timeout 1.5 秒／腿，同一腿不重試；零價模型清單查核最多 5 秒、最多快取一小時，兩者都在背景，不拖住 prompt。每日最多 1,000 次／4,000,000 request bytes，每小時最多 250 次／1,000,000 bytes，兩腿共用、每回合只預留一次；先預留再呼叫。byte 預算是本機保守流量上限，不宣稱等同 provider token 計費，換算 Drex 最多約每日 US$0.08。Jev 429／非零或缺失 cost 啟動一小時 Jev 冷卻（冷卻中直接問 Drex）；paid cost 契約違反另留 disabled sentinel，兩腿一起停，需人查核後恢复。免費 lane 的供應商契約仍可能改變，client 不是供應商計費的強制邊界。
+分類 API timeout 1.5 秒／腿，同一腿不重試；零價模型清單查核最多 5 秒、最多快取一小時，兩者都在背景，不拖住 prompt。每日最多 1,000 個候選回合／4,000,000 request bytes，每小時最多 250 個候選回合／1,000,000 bytes，兩腿共用、每候選回合在送出前預留一次（若 Jev 送出後失敗再轉 Drex，該回合實際會送出兩次請求）。byte 預算是本機候選回合上限，不宣稱等同 provider token 計費或強制美元封頂；依此預算推算 Drex 每日估算約 US$0.08。Jev 429／非零或缺失 cost 啟動一小時 Jev 冷卻（冷卻中直接問 Drex）；paid cost 契約違反另留 disabled sentinel，兩腿一起停，需人查核後恢复。免費 lane 的供應商契約仍可能改變，client 不是供應商計費的強制邊界。
 
 ## Surface 與生命週期
 
 | 面 | 所有權／路徑 |
 |---|---|
 | Locked | 本 hook、共用 helper、凍結 question；bootstrap 按本次使用者批准加接線；update 需使用者批准、fixture／harness 重驗與 commit |
-| Editable | pending／去重／quota state，由 hook 以安全 regular-file 操作更新；沒有候選文字或 memory 本文 |
+| Editable | pending／去重／quota state，由 hook 以安全 regular-file 操作更新；`pending` 暫存當輪清理後最多 4,000 字元的助理回覆（供下輪比對是否過期，消費或下一輪 Stop 即覆寫），不存使用者提問或 memory 檔案本文 |
 | Append-only | `logs/auto-memory-jev.jsonl`，純 log；只存匿名 session／turn hash、判定、usage、延遲、delivery version／skip reason |
 | Human-controlled | settings 接線、停用與 trial KEEP／MODIFY／KILL；`JEV_MEMORY_DISABLE=1` 或 `hooks/state/auto-memory-jev.disabled` 可立即停自動入口（兩腿一起停），手動不受影響；Keychain `experiential-api-key`／`nace-api-key` 與 nace 儲值由使用者管 |
 

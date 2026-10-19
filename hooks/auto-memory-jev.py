@@ -35,8 +35,7 @@ DREX_USD_PER_INPUT_TOKEN = 6e-8  # console.nace.ai/docs/drex/reference/pricing�
 JEV_FALLS_TO_DREX = ('quota_cooldown', 'missing_key', 'free_lane_not_confirmed', 'unexpected_model')
 # 題目唯一來源；凍結靠 auto-memory-jev.md 的 Locked 欄，hook 不自驗。
 QUESTION_FILE = Path(__file__).with_name('auto-memory-jev-question.json')
-COMPANY = re.compile(r'acme|oldco|oldco-shop|Desktop[/\\-]work|work-user|example-work-account|公司付', re.I)
-SECRET = re.compile(r'sk-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10,}|AIza[0-9A-Za-z_-]{30,}|gsk_[A-Za-z0-9]{20,}|Bearer\s+[A-Za-z0-9._-]{24,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|(?:api[_-]?key|secret|token|password|passwd)\s*[:=]\s*[\"\']?[A-Za-z0-9_./+=-]{20,}', re.I)
+SECRET = re.compile(r'sk-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10,}|AIza[0-9A-Za-z_-]{30,}|gsk_[A-Za-z0-9]{20,}|Bearer\s+[A-Za-z0-9._-]{24,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|(?:api[_-]?key|secret|token|password|passwd)["\']?\s*[:=]\s*["\']?[A-Za-z0-9_./+=-]{20,}', re.I)
 MANUAL = re.compile(r'收尾|結案|save[-_ ]?session|寫.*memory|該記.{0,5}嗎|歸檔|promote.*wiki|記下來|記一下|存.{0,3}memory', re.I)
 PRIVATE = re.compile(r'不要(?:記|存)|別(?:記|存)|do not (?:remember|save)|don.t (?:remember|save)', re.I)
 SYNTHETIC = re.compile(r'^\s*(?:<|/|\[SYSTEM NOTIFICATION|\[Request interrupted)', re.I)
@@ -172,8 +171,10 @@ def packet(context, final):
   rows = context['records']
   row = rows[-1]
   previous = rows[-2] if len(rows) > 1 else {'user': '', 'assistant': ''}
+  if PRIVATE.search(previous['user']):
+    previous = {'user': '', 'assistant': ''}
   raw = '\n'.join((row['user'], final, previous['user'], previous['assistant']))
-  if COMPANY.search(raw) or SECRET.search(raw):
+  if SECRET.search(raw):
     raise ValueError('sensitive_packet')
   if PRIVATE.search(row['user']):
     raise ValueError('do_not_save')
@@ -184,7 +185,7 @@ def packet(context, final):
            'observed_tool_names': sorted(row['tools']), 'memory_write_observed_this_turn': False,
            'explicit_memory_request': False}
   serialized = dump(state)
-  if COMPANY.search(serialized) or SECRET.search(serialized):
+  if SECRET.search(serialized):
     raise ValueError('sensitive_packet')
   return state
 
@@ -360,8 +361,8 @@ def run_stop(payload, directory, state, name):
     if str(error) not in JEV_FALLS_TO_DREX:
       raise
     data, judge = ask_drex(candidate, questions)
-  except (OSError, subprocess.CalledProcessError):
-    # HTTPError／URLError／socket timeout 都是 OSError；Keychain 讀不到 Jev key 是 CalledProcessError
+  except (OSError, subprocess.SubprocessError):
+    # HTTPError／URLError／socket timeout 都是 OSError；Keychain 讀不到或逾時是 SubprocessError
     data, judge = ask_drex(candidate, questions)
   usage = data.get('usage') or {}
   score = data['answers']['direct_nudge']['noul']
@@ -401,7 +402,7 @@ def run_deliver(payload, directory, state, name):
   source = next((r for r in context['records'] if r['turn'] == pending['turn']), None)
   state.pop('pending', None)
   directory.write(name, dump(state))
-  if MANUAL.search(prompt) or PRIVATE.search(prompt) or COMPANY.search(prompt) or SECRET.search(prompt):
+  if MANUAL.search(prompt) or PRIVATE.search(prompt) or SECRET.search(prompt):
     audit(payload, 'delivery_skip_current_request')
     return
   if (not source or source['saved'] or pending['compact'] != context['compact'] or time.time()-pending['created_at'] > 86400
@@ -432,9 +433,7 @@ def main(payload, mode):
   session = payload.get('session_id', '')
   if not isinstance(session, str) or not SESSION_RE.fullmatch(session):
     return
-  cwd = Path(payload.get('cwd') or '/').resolve()
-  roots = (Path.home().resolve() / 'Desktop/projects', Path.home().resolve() / '.claude')
-  if not any(cwd == r or r in cwd.parents for r in roots) or 'subagents' in Path(payload.get('transcript_path', '')).parts:
+  if 'subagents' in Path(payload.get('transcript_path', '')).parts:
     return
   # Detect unsafe audit targets before any model call, not only after classification.
   audit(payload, 'entered')
