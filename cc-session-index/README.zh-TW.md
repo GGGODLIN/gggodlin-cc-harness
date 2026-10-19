@@ -2,16 +2,18 @@
 
 [English](/README.md) | 繁體中文
 
-單一 Python 檔案、零第三方套件依賴的 SQLite FTS5（`tokenize='trigram'`）本機對話全文索引與正規化事件流工具，涵蓋 **Claude Code**、**Codex** 與 **Pi** 的 `.jsonl` 對話紀錄。
+把本機 **Claude Code**、**Codex** 與 **Pi** 的 `.jsonl` 對話紀錄建進 SQLite FTS5（`tokenize='trigram'`）全文索引，並提供跨工具的正規化 JSONL 事件流。全靠單一 Python 標準庫腳本運作，不裝第三方套件。
 
-取代對數十 GB `.jsonl` 跑全量 `grep`，也避開預設 `unicode61` 分詞器或純英文 embedding 模型無法搜尋中文子字串的問題；在約 600 行標準庫程式碼內提供中英文子字串檢索、工具檔案參數抽取、append-only 位元組增量游標與同檔前後文展開。
+對話紀錄累積到幾十 GB 之後，每次回頭找舊結論都跑 `grep -r` 會慢到打斷工作。現成的對話記憶工具不是用 SQLite 預設的 `unicode61` 分詞（切不出中文子字串），就是綁了純英文的 embedding 模型。
 
-## 為什麼用 `ccsi`
+在作者的機器上（`44 GB`、`53,016` 個 `.jsonl` 檔、`150 萬`列索引紀錄，SQLite 檔 `3.5 GB`，2026-10-19 量測），首次全量建庫耗時 `371.5 秒`，日常增量更新約 `0.6～6.0 秒`。
 
-1. **原生繁體中文／CJK 子字串檢索（`trigram`）**：直接搜 3 字以上中文詞彙、檔案路徑、函式名或錯誤訊息。
-2. **百萬列秒級增量更新（append-only 位元組游標 ＋ `message_refs` 定位表）**：在作者本機 **44 GB／53,016 個 `.jsonl` 檔／150 萬列訊息**（`3.5 GB` SQLite 索引，2026-10-19 實測）上，全量重建耗時 371.5 秒，日常增量更新僅需 **0.6～6.0 秒**。
-3. **高訊噪比的工具參數與控制面抽取**：索引 `Read`、`Edit`、`Write`、`NotebookEdit` 檔案路徑、`Bash` 指令、`Grep`/`Glob` 條件、`Skill` 名稱與參數，同時略過無內容空殼工具列，並過濾 `Base directory for this skill:` 展開全文與 `<system-reminder>` 雜訊。
-4. **跨 Agent 統一事件流（`ccsi events`）**：將三家格式正規化為一致的 JSONL 事件流（`vendor, session, path, ts, cwd, role, kind, tool, model, text`），方便用 `jq` 做跨工具統計與治理稽核。
+## 運作方式
+
+1. `ccsi index` 掃描三個工具的對話目錄，為每個檔案記錄 `(mtime, size, offset, ino, rows)`。檔案在同一 inode 下長大時，直接跳到上次的位元組 `offset` 只讀新增行；若寫入端還沒補上結尾換行，游標會停在該行起點留待下次重讀。
+2. 對話文字寫入 FTS5 `trigram` 表，同時在普通表 `message_refs(mid, path)` 記下檔案與列號對應，讓單檔重算與 `-C` 前後文查詢直接走索引，不必全表掃描 FTS5。
+3. 工具呼叫會抽出可搜尋的關鍵參數（`Read`／`Edit`／`Write`／`NotebookEdit` 的檔案路徑、`Bash` 指令、`Grep`／`Glob` 條件、`Skill` 名稱與參數、`Agent`／`SendMessage` 提示詞）。沒有內容的空工具列（`input: {}`）、Skill 展開的整份說明書（`Base directory for this skill:`）與 `<system-reminder>` 會略過；手動斜線指令（`<command-name>`）與背景任務結果（`<task-notification>`）則保留。
+4. `ccsi events` 讀取同一批對話檔，一行輸出一個正規化事件，讓跨工具統計不用分別寫三套解析器。
 
 | vendor | 預設根目錄（可覆寫環境變數） | 格式 |
 |---|---|---|
@@ -33,7 +35,7 @@ ccsi index
 
 ### 寫入 Claude Code 路由規則（`~/.claude/CLAUDE.md` 或 `rules/common/code-search.md`）
 
-光把 CLI 放進 `PATH`，AI 不會主動記得呼叫它（作者環境實測：未寫入規則的 8 月僅被呼叫 **15 次**；寫入 `code-search.md` 後於 9～10 月被呼叫 **2,569 次**／跨 429 個獨立對話）。建議在全域規則加入：
+光把 `ccsi` 放進 `PATH`，模型不會自己想到要呼叫它。在作者的環境裡，還沒寫進規則的 8 月整月只被呼叫 15 次；寫入 `code-search.md` 後，9～10 月在 429 個獨立對話裡被呼叫了 2,569 次。在全域規則加入這一段即可：
 
 ```markdown
 - **Session 歷史檢索**（我之前怎麼做的、上次為什麼放棄某做法、某決策發生在哪個 session）→ `ccsi search "<query>" -k 5`（加 `-C 2` 展開同檔前後已索引紀錄、加 `--exclude-session <UUID前綴>` 排除當前 session、加 `--vendor {cc,codex,pi}` 篩來源）。SQLite FTS5 全文索引（若已設定排程則自動增量，剛發生的對話若未入庫可先 `ccsi index`）。trigram tokenizer：查詢至少要有一個 `>=3` 字元的詞或雙引號片語（如 `ccsi search '"測試 假綠"'`；純 2 字中文詞會報錯 exit 2），且多詞必須在同一則訊息共現（不確定時拆成多次短查詢）。需要看未入 FTS 的 `tool_result`（單筆上限 8,000 字）時用 `ccsi events --session <id>`，超過上限則讀命中原檔。
@@ -66,9 +68,9 @@ ccsi events --session 97ac80ca --kind text
 
 ## 已知限制
 
-- **Trigram 最短詞長（3 字元）**：查詢至少需含一個 `>= 3` 字元的詞或雙引號片語（如 `ccsi search '"測試 假綠"'`）。純 `< 3` 字短詞（或含 `< 3` 字運算元的布林／引號查詢）會明確報錯並回傳 `exit 2`；一般空白分隔的長短詞混搜則會自動對 `< 3` 字詞附加 `LIKE` 過濾。
-- **長度上限與 `tool_result`**：FTS 表不收錄 `tool_result` 輸出（僅收錄對話文字與 2,000 字以內的 `tool_use` 參數摘要）；單筆 `text` 在索引與 `ccsi events` 皆截斷於 8,000 字元，需完整長文時請直接讀取命中的 `.jsonl` 原檔。
-- **Append-only 假設與已刪除檔案**：增量索引假設既有 `.jsonl` 為純追加寫入，且不自動清除磁碟上已刪除檔案的舊列（需完整清理時刪除 `index.sqlite` 重跑 `ccsi index`）。
+- FTS5 `trigram` 要求查詢裡至少有一個 3 字元以上的詞或雙引號片語（如 `ccsi search '"測試 假綠"'`）。只含 1～2 字元的查詢（或含 `< 3` 字運算元的布林／引號查詢）會回傳 `exit 2` 並印出說明，不會假裝成 `(no hits)`；一般空白分隔的長短詞混搜則會自動對短詞補上 `LIKE` 過濾。
+- FTS 表不收錄 `tool_result` 輸出，只收錄對話文字（上限 8,000 字）與 `tool_use` 參數摘要（上限 2,000 字）。要看工具輸出可用 `ccsi events --session <id> --kind tool_result`（單筆上限 8,000 字），超過上限時直接讀 `.jsonl` 原檔。
+- 增量更新假設既有 `.jsonl` 只往後追加（`st_ino` 未變且 `st_size` 變大），且不會自動刪除已從磁碟移除的舊檔紀錄；需要完整清理時，刪掉 `index.sqlite` 再跑一次 `ccsi index`。
 
 ## 測試
 

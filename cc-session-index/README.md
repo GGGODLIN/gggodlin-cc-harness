@@ -2,16 +2,18 @@
 
 English | [繁體中文](/README.zh-TW.md)
 
-Single-file, zero-dependency SQLite FTS5 (`tokenize='trigram'`) full-text index and normalized event stream over local coding-agent session transcripts (**Claude Code**, **Codex**, and **Pi**).
+Index your local **Claude Code**, **Codex**, and **Pi** `.jsonl` session transcripts into SQLite FTS5 (`tokenize='trigram'`), and stream normalized events across all three tools from a single standard-library Python script.
 
-Instead of running slow `grep -r` scans across tens of gigabytes of `.jsonl` session logs—or adopting heavy vector/Electron stacks whose default tokenizers fail on CJK (Chinese/Japanese/Korean) substrings—`ccsi` gives your coding agent sub-second literal and CJK substring search with append-only incremental indexing in ~600 lines of standard-library Python.
+Once a transcript folder grows past a few tens of gigabytes, `grep -r` across `.jsonl` files takes too long for an agent to run mid-turn. Most session-memory tools either use SQLite's default `unicode61` tokenizer, which cannot match Chinese, Japanese, or Korean substrings, or pin an English-only embedding model.
 
-## Why `ccsi`
+On the author's machine (`44 GB` across `53,016` `.jsonl` files, `1.50M` indexed rows, `3.5 GB` SQLite file, measured 2026-10-19), a full build takes `371.5s` and incremental runs take `0.6s–6.0s`.
 
-1. **Native CJK & substring search (`trigram`)**: SQLite's default `unicode61` tokenizer cannot search arbitrary CJK substrings, and many embedding-based session memory tools pin English-only models. `ccsi` uses FTS5 `trigram`, so 3+ character CJK phrases, file paths, identifiers, and error strings work out of the box.
-2. **Append-only byte cursor + `message_refs` positioning**: On a production corpus of **44 GB / 53,016 `.jsonl` files / 1.50M indexed rows** (`3.5 GB` SQLite index, measured 2026-10-19), incremental updates take **0.6s–6.0s** by reading only newly appended bytes from `(mtime, size, offset, ino)` and avoiding full-table FTS scans via `message_refs(path, mid)`.
-3. **High-signal tool & envelope extraction**: Indexes `Read`, `Edit`, `Write`, `NotebookEdit` file paths, `Bash` commands, `Grep`/`Glob` patterns, `Skill` invocations, and `Agent`/`SendMessage` prompts while skipping empty tool shells and stripping expanded skill prompt bodies (`Base directory for this skill:`) and `<system-reminder>` noise.
-4. **Unified cross-agent event stream (`ccsi events`)**: Streams normalized JSONL events across Claude Code, Codex, and Pi (`vendor`, `session`, `path`, `ts`, `cwd`, `role`, `kind`, `tool`, `model`, `text`) for cross-agent auditing without writing three separate parsers.
+## How it works
+
+1. `ccsi index` walks the transcript roots for Claude Code, Codex, and Pi. For each file it stores `(mtime, size, offset, ino, rows)`. When a file grows with the same inode, `ccsi` seeks to the previous byte `offset` and indexes only the newly appended lines; if the last line is still being written and lacks a trailing newline, the cursor stays at the start of that line until the next run.
+2. User and assistant text are written to an FTS5 table using the `trigram` tokenizer, alongside a `message_refs(mid, path)` lookup table so per-file replacements and `-C` context queries use an index instead of scanning FTS5.
+3. Tool calls are summarized down to their searchable arguments (`Read`/`Edit`/`Write`/`NotebookEdit` file paths, `Bash` commands, `Grep`/`Glob` patterns, `Skill` names and args, `Agent`/`SendMessage` prompts). Tool calls with empty inputs (`{}`), expanded skill bodies (`Base directory for this skill:`), and `<system-reminder>` blocks are skipped; slash commands (`<command-name>`) and `<task-notification>` results are kept.
+4. `ccsi events` reads the same transcripts and emits one JSONL object per event (`vendor`, `session`, `path`, `ts`, `cwd`, `role`, `kind`, `tool`, `model`, `text`) so you can query all three agents with `jq`.
 
 | Vendor | Default Root (override env var) | Transcript Format |
 |---|---|---|
@@ -33,7 +35,7 @@ ccsi index
 
 ### Wire into Claude Code (`~/.claude/CLAUDE.md`)
 
-Installing the CLI alone is not enough—agents rarely remember to call a tool unless a routing rule points them to it (on the author's setup, agent calls went from **15** in August before adding the rule to **2,569** across September–October / 429 root sessions after adding it). Add this line to your `~/.claude/CLAUDE.md` (or `rules/common/code-search.md`):
+Putting `ccsi` on `PATH` is not enough on its own; the model will not call it unless a rule tells it when to look up past sessions. On the author's setup, `ccsi` was called 15 times in August before being added to the routing rules, and 2,569 times across 429 root sessions over September and October after adding this line to `~/.claude/CLAUDE.md` (or `rules/common/code-search.md`):
 
 ```markdown
 - **Session history search** (how we solved X before, why an approach was dropped, which session made a decision) → `ccsi search "<query>" -k 5` (add `-C 2` for surrounding same-file messages, `--exclude-session <UUID-prefix>` to skip the current session, `--vendor {cc,codex,pi}` to filter). Uses SQLite FTS5 `trigram` (run `ccsi index` first if recent sessions are not indexed yet): include at least one >=3-char token or quoted phrase (e.g. `ccsi search '"測試 假綠"'`), and split uncertain multi-concept queries into separate searches. For unindexed `tool_result` outputs, use `ccsi events --session <id>`.
@@ -98,11 +100,11 @@ On Linux (`crontab -e`):
 */15 * * * * ~/.local/bin/ccsi index >> ~/.cache/cc-session-index/cron.log 2>&1
 ```
 
-## Known Limits
+## Known limits
 
-- **Trigram minimum length (3 chars)**: FTS5 `trigram` requires at least one token or quoted phrase of `>= 3` characters. Queries with only 1–2 character tokens (or boolean/quoted queries containing `< 3`-char operands) exit with code `2` and an explanation rather than silently returning wrong results. In plain space-separated queries that mix `>= 3`-char and `< 3`-char tokens, `ccsi` automatically filters the `< 3`-char tokens via `LIKE`.
-- **Length caps & `tool_result` bodies**: `tool_result` bodies are not indexed in the FTS table (only conversation text and summarized `tool_use` inputs up to 2,000 chars are indexed in `messages`, with message text capped at 8,000 chars in both `messages` and `ccsi events`). For unindexed `tool_result` outputs, use `ccsi events --session <id> --kind tool_result` (up to 8,000 chars per event) or inspect the source `.jsonl` file.
-- **Append-only assumption & deleted transcripts**: Incremental indexing assumes existing `.jsonl` files are append-only (`st_ino` unchanged and `st_size` grown) and does not automatically purge rows for `.jsonl` files deleted from disk; remove `index.sqlite` and re-run `ccsi index` for a clean rebuild.
+- FTS5 `trigram` needs at least one token or quoted phrase of 3 or more characters. Queries made only of 1–2 character tokens (or boolean/quoted queries with `< 3`-char operands) exit with code `2` instead of printing `(no hits)`. In plain space-separated queries that mix `>= 3`-char and `< 3`-char tokens, `ccsi` filters the short tokens with `LIKE`.
+- `tool_result` outputs are not indexed in FTS. `messages` stores conversation text (capped at 8,000 chars) and summarized `tool_use` inputs (capped at 2,000 chars). To read `tool_result` outputs, run `ccsi events --session <id> --kind tool_result` (capped at 8,000 chars per event) or open the `.jsonl` file.
+- Incremental indexing assumes `.jsonl` files are append-only (`st_ino` unchanged and `st_size` grown), and deleted `.jsonl` files are not purged from `index.sqlite`. Delete `index.sqlite` and run `ccsi index` to rebuild from scratch.
 
 ## Tests
 
