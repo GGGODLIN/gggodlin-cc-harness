@@ -26,7 +26,7 @@ On the author's machine (`44 GB` across `53,016` `.jsonl` files, `1.50M` indexed
 Requires Python 3.9+ linked against **SQLite 3.34.0+** with FTS5 `trigram` support (included in macOS Homebrew Python and standard Linux distributions). No `pip install` needed.
 
 ```sh
-git clone https://github.com/example-owner/cc-session-index.git
+git clone https://github.com/GGGODLIN/cc-session-index.git
 mkdir -p ~/.local/bin
 ln -s "$PWD/cc-session-index/ccsi" ~/.local/bin/ccsi
 # Ensure ~/.local/bin is in your PATH (e.g. export PATH="$HOME/.local/bin:$PATH")

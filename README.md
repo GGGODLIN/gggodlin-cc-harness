@@ -19,7 +19,7 @@ It is a reference, not a product. You can install single pieces, but nothing gua
 - skill、command、agent 與審查標準：規劃、實作、審查、查證這條工作流用到的部分，以及按變更條件載入的 34 份審查標準（`review-standards/`）。
 - 四套制度：memory（跨 session 記憶）、wiki（收斂後的知識條目）、trial（新工具與新機制的觀察期帳本）、摩擦紀錄（卡住、繞路、規則沒被遵守的事件）。四套都只公開機制，內容換成 `examples/` 裡的虛構範例。
 - daily-local：每天跑一次的本機分析報告，掃規則用量、摩擦、壞掉的路徑等，程式在 `social-info/` 與 `cc-skill-doctor/`。
-- cc-session-index（`ccsi`）：對 Claude Code、Codex 與 Pi 的 `.jsonl` 對話紀錄建 SQLite FTS5 `trigram` 全文索引與正規化事件流，在 `cc-session-index/`（獨立 repo 見 [`example-owner/cc-session-index`](https://github.com/example-owner/cc-session-index)）。
+- cc-session-index（`ccsi`）：對 Claude Code、Codex 與 Pi 的 `.jsonl` 對話紀錄建 SQLite FTS5 `trigram` 全文索引與正規化事件流，在 `cc-session-index/`（獨立 repo 見 [`GGGODLIN/cc-session-index`](https://github.com/GGGODLIN/cc-session-index)）。
 - compact-guard：context 壓縮前存一份可稽核的 checkpoint，壓縮後把原始對話證據注回來，含 Codex 支援，在 `compact-guard/`。
 
 不包含：個人客製化（statusline、個人工具串接、部落格產線、帳號與瀏覽器的具體接法）、公司相關的治理、能力型 skill（畫圖、簡報之類），以及 memory、wiki、trial、摩擦紀錄的實際內容。

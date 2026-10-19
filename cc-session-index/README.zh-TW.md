@@ -26,7 +26,7 @@
 需要 Python 3.9+ 且連結的 **SQLite 為 3.34.0+**（支援 FTS5 `trigram`，macOS Homebrew Python 與主流 Linux 發行版皆已內建），不需安裝任何第三方套件：
 
 ```sh
-git clone https://github.com/example-owner/cc-session-index.git
+git clone https://github.com/GGGODLIN/cc-session-index.git
 mkdir -p ~/.local/bin
 ln -s "$PWD/cc-session-index/ccsi" ~/.local/bin/ccsi
 # 確認 ~/.local/bin 已加入 PATH（例如 export PATH="$HOME/.local/bin:$PATH"）
