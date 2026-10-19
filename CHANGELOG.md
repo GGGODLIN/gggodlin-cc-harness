@@ -2,12 +2,15 @@
 
 公開版 harness 的變更紀錄。每一節對應一次發布；「Unreleased」是已整備、尚未推上公開 repo 的候選。只記對讀者有意義的變動，不逐檔列 diff。
 
-## Unreleased
+## 2026-10-19
 
 ### 新增
+- `cc-session-index/`、`install/cc-session-index/ccsi.md`：納入單一 Python 檔的 SQLite FTS5（`trigram`）跨工具（Claude Code／Codex／Pi）對話索引與正規化事件流工具 `ccsi`（支援 append-only 位元組增量游標、`message_refs` 定位表、工具檔案參數抽取、`-C <N>` 同檔上下文展開與 `<3` 字元短詞防護），並於 `rules/common/code-search.md` 直接保留 `ccsi` 檢索規則（移除原 `session 歷史檢索` 的 `🔌` 替換）。
+- `skills/resolving-merge-conflicts/scripts/prepare_merge_review.py` 與對應測試：新增 3-way 合併衝突差異審查打包器與基於檔案內容的機械檢查。
 - `examples/memory/feedback_memory_cluster_maintenance.md`、`examples/memory/_index_example_cluster.md`：補齊兩層記憶索引維護規範範例（含 `## Tier 1:` 動態注入段落）與子索引範例，並在 `README.md` 元件分類地圖補上跨 session 記憶提醒入口。
 
 ### 變更
+- `skills/check-my-stack/SKILL.md`：Step 7 自檢模板補齊 `AUDIT_INPUT_MODE: FILE_SNAPSHOT` 三行標頭契約。
 - `hooks/auto-memory-jev.py`、`install/hooks/auto-memory-jev.py.md`：試用期 KEEP 結案後移除目錄白名單與公司字樣限制、放寬為整機主對話適用；補齊安裝說明中的 `hooks/memory_reminder_common.py`、兩層記憶規範檔與 Keychain 金鑰依賴。
 - `skills/deep-research`：移除試用期 KILL 結案的 `hyperresearch` 選項 4 接線。
 

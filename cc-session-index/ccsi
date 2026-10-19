@@ -1,0 +1,673 @@
+#!/usr/bin/env python3
+import argparse
+import fcntl
+import json
+import os
+import re
+import sqlite3
+import sys
+import time
+
+def default_db_dir():
+  if os.environ.get("CCSI_DB_DIR"):
+    return os.path.expanduser(os.environ["CCSI_DB_DIR"])
+  if sys.platform == "darwin":
+    return os.path.expanduser("~/Library/Caches/cc-session-index")
+  xdg = os.environ.get("XDG_CACHE_HOME", "")
+  cache_home = xdg if os.path.isabs(xdg) else os.path.expanduser("~/.cache")
+  return os.path.join(cache_home, "cc-session-index")
+
+
+def build_roots():
+  cc_cfg = os.path.expanduser(os.environ.get("CLAUDE_CONFIG_DIR") or "~/.claude")
+  codex_home = os.path.expanduser(os.environ.get("CODEX_HOME") or "~/.codex")
+  pi_dir = os.path.expanduser(os.environ.get("PI_CODING_AGENT_DIR") or "~/.pi/agent")
+  return (
+    ("cc", os.path.join(cc_cfg, "projects")),
+    ("codex", os.path.join(codex_home, "sessions")),
+    ("codex", os.path.join(codex_home, "archived_sessions")),
+    ("pi", os.path.join(pi_dir, "sessions")),
+  )
+
+
+ROOTS = build_roots()
+ROOT = ROOTS[0][1]
+VENDORS = ("cc", "codex", "pi")
+DB_DIR = default_db_dir()
+DB_PATH = os.path.join(DB_DIR, "index.sqlite")
+SCHEMA_VERSION = 2
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS files (
+  path TEXT PRIMARY KEY,
+  mtime REAL NOT NULL,
+  size INTEGER NOT NULL,
+  offset INTEGER NOT NULL DEFAULT 0,
+  ino INTEGER NOT NULL DEFAULT 0,
+  rows INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS message_refs (
+  mid INTEGER PRIMARY KEY,
+  path TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS message_refs_path_mid ON message_refs(path, mid);
+CREATE VIRTUAL TABLE IF NOT EXISTS messages USING fts5(
+  text,
+  path UNINDEXED,
+  ts UNINDEXED,
+  role UNINDEXED,
+  tokenize='trigram'
+);
+"""
+
+COMMAND_NAME_RE = re.compile(r"<command-name>\s*([^<]+?)\s*</command-name>")
+COMMAND_ARGS_RE = re.compile(r"<command-args>\s*(.*?)\s*</command-args>", re.DOTALL)
+TASK_SUMMARY_RE = re.compile(r"<summary>\s*(.*?)\s*</summary>", re.DOTALL)
+TASK_RESULT_RE = re.compile(r"<result>\s*(.*?)\s*</result>", re.DOTALL)
+SKILL_BASE_RE = re.compile(r"^\s*Base directory for this skill(?:\s*:|\s*\r?\n)")
+PURE_NOISE_RE = re.compile(r"^\s*<(?:local-command-caveat|local-command-stdout|system-reminder)\b")
+
+
+def set_private_mode(path, mode):
+  try:
+    os.chmod(path, mode)
+  except OSError:
+    pass
+
+
+def connect(upgrade=False):
+  os.makedirs(DB_DIR, mode=0o700, exist_ok=True)
+  set_private_mode(DB_DIR, 0o700)
+  db = sqlite3.connect(DB_PATH)
+  set_private_mode(DB_PATH, 0o600)
+  try:
+    ver = db.execute("PRAGMA user_version").fetchone()[0]
+    if ver != SCHEMA_VERSION:
+      has_files = db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='files'").fetchone()
+      if not has_files:
+        db.executescript(SCHEMA)
+        db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+        db.commit()
+      elif upgrade:
+        cols = {r[1] for r in db.execute("PRAGMA table_info(files)")}
+        has_refs = db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='message_refs'").fetchone()
+        if not {"offset", "ino", "rows"}.issubset(cols) or not has_refs:
+          db.executescript("DROP TABLE IF EXISTS files; DROP TABLE IF EXISTS message_refs; DROP TABLE IF EXISTS messages; VACUUM;")
+        db.executescript(SCHEMA)
+        db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+        db.commit()
+    else:
+      db.executescript(SCHEMA)
+  except sqlite3.OperationalError as e:
+    if "fts5" in str(e).lower() or "trigram" in str(e).lower():
+      print(
+        f"ccsi: SQLite 3.34.0+ with FTS5 trigram is required (running {sys.executable} with SQLite {sqlite3.sqlite_version}): {e}",
+        file=sys.stderr,
+      )
+      sys.exit(2)
+    raise
+  return db
+
+
+def vendor_of(path):
+  for vendor, root in ROOTS:
+    if path.startswith(root + os.sep):
+      return vendor, root
+  return "cc", ROOT
+
+
+def iter_files(vendors):
+  for vendor, root in ROOTS:
+    if vendor not in vendors or not os.path.isdir(root):
+      continue
+    for dirpath, dirs, names in os.walk(root):
+      # Prune mirrored Codex rollouts under <cc_root>/codex so they are not indexed twice.
+      if vendor == "cc" and dirpath == root and "codex" in dirs:
+        dirs.remove("codex")
+      for n in names:
+        if n.endswith(".jsonl"):
+          yield vendor, os.path.join(dirpath, n)
+
+
+def read_jsonl_records(path, start_offset=0):
+  records = []
+  with open(path, "rb") as f:
+    st = os.fstat(f.fileno())
+    if start_offset > 0:
+      f.seek(start_offset)
+    consumed = start_offset
+    while f.tell() < st.st_size:
+      line_start = f.tell()
+      raw = f.readline(st.st_size - line_start)
+      if not raw:
+        break
+      line_end = f.tell()
+      text = raw.decode("utf-8", errors="replace")
+      if raw.endswith(b"\n"):
+        consumed = line_end
+        try:
+          obj = json.loads(text)
+        except json.JSONDecodeError:
+          continue
+        if isinstance(obj, dict):
+          records.append(obj)
+      else:
+        try:
+          obj = json.loads(text)
+        except json.JSONDecodeError:
+          # Incomplete trailing line from a live writer: hold cursor at line_start
+          # so the next incremental pass reads the completed JSON object.
+          break
+        consumed = line_end
+        if isinstance(obj, dict):
+          records.append(obj)
+  return st, consumed, records
+
+
+def load_lines(path):
+  _, _, records = read_jsonl_records(path, 0)
+  yield from records
+
+
+def as_text(value):
+  if isinstance(value, str):
+    return value
+  if value is None:
+    return ""
+  try:
+    return json.dumps(value, ensure_ascii=False, default=str)
+  except (TypeError, ValueError):
+    return str(value)
+
+
+def summarize_tool_input(name, inp):
+  if not isinstance(inp, dict) or not inp:
+    return ""
+  for k in ("command", "prompt", "query", "file_path", "notebook_path", "url"):
+    if inp.get(k):
+      return as_text(inp[k])
+  if name == "Skill":
+    return f"{as_text(inp.get('skill', ''))} {as_text(inp.get('args', ''))}".strip()
+  if name in ("Grep", "Glob"):
+    return f"{as_text(inp.get('pattern', ''))} {as_text(inp.get('path', ''))}".strip()
+  if name == "SendMessage":
+    return f"{as_text(inp.get('to', ''))} {as_text(inp.get('summary', ''))} {as_text(inp.get('message', ''))}".strip()
+  if name == "Workflow":
+    return f"{as_text(inp.get('name', ''))} {as_text(inp.get('script', ''))}".strip()
+  return as_text(inp)
+
+
+def normalize_fts_text(text):
+  s = text.strip()
+  if not s or SKILL_BASE_RE.match(s):
+    return ""
+  if s.startswith(("<command-message>", "<command-name>")):
+    m_name = COMMAND_NAME_RE.search(s)
+    if m_name:
+      m_args = COMMAND_ARGS_RE.search(s)
+      args_part = m_args.group(1).strip() if m_args else ""
+      return f"{m_name.group(1).strip()} {args_part}".strip()
+  if "<task-notification>" in s and s.startswith(("<task-notification>", "[SYSTEM NOTIFICATION", "<system-reminder>")):
+    m_sum = TASK_SUMMARY_RE.search(s)
+    m_res = TASK_RESULT_RE.search(s)
+    parts = [p.group(1).strip() for p in (m_sum, m_res) if p and p.group(1).strip()]
+    return ("[task-notification] " + " — ".join(parts)) if parts else ""
+  if PURE_NOISE_RE.match(s):
+    return ""
+  return s
+
+
+def cc_blocks(content):
+  if isinstance(content, str):
+    yield ("text", content, None)
+    return
+  if not isinstance(content, list):
+    return
+  for block in content:
+    if not isinstance(block, dict):
+      continue
+    btype = block.get("type")
+    if btype == "text":
+      yield ("text", as_text(block.get("text", "")), None)
+    elif btype == "tool_use":
+      inp = block.get("input") if isinstance(block.get("input"), dict) else {}
+      tname = as_text(block.get("name", ""))
+      cmd = inp.get("command") or inp.get("prompt") or inp.get("query") or summarize_tool_input(tname, inp)
+      yield ("tool_call", as_text(cmd), {"tool": tname, "input": inp})
+    elif btype == "tool_result":
+      c = block.get("content")
+      text = c if isinstance(c, str) else " ".join(as_text(x.get("text", "")) for x in c if isinstance(x, dict)) if isinstance(c, list) else ""
+      yield ("tool_result", as_text(text), None)
+
+
+def codex_text(content):
+  if isinstance(content, str):
+    return content
+  if isinstance(content, list):
+    return "\n".join(as_text(x.get("text", "")) for x in content if isinstance(x, dict) and x.get("type") in ("input_text", "output_text", "text"))
+  return ""
+
+
+def events_cc(path, records=None, include_input=False):
+  session = os.path.splitext(os.path.basename(path))[0]
+  for obj in (records if records is not None else load_lines(path)):
+    if obj.get("type") not in (None, "user", "assistant"):
+      continue
+    msg = obj.get("message")
+    if not isinstance(msg, dict):
+      continue
+    is_meta = bool(obj.get("isMeta") or msg.get("isMeta"))
+    base = {"vendor": "cc", "session": obj.get("sessionId") or session, "path": path, "ts": as_text(obj.get("timestamp", "")), "cwd": as_text(obj.get("cwd", "")), "role": as_text(msg.get("role", obj.get("type"))), "model": as_text(msg.get("model", ""))}
+    for kind, text, extra in cc_blocks(msg.get("content")):
+      if kind == "text" and (is_meta or not text.strip()):
+        continue
+      ev = dict(base, kind=kind, text=text[:8000])
+      if extra:
+        ev["tool"] = extra["tool"]
+        if include_input:
+          ev["_input"] = extra["input"]
+        if extra["tool"] == "Agent":
+          ev["agent_type"] = as_text(extra["input"].get("subagent_type", ""))
+          ev["agent_model"] = as_text(extra["input"].get("model", ""))
+        if extra["tool"] == "Skill":
+          ev["skill"] = as_text(extra["input"].get("skill", ""))
+      yield ev
+
+
+def events_codex(path, records=None, include_input=False):
+  session = os.path.splitext(os.path.basename(path))[0]
+  cwd = ""
+  model = ""
+  effort = ""
+  role_tag = ""
+  for obj in (records if records is not None else load_lines(path)):
+    t = obj.get("type")
+    p = obj.get("payload")
+    if not isinstance(p, dict):
+      p = {}
+    ts = as_text(obj.get("timestamp", ""))
+    if t == "session_meta":
+      session = as_text(p.get("id")) or session
+      cwd = as_text(p.get("cwd")) or cwd
+      sub = ((p.get("source") or {}).get("subagent") or {}) if isinstance(p.get("source"), dict) else {}
+      spawn = sub.get("thread_spawn") if isinstance(sub, dict) else None
+      role_tag = as_text((spawn or {}).get("agent_role", "")) if isinstance(spawn, dict) else (as_text(sub.get("other", "")) if isinstance(sub, dict) else "")
+      yield {"vendor": "codex", "session": session, "path": path, "ts": ts, "cwd": cwd, "role": "meta", "kind": "session_meta", "text": "", "model": "", "agent_role": role_tag, "originator": as_text(p.get("originator", ""))}
+      continue
+    if t == "turn_context":
+      model = as_text(p.get("model")) or model
+      effort = as_text(p.get("effort")) or effort
+      cwd = as_text(p.get("cwd")) or cwd
+      yield {"vendor": "codex", "session": session, "path": path, "ts": ts, "cwd": cwd, "role": "meta", "kind": "turn_context", "text": "", "model": model, "effort": effort, "agent_role": role_tag}
+      continue
+    if t != "response_item":
+      continue
+    base = {"vendor": "codex", "session": session, "path": path, "ts": ts, "cwd": cwd, "model": model, "effort": effort, "agent_role": role_tag}
+    pt = p.get("type")
+    if pt == "message":
+      text = codex_text(p.get("content"))
+      if text.strip():
+        yield dict(base, role=as_text(p.get("role", "")), kind="text", text=text[:8000])
+    elif pt in ("function_call", "custom_tool_call"):
+      args = p.get("arguments") if pt == "function_call" else p.get("input")
+      parsed = None
+      if isinstance(args, str):
+        try:
+          parsed = json.loads(args)
+        except ValueError:
+          parsed = None
+      elif isinstance(args, dict):
+        parsed = args
+      text = args if isinstance(args, str) else json.dumps(args, ensure_ascii=False)
+      ev = dict(base, role="assistant", kind="tool_call", tool=as_text(p.get("name", "")), text=(text or "")[:8000])
+      if include_input and isinstance(parsed, dict):
+        ev["_input"] = parsed
+      if isinstance(parsed, dict) and p.get("name") == "spawn_agent":
+        ev["agent_type"] = as_text(parsed.get("agent_type", ""))
+      yield ev
+    elif pt in ("function_call_output", "custom_tool_call_output"):
+      out = p.get("output")
+      text = out if isinstance(out, str) else json.dumps(out, ensure_ascii=False)
+      yield dict(base, role="tool", kind="tool_result", text=(text or "")[:8000])
+
+
+def events_pi(path, records=None, include_input=False):
+  session = os.path.splitext(os.path.basename(path))[0]
+  cwd = ""
+  model = ""
+  for obj in (records if records is not None else load_lines(path)):
+    t = obj.get("type")
+    ts = as_text(obj.get("timestamp", ""))
+    if t == "session":
+      session = as_text(obj.get("id")) or session
+      cwd = as_text(obj.get("cwd")) or cwd
+      yield {"vendor": "pi", "session": session, "path": path, "ts": ts, "cwd": cwd, "role": "meta", "kind": "session_meta", "text": "", "model": ""}
+      continue
+    if t == "model_change":
+      prov = as_text(obj.get("provider", ""))
+      mid = as_text(obj.get("modelId", ""))
+      model = f"{prov}/{mid}".strip("/") if (prov or mid) else model
+      continue
+    if t != "message":
+      continue
+    msg = obj.get("message")
+    if not isinstance(msg, dict):
+      continue
+    role = as_text(msg.get("role", ""))
+    base = {"vendor": "pi", "session": session, "path": path, "ts": ts, "cwd": cwd, "role": role, "model": model}
+    content = msg.get("content")
+    if role == "toolResult":
+      text = content if isinstance(content, str) else " ".join(as_text(x.get("text", "")) for x in content if isinstance(x, dict) and x.get("type") == "text") if isinstance(content, list) else ""
+      yield dict(base, role="tool", kind="tool_result", tool=as_text(msg.get("toolName", "")), text=as_text(text)[:8000])
+      continue
+    if isinstance(content, str):
+      if content.strip():
+        yield dict(base, kind="text", text=content[:8000])
+      continue
+    if not isinstance(content, list):
+      continue
+    for block in content:
+      if not isinstance(block, dict):
+        continue
+      bt = block.get("type")
+      if bt == "text":
+        txt = as_text(block.get("text", ""))
+        if txt.strip():
+          yield dict(base, kind="text", text=txt[:8000])
+      elif bt == "toolCall":
+        tname = as_text(block.get("name", ""))
+        args = block.get("arguments")
+        inp = args if isinstance(args, dict) else {}
+        summary = summarize_tool_input(tname, inp) if inp else as_text(args)
+        ev = dict(base, role="assistant", kind="tool_call", tool=tname, text=summary[:8000])
+        if include_input:
+          ev["_input"] = inp
+        yield ev
+
+
+PARSERS = {
+  "cc": events_cc,
+  "codex": events_codex,
+  "pi": events_pi,
+}
+
+
+def events_for(vendor, path, records=None, include_input=False):
+  parser = PARSERS.get(vendor, events_codex)
+  return parser(path, records=records, include_input=include_input)
+
+
+def extract_rows(path, vendor=None, records=None):
+  vendor = vendor or vendor_of(path)[0]
+  rows = []
+  for ev in events_for(vendor, path, records=records, include_input=True):
+    if ev["kind"] == "text":
+      text = normalize_fts_text(ev["text"])
+    elif ev["kind"] == "tool_call":
+      tool = ev.get("tool", "")
+      body = ev["text"].strip()
+      if not body and isinstance(ev.get("_input"), dict):
+        body = summarize_tool_input(tool, ev["_input"]).strip()
+      if body:
+        text = f"[{tool}] {body}"[:2000]
+      else:
+        text = ""
+    else:
+      continue
+    if text:
+      rows.append((text[:8000], path, ev["ts"], ev["role"]))
+  return rows
+
+
+def delete_file_messages(db, path):
+  db.execute("DELETE FROM messages WHERE rowid IN (SELECT mid FROM message_refs WHERE path = ?)", (path,))
+  db.execute("DELETE FROM message_refs WHERE path = ?", (path,))
+
+
+def cmd_index(args):
+  t0 = time.time()
+  os.makedirs(DB_DIR, mode=0o700, exist_ok=True)
+  set_private_mode(DB_DIR, 0o700)
+  lock_path = os.path.join(DB_DIR, "index.lock")
+  with open(lock_path, "w") as lock_file:
+    set_private_mode(lock_path, 0o600)
+    fcntl.flock(lock_file, fcntl.LOCK_EX)
+    db = connect(upgrade=True)
+    known = {
+      row[0]: (row[1], row[2], row[3], row[4], row[5])
+      for row in db.execute("SELECT path, mtime, size, offset, ino, rows FROM files")
+    }
+    next_mid = db.execute(
+      "SELECT max(coalesce((SELECT max(mid) FROM message_refs), 0), coalesce((SELECT max(id) FROM messages_docsize), 0))"
+    ).fetchone()[0]
+    scanned = updated = failed = 0
+    for vendor, p in iter_files(set(args.vendor or VENDORS)):
+      try:
+        st_pre = os.stat(p)
+      except OSError:
+        continue
+      scanned += 1
+      prev = known.get(p)
+      if prev is not None and prev[0] == st_pre.st_mtime and prev[1] == st_pre.st_size and prev[3] == st_pre.st_ino:
+        continue
+      can_append = (
+        prev is not None
+        and prev[3] == st_pre.st_ino
+        and st_pre.st_size > prev[1]
+        and prev[2] > 0
+      )
+      start_offset = prev[2] if can_append else 0
+      try:
+        st, new_offset, records = read_jsonl_records(p, start_offset)
+        if can_append and (st.st_ino != prev[3] or st.st_size <= prev[1]):
+          can_append = False
+          st, new_offset, records = read_jsonl_records(p, 0)
+        rows = extract_rows(p, vendor, records=records)
+      except OSError as e:
+        failed += 1
+        print(f"skip unreadable file: {p}: {e}", file=sys.stderr)
+        continue
+      if prev is not None and not can_append:
+        delete_file_messages(db, p)
+        base_rows = 0
+      else:
+        base_rows = prev[4] if can_append else 0
+      fts_rows = []
+      ref_rows = []
+      for text, rpath, ts, role in rows:
+        next_mid += 1
+        fts_rows.append((next_mid, text, rpath, ts, role))
+        ref_rows.append((next_mid, rpath))
+      if fts_rows:
+        db.executemany(
+          "INSERT INTO messages (rowid, text, path, ts, role) VALUES (?, ?, ?, ?, ?)",
+          fts_rows,
+        )
+        db.executemany(
+          "INSERT INTO message_refs (mid, path) VALUES (?, ?)",
+          ref_rows,
+        )
+      db.execute(
+        "INSERT OR REPLACE INTO files (path, mtime, size, offset, ino, rows) VALUES (?, ?, ?, ?, ?, ?)",
+        (p, st.st_mtime, st.st_size, new_offset, st.st_ino, base_rows + len(fts_rows)),
+      )
+      known[p] = (st.st_mtime, st.st_size, new_offset, st.st_ino, base_rows + len(fts_rows))
+      updated += 1
+      if updated % 500 == 0:
+        db.commit()
+    db.commit()
+    total = db.execute("SELECT coalesce(sum(rows), 0) FROM files").fetchone()[0]
+    print(f"scanned={scanned} updated={updated} failed={failed} rows={total} took={time.time()-t0:.1f}s")
+
+
+FTS_SYNTAX_RE = re.compile(r'["*()^:]|\b(?:AND|OR|NOT|NEAR(?:/\d+)?)\b')
+QUERY_TERM_RE = re.compile(r'"([^"]+)"|(\S+)')
+NEAR_OP_RE = re.compile(r"^NEAR(?:/\d+)?$")
+
+
+def literal_query(query):
+  out = []
+  for token in query.split():
+    if token in ("AND", "OR", "NOT"):
+      out.append(token)
+    else:
+      out.append('"' + token.replace('"', '""') + '"')
+  return " ".join(out)
+
+
+def escape_like(token):
+  return "%" + token.replace("!", "!!").replace("%", "!%").replace("_", "!_") + "%"
+
+
+def parse_search_query(query):
+  has_long_term = False
+  has_short_term = False
+  for quoted, bare in QUERY_TERM_RE.findall(query):
+    if quoted:
+      if len(quoted) >= 3:
+        has_long_term = True
+      else:
+        has_short_term = True
+    elif bare not in ("AND", "OR", "NOT") and not NEAR_OP_RE.match(bare):
+      cleaned = bare.strip('"*()^')
+      if len(cleaned) >= 3:
+        has_long_term = True
+      elif cleaned:
+        has_short_term = True
+  if not has_long_term:
+    return None, []
+  if not FTS_SYNTAX_RE.search(query):
+    tokens = query.split()
+    long_tokens = [t for t in tokens if len(t) >= 3]
+    short_tokens = [t for t in tokens if len(t) < 3]
+    if short_tokens:
+      return " ".join(long_tokens), short_tokens
+  elif has_short_term:
+    return None, []
+  return query, []
+
+
+def cmd_search(args):
+  query = " ".join(args.query)
+  fts_query, short_tokens = parse_search_query(query)
+  if fts_query is None:
+    print(
+      f"query error: trigram index requires >=3-char terms (or plain space-separated mixed terms without boolean/quoted <3-char tokens; got: {query})",
+      file=sys.stderr,
+    )
+    sys.exit(2)
+  db = connect()
+  sql = (
+    "SELECT rowid, path, ts, role, snippet(messages, 0, '>>>', '<<<', '…', 64), text "
+    "FROM messages WHERE messages MATCH ?"
+  )
+  params = [fts_query]
+  for st in short_tokens:
+    sql += " AND +text LIKE ? ESCAPE '!'"
+    params.append(escape_like(st))
+  if args.vendor:
+    roots = [root for vendor, root in ROOTS if vendor in args.vendor]
+    sql += " AND (" + " OR ".join("+path LIKE ?" for _ in roots) + ")"
+    params.extend(root + os.sep + "%" for root in roots)
+  for ex in getattr(args, "exclude_session", None) or ():
+    if ex:
+      sql += " AND +path NOT LIKE ? ESCAPE '!'"
+      params.append(escape_like(ex))
+  sql += " ORDER BY rank LIMIT ?"
+  params.append(args.k)
+  try:
+    hits = db.execute(sql, params).fetchall()
+  except sqlite3.OperationalError as e:
+    if "locked" in str(e).lower() or "busy" in str(e).lower():
+      print(f"query error: {e}", file=sys.stderr)
+      sys.exit(1)
+    try:
+      hits = db.execute(sql, [literal_query(fts_query)] + params[1:]).fetchall()
+    except sqlite3.OperationalError as e2:
+      print(f"query error: {e2}", file=sys.stderr)
+      sys.exit(1)
+  ctx_n = getattr(args, "context", 0) or 0
+  for mid, path, ts, role, snip, full_text in hits:
+    vendor, root = vendor_of(path)
+    rel = os.path.relpath(path, root)
+    print(f"--- [{vendor}] {rel}  {ts}  [{role}]")
+    print(snip.replace("\n", " ")[:500])
+    if ctx_n > 0:
+      before_mids = [
+        r[0] for r in db.execute(
+          "SELECT mid FROM message_refs WHERE path = ? AND mid < ? ORDER BY mid DESC LIMIT ?",
+          (path, mid, ctx_n),
+        ).fetchall()
+      ][::-1]
+      after_mids = [
+        r[0] for r in db.execute(
+          "SELECT mid FROM message_refs WHERE path = ? AND mid > ? ORDER BY mid ASC LIMIT ?",
+          (path, mid, ctx_n),
+        ).fetchall()
+      ]
+      for cmid in before_mids:
+        crow = db.execute("SELECT ts, role, text FROM messages WHERE rowid = ?", (cmid,)).fetchone()
+        if crow:
+          print(f"  - [{crow[1]} {crow[0]}] {crow[2].replace(chr(10), ' ')[:300]}")
+      print(f"  > [{role} {ts}] {full_text.replace(chr(10), ' ')[:300]}")
+      for cmid in after_mids:
+        crow = db.execute("SELECT ts, role, text FROM messages WHERE rowid = ?", (cmid,)).fetchone()
+        if crow:
+          print(f"  + [{crow[1]} {crow[0]}] {crow[2].replace(chr(10), ' ')[:300]}")
+  if not hits:
+    print("(no hits)")
+
+
+def cmd_events(args):
+  since = args.since or ""
+  kinds = set(args.kind) if args.kind else None
+  out = sys.stdout
+  for vendor, p in iter_files(set(args.vendor or VENDORS)):
+    if args.session and args.session not in os.path.basename(p):
+      continue
+    if since:
+      try:
+        if time.strftime("%Y-%m-%d", time.localtime(os.stat(p).st_mtime)) < since:
+          continue
+      except OSError:
+        continue
+    try:
+      for ev in events_for(vendor, p):
+        if since and ev["ts"] and ev["ts"][:10] < since:
+          continue
+        if kinds and ev["kind"] not in kinds:
+          continue
+        if args.tool and (ev["kind"] != "tool_call" or ev.get("tool") != args.tool):
+          continue
+        out.write(json.dumps(ev, ensure_ascii=False) + "\n")
+    except OSError as e:
+      print(f"skip unreadable file: {p}: {e}", file=sys.stderr)
+      continue
+
+
+def main():
+  ap = argparse.ArgumentParser(prog="ccsi", description="FTS index and normalized event stream over CC (~/.claude/projects), Codex (~/.codex/sessions, archived_sessions), and Pi (~/.pi/agent/sessions) jsonl")
+  sub = ap.add_subparsers(dest="cmd", required=True)
+  p_index = sub.add_parser("index", help="build or incrementally update the index")
+  p_index.add_argument("--vendor", action="append", choices=VENDORS, help="restrict to one vendor (default all)")
+  p_index.set_defaults(fn=cmd_index)
+  p_search = sub.add_parser("search", help="full-text search indexed messages")
+  p_search.add_argument("query", nargs="+")
+  p_search.add_argument("-k", type=int, default=10)
+  p_search.add_argument("--vendor", action="append", choices=VENDORS, help="restrict hits to one vendor")
+  p_search.add_argument("--exclude-session", action="append", default=[], help="exclude session paths containing this substring")
+  p_search.add_argument("-C", "--context", type=int, default=0, help="show N surrounding indexed messages from the same file")
+  p_search.set_defaults(fn=cmd_search)
+  p_events = sub.add_parser("events", help="stream normalized events as JSONL (vendor, session, ts, cwd, role, kind, tool, model, text)")
+  p_events.add_argument("--vendor", action="append", choices=VENDORS)
+  p_events.add_argument("--since", help="YYYY-MM-DD; skip files older than this and events before it")
+  p_events.add_argument("--session", help="substring of the session file name")
+  p_events.add_argument("--kind", action="append", choices=("text", "tool_call", "tool_result", "session_meta", "turn_context"))
+  p_events.add_argument("--tool", help="only tool_call events for this tool name")
+  p_events.set_defaults(fn=cmd_events)
+  args = ap.parse_args()
+  args.fn(args)
+
+
+if __name__ == "__main__":
+  main()

@@ -43,6 +43,9 @@ check_contains "$TEMPLATE" '完整 Blocks 1–4 與 Gate Ledger 寫入證據副�
 check_contains "$SKILL" '預設路徑聊天只輸出白話主報告與證據副檔連結' 'default route keeps chat to the plain-language main report plus sidecar link'
 check_contains "$SKILL" '完整 Blocks 1–4 與 Gate Ledger 寫入證據副檔，不貼回聊天' 'default route sends the full blocks to the sidecar'
 check_contains "$TEMPLATE" '預設路徑的聊天主報告' 'template defines the default-route chat main report'
+check_contains "$SKILL" 'AUDIT_INPUT_MODE: FILE_SNAPSHOT' 'self-verify template enables file snapshot mode'
+check_contains "$SKILL" 'SNAPSHOT_PATH: {path}' 'self-verify template provides snapshot path header'
+check_contains "$SKILL" 'SNAPSHOT_TOTAL_LINES: {lines}' 'self-verify template provides snapshot total lines header'
 
 printf '%s\n' '----'
 printf 'PASS=%s FAIL=%s\n' "$PASS" "$FAIL"

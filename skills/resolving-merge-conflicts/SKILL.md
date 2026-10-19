@@ -19,7 +19,7 @@ Use this workflow only while Git reports unmerged paths; ordinary code or test f
 python3 ~/.claude/skills/resolving-merge-conflicts/scripts/extract_conflict_context.py --repo .
 ```
 
-Keep the list of conflicted paths it reports; step 7 reviews each of them after they are resolved. If the list is lost once files are staged, `git merge-tree --write-tree --name-only HEAD MERGE_HEAD` prints it again.
+Keep the list of conflicted paths it reports; step 7 reviews each of them after they are resolved. If the list is lost once files are staged, `git merge-tree --write-tree --name-only HEAD MERGE_HEAD` prints it again (or `git merge-tree --write-tree --name-only HEAD^1 HEAD^2` when inspecting an already-committed merge).
 
 2. **Find the primary sources** for each conflict. Understand why each change was made and what the original intent was. Read the commit messages, check the PRs, and check original issues/tickets.
 
@@ -44,14 +44,18 @@ Repeat Steps 2–5 until both commands report no unresolved paths.
 
 6. Discover the project's **automated checks** and run them—typically typecheck, tests, then format. Fix anything the merge broke, and verify no conflict markers remain in resolved text files.
 
-7. **Review every conflicted file for a side whose change disappeared.** Green checks do not cover this: a resolution that keeps one side's refactor and drops the other side's addition stays green whenever nothing tested that addition. For each path from step 1, with `base=$(git merge-base HEAD MERGE_HEAD)` (in a rebase, `REBASE_HEAD` in place of `MERGE_HEAD`), produce three diffs, base to ours, base to theirs, and base to the result:
+7. **Review every conflicted file for a side whose change disappeared.** Green checks do not cover this: a resolution that keeps one side's refactor and drops the other side's addition stays green whenever nothing tested that addition. Build the three-diff bundle (base to ours, base to theirs, and base to the result) and run the mechanical checks with `prepare_merge_review.py`:
 
 ```bash
-git diff "$base" HEAD -- <path>
-git diff "$base" MERGE_HEAD -- <path>
-git diff --cached "$base" -- <path>
+# In-progress merge after staging resolved files (MERGE_HEAD present):
+python3 ~/.claude/skills/resolving-merge-conflicts/scripts/prepare_merge_review.py --repo . --staged --out /tmp/merge-review-bundle.txt
+
+# Already-committed merge or delegated worker handoff (computes conflicts from HEAD^1 and HEAD^2):
+python3 ~/.claude/skills/resolving-merge-conflicts/scripts/prepare_merge_review.py --repo . --commit HEAD --out /tmp/merge-review-bundle.txt
 ```
 
-Give them to a fresh reviewer agent with no conversation context, one file per item, asking only which hunk of ours or theirs is missing from the result and whether anything explains its absence. A file whose conflicts were all mechanical (translation dictionaries, lockfiles, a changelog) is checked by a script, not an agent: every key or entry either side added is present in the result, and a key both sides changed is reviewed by value. A lockfile is regenerated from the merged manifests rather than checked entry by entry, since an upgrade replaces entries by design. Fix what the review finds, then run step 6 again. Done when every conflicted path has a reviewer or script verdict and each missing hunk is restored or has a stated reason.
+(In a rebase where `REBASE_HEAD` is active instead of a two-parent merge, compute `base=$(git merge-base HEAD REBASE_HEAD)` and produce `git diff "$base" HEAD -- <path>`, `git diff "$base" REBASE_HEAD -- <path>`, and `git diff --cached "$base" -- <path>` for each path from step 1.)
+
+A file whose conflicts were all mechanical (translation dictionaries, lockfiles, a changelog, or a manifest where only `version` changed) is checked by a script, not an agent: every key or entry either side added is present in the result, and a key both sides changed or a manifest that also modified `scripts` or `dependencies` is kept in `REVIEW_FILES_COUNT` rather than exempted by filename. Lockfiles are regenerated from the merged manifests rather than checked entry by entry. When `REVIEW_FILES_COUNT > 0`, give `BUNDLE_PATH` to a fresh reviewer agent with no conversation context, one file per item, asking only which hunk of ours or theirs is missing from the result and whether anything explains its absence. Reading `BUNDLE_PATH` in the resolving session does not substitute for the fresh reviewer even when `REVIEW_FILES_COUNT` is 1 or the bundle is short, because the resolver already expects its resolution to be complete. Whether main resolves the merge directly or receives a commit from a delegated worker that cannot spawn subagents, main must obtain that fresh reviewer's per-file verdicts and fix what the review finds (then re-run step 6) before the merge counts as done. Done when every conflicted path has a script or fresh-reviewer verdict and each missing hunk is restored or has a stated reason. Proceed to step 8.
 
 8. **Finish the merge/rebase.** Commit the completed merge. If rebasing, continue until every commit is rebased, repeating the workflow for each new conflict stop.

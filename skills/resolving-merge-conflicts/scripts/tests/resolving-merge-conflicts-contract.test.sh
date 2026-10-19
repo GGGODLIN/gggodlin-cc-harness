@@ -52,11 +52,16 @@ assert_order "summary precedes per-file detail" '^1\. \*\*Start with a compact s
 # places (Collie upstream 1.21.0); only a per-file review against both sides found them.
 assert_grep "conflicted paths are kept for the review" 'Keep the list of conflicted paths'
 assert_grep "review uses three diffs per file" 'base to ours.*base to theirs.*base to the result'
+assert_grep "review invokes prepare_merge_review helper for staged and committed merges" 'prepare_merge_review\.py --repo \. --staged'
+assert_grep "review supports committed merge or worker handoff" 'prepare_merge_review\.py --repo \. --commit HEAD'
 assert_grep "reviewer has no conversation context" 'fresh reviewer.*no conversation context'
 assert_grep "reviewer looks for a disappeared side" 'whose change disappeared'
 assert_grep "mechanical conflicts are checked by a script" 'mechanical.*checked by a script, not an agent'
+assert_grep "main owns fresh reviewer completion across worker handoffs" 'delegated worker.*main must obtain that fresh reviewer'
 assert_order "checks precede the side review" '^6\. Discover the project' '^7\. \*\*Review every conflicted file'
 assert_order "side review precedes finishing" '^7\. \*\*Review every conflicted file' '^8\. \*\*Finish the merge'
+
+python3 "${HOME}/.claude/skills/resolving-merge-conflicts/scripts/tests/test_prepare_merge_review.py"
 
 printf 'PASS=%s FAIL=%s\n' "$PASS" "$FAIL"
 

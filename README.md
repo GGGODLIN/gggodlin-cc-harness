@@ -4,7 +4,7 @@ https://github.com/user-attachments/assets/0421df31-50ee-447b-a314-a471e8e156a3
 
 ## English summary
 
-This repository is the governance part of one person's Claude Code harness: always-on rules (`CLAUDE.md`, `rules/`), hooks that enforce some of those rules mechanically, the skills, commands and agents that the workflow depends on, and the systems around them — a memory system, a trial (observation period) ledger, a friction log, a daily local analysis report, and compact-guard, which keeps evidence across context compaction. Personal customisation (status line, personal tools, blog pipeline, account and browser setup) is not included.
+This repository is the governance part of one person's Claude Code harness: always-on rules (`CLAUDE.md`, `rules/`), hooks that enforce some of those rules mechanically, the skills, commands and agents that the workflow depends on, and the systems around them — a memory system, a trial (observation period) ledger, a friction log, a daily local analysis report, `cc-session-index` (`ccsi`, an FTS5 trigram session transcript indexer), and `compact-guard`, which keeps evidence across context compaction. Personal customisation (status line, personal tools, blog pipeline, account and browser setup) is not included.
 
 The rules are written in Traditional Chinese and are not translated. If you want them in another language or in your own style, ask Claude to translate or rewrite the files you pick.
 
@@ -19,6 +19,7 @@ It is a reference, not a product. You can install single pieces, but nothing gua
 - skill、command、agent 與審查標準：規劃、實作、審查、查證這條工作流用到的部分，以及按變更條件載入的 34 份審查標準（`review-standards/`）。
 - 四套制度：memory（跨 session 記憶）、wiki（收斂後的知識條目）、trial（新工具與新機制的觀察期帳本）、摩擦紀錄（卡住、繞路、規則沒被遵守的事件）。四套都只公開機制，內容換成 `examples/` 裡的虛構範例。
 - daily-local：每天跑一次的本機分析報告，掃規則用量、摩擦、壞掉的路徑等，程式在 `social-info/` 與 `cc-skill-doctor/`。
+- cc-session-index（`ccsi`）：對 Claude Code、Codex 與 Pi 的 `.jsonl` 對話紀錄建 SQLite FTS5 `trigram` 全文索引與正規化事件流，在 `cc-session-index/`（獨立 repo 見 [`example-owner/cc-session-index`](https://github.com/example-owner/cc-session-index)）。
 - compact-guard：context 壓縮前存一份可稽核的 checkpoint，壓縮後把原始對話證據注回來，含 Codex 支援，在 `compact-guard/`。
 
 不包含：個人客製化（statusline、個人工具串接、部落格產線、帳號與瀏覽器的具體接法）、公司相關的治理、能力型 skill（畫圖、簡報之類），以及 memory、wiki、trial、摩擦紀錄的實際內容。
@@ -28,7 +29,7 @@ It is a reference, not a product. You can install single pieces, but nothing gua
 | 你想做的事 | 先看 |
 |---|---|
 | 已經有自己的 Claude Code 設定，想讓 agent 守紀律 | [`skills/gate-authoring/SKILL.md`](/skills/gate-authoring/SKILL.md)、[`rules/common/dispatch-and-verify.md`](/rules/common/dispatch-and-verify.md)、[`friction/PROTOCOL.md`](/friction/PROTOCOL.md) 與 [`examples/trials/`](/examples/trials/) |
-| 想挑一個完整的工具來試 | [`compact-guard/README.md`](/compact-guard/README.md)：有完整程式與測試，可以單獨安裝 |
+| 想挑一個完整的工具來試 | [`cc-session-index/README.md`](/cc-session-index/README.md)（單一 Python 檔對話索引）或 [`compact-guard/README.md`](/compact-guard/README.md)：有完整程式與測試，可以單獨安裝 |
 | 想看大型機制與工作流怎麼咬合（附寬版 SVG 架構圖） | 下方「核心機制與大型 Skill 圖解導覽」表格，點進各機制的圖解檔即可看完整三階段流程 |
 | 想研究 agent 治理、人工授權與出錯後怎麼恢復 | 下面的「設計原則」「已知風險」，以及 [`rules/common/git-workflow.md`](/rules/common/git-workflow.md) |
 | 想幾分鐘內裝好整套 | 目前做不到：路徑寫死、接線要自己補。單一元件看 [`install/`](/install/) 與下方「怎麼讓你的 Claude Code 幫你挑選與改裝」 |
@@ -69,6 +70,7 @@ It is a reference, not a product. You can install single pieces, but nothing gua
    - Subagent 路由與高單價模型守門：[`references/subagent-routing.md`](/references/subagent-routing.md)、[`install/hooks/T2-routing-gate.sh.md`](/install/hooks/T2-routing-gate.sh.md)、[`install/hooks/fable-gate.sh.md`](/install/hooks/fable-gate.sh.md)
 4. **四大回饋帳本與跨壓縮守衛**：
    - 跨 session 兩層記憶提醒（背景小模型判官＋手動收尾檢查點）：[`install/hooks/auto-memory-jev.py.md`](/install/hooks/auto-memory-jev.py.md)、[`install/hooks/checkpoint-judge.sh.md`](/install/hooks/checkpoint-judge.sh.md)、[`examples/memory/`](/examples/memory/)
+   - 跨 session 歷史對話全文檢索與正規化事件流：[`cc-session-index/README.zh-TW.md`](/cc-session-index/README.zh-TW.md)（可獨立安裝）
    - 壓縮前後保留原始證據：[`compact-guard/README.md`](/compact-guard/README.md)（可獨立安裝）
    - 觀察期帳本、摩擦協議與失敗模式分類表：[`examples/trials/`](/examples/trials/)、[`friction/PROTOCOL.md`](/friction/PROTOCOL.md)、[`references/failure-mode-taxonomy.md`](/references/failure-mode-taxonomy.md)、[`install/hooks/ledger-bootstrap.sh.md`](/install/hooks/ledger-bootstrap.sh.md)
 
@@ -123,6 +125,7 @@ It is a reference, not a product. You can install single pieces, but nothing gua
 
 - `folder-level/` 是放在「專案資料夾根目錄」那一層的設定（原作者的是 `~/Desktop/projects/`），trial 帳本與摩擦機制的 hook 在這裡。
 - `social-info/` 與 `cc-skill-doctor/` 是 daily-local 的程式；原作者把它們放在 `~/code/social-info` 與 `~/Desktop/projects/cc-skill-doctor`，程式裡的路徑照那樣寫，換位置時要一起改。
+- `cc-session-index/` 的 `ccsi` 執行檔建議連到 `~/.local/bin/ccsi`（見 [`install/cc-session-index/ccsi.md`](/install/cc-session-index/ccsi.md)）。
 - `compact-guard/` 照 `~/.claude/compact-guard` 的位置寫進 hook 註冊。
 - `install/` 是各機制的安裝說明。
 - `examples/` 是 memory、wiki、trial 帳本、摩擦紀錄的虛構範例，只示範格式。
@@ -135,7 +138,6 @@ It is a reference, not a product. You can install single pieces, but nothing gua
 
 - 🔌 [ChatGPT 網頁版席位](WIRING.md#chatgpt-網頁版席位) — 僅定義介面（interface only），實作請自行提供
 - 🔌 [E2E 測試服務](WIRING.md#e2e-測試服務) — 推薦工具：TesterArmy（tester-army/e2e：官方 skill 加 e2e 框架）
-- 🔌 [session 歷史檢索](WIRING.md#session-歷史檢索) — 推薦工具：ccsi（原作者自寫，以 SQLite FTS5 trigram 索引 session jsonl）
 - 🔌 [workflow-monitor 後端轉接](WIRING.md#workflow-monitor-後端轉接) — 推薦工具：自己寫一支 case 分支的 shell 腳本（原作者的版本含灰色中轉站分支，未公開）
 - 🔌 [中轉站](WIRING.md#中轉站) — 僅定義介面（interface only），實作請自行提供
 - 🔌 [全機文件定位](WIRING.md#全機文件定位) — 推薦工具：DigUp（原作者試用中，用一支小 wrapper 包起來、掃描範圍由私人設定檔決定，兩者未公開；不是強依賴，規則其餘路由不靠它）
@@ -158,6 +160,7 @@ It is a reference, not a product. You can install single pieces, but nothing gua
 - [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)
 - [`WIRING.md`](WIRING.md)
 - [`agents/`](agents/) — 33 個檔案；內含 `advisor-seat.md`、`architecture-critic.md`、`architecture-critic.md.LICENSE`、`code-reviewer.md`、`code-reviewer.md.LICENSE`、`deep-explore.md`、`docs-lookup.md`、`docs-lookup.md.LICENSE`…（共 30 項）
+- [`cc-session-index/`](cc-session-index/) — 5 個檔案；內含 `LICENSE`、`README.md`、`README.zh-TW.md`、`ccsi`、`test_ccsi.py`
 - [`cc-skill-doctor/`](cc-skill-doctor/) — 2 個檔案；內含 `scripts/`
 - [`commands/`](commands/) — 64 個檔案；內含 `advisor-flow.svg`、`advisor.md`、`advisor.overview.md`、`aside.md`、`aside.md.LICENSE`、`daily-local.md`、`docs.md`、`docs.md.LICENSE`…（共 39 項）
 - [`compact-guard/`](compact-guard/) — 23 個檔案；內含 `README.md`、`bin/`、`docs/`、`package.json`、`src/`、`test/`
@@ -166,7 +169,7 @@ It is a reference, not a product. You can install single pieces, but nothing gua
 - [`folder-level/`](folder-level/) — 17 個檔案；內含 `.claude/`、`CLAUDE.md`
 - [`friction/`](friction/) — 1 個檔案；內含 `PROTOCOL.md`
 - [`hooks/`](hooks/) — 110 個檔案；內含 `T1-claim-detect-local-first.llm.test.sh`、`T1-claim-detect-local-first.sh`、`T1-claim-detect-local-first.test.sh`、`T1-evidence-level-detect.sh`、`T1-evidence-level-detect.test.sh`、`T1-evidence-level-fixtures/`、`T1-evidence-level-prompt-v2.txt`、`T1-system-prompt-v5d.txt`…（共 106 項）
-- [`install/`](install/) — 44 個檔案；內含 `compact-guard/`、`folder-level/`、`hooks/`、`output-styles/`、`workflows/`
+- [`install/`](install/) — 45 個檔案；內含 `cc-session-index/`、`compact-guard/`、`folder-level/`、`hooks/`、`output-styles/`、`workflows/`
 - [`model-routing.env`](model-routing.env)
 - [`openspec/`](openspec/) — 3 個檔案；內含 `specs/`
 - [`output-styles/`](output-styles/) — 1 個檔案；內含 `Explanatory.md`
@@ -175,6 +178,6 @@ It is a reference, not a product. You can install single pieces, but nothing gua
 - [`rules/`](rules/) — 14 個檔案；內含 `common/`、`typescript/`
 - [`scripts/`](scripts/) — 100 個檔案；內含 `advisor-extract-context.py`、`agent-contract-command/`、`agent-contract-validator.definition.test.sh`、`agent-contract-validator.diagnostics.test.sh`、`agent-contract-validator.frontmatter.test.sh`、`agent-contract-validator.mcp-tools.test.sh`、`agent-contract-validator.mjs`、`agent-contract-validator.name.test.sh`…（共 86 項）
 - [`settings.json`](settings.json)
-- [`skills/`](skills/) — 211 個檔案；內含 `INVENTORY.md`、`absorb-pack/`、`agent-authoring/`、`agent-dispatch/`、`align-intent/`、`auto-choice/`、`brainstorm/`、`caveman/`…（共 43 項）
+- [`skills/`](skills/) — 213 個檔案；內含 `INVENTORY.md`、`absorb-pack/`、`agent-authoring/`、`agent-dispatch/`、`align-intent/`、`auto-choice/`、`brainstorm/`、`caveman/`…（共 43 項）
 - [`social-info/`](social-info/) — 76 個檔案；內含 `scripts/`、`tests/`
 - [`workflows/`](workflows/) — 8 個檔案；內含 `best-of-n-implement.js`、`failure-mode-daily.sh`、`local-analysis-flow.svg`、`local-analysis.js`、`skill-changes-daily.sh`、`skillevaluator-weekly.sh`、`tests/`

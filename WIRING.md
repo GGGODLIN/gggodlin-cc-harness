@@ -33,20 +33,6 @@
 
 TesterArmy（tester-army/e2e：官方 skill 加 e2e 框架）
 
-## session 歷史檢索
-
-### 用到的元件
-
-- `rules/common/code-search.md`
-
-### 需提供的介面
-
-一個對 `~/.claude/projects/**/*.jsonl`（含 subagent 與 workflow transcript）建全文索引、能用中文字面查詢的 CLI，回答「我之前怎麼做的、某決策發生在哪個 session」。
-
-### 推薦工具
-
-ccsi（原作者自寫，以 SQLite FTS5 trigram 索引 session jsonl）
-
 ## workflow-monitor 後端轉接
 
 ### 用到的元件

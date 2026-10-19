@@ -8,9 +8,9 @@
 
 ## 連結格式
 
-- 提及網頁、文件、Issue、PR 一律組完整可點擊 URL，不要只給縮寫或純文字描述；GitHub / Bitbucket 可加 `owner/repo#123` 短格式，但完整 URL 至少出現一次；對人敘事用標題帶連結、不要裸編號牆（一排 #42 #43 讀不出資訊）
-- 本地檔案路徑分情境：對話內回答 / 暫時性檔案 → `file:///絕對路徑`（terminal 可點）；會 commit 的 repo markdown → repo-root relative path（leading slash，如 `[docs/spec.md](/docs/spec.md)`，web UI 才 render 跳檔 link）；個人 memory / 機器特定路徑不寫進 commit 的 doc、改純文字描述；長期 memory／wiki 不連 scratchpad 或 /tmp 暫存檔，要留的證據先搬到持久位置再連
-- 不要只用 inline code backtick 包路徑（不會 render 成 clickable link）；例外是附在宣稱旁的短出處標註（`檔名:行號`），要使用者打開、編輯或確認的檔案仍給可點連結
+- 提及網頁、文件、Issue、PR、本地檔案一律把連結直接包在名詞或標題上（`[顯示文字](完整URL)`），禁止裸貼 URL、禁止 `[完整URL](完整URL)`、禁止先寫名詞再於括號塞連結（如 `名詞（[URL](URL)）`），方括號內也不包反引號；GitHub / Bitbucket 可加 `owner/repo#123` 短格式，但完整連結至少出現一次；對人敘事用標題帶連結、不要裸編號牆（一排 #42 #43 讀不出資訊）
+- 本地檔案路徑分情境：對話內回答 / 暫時性檔案 → `[檔名或文字](file:///絕對路徑)`（terminal 可點）；會 commit 的 repo markdown → repo-root relative path（leading slash，如 `[docs/spec.md](/docs/spec.md)`，web UI 才 render 跳檔 link）；個人 memory / 機器特定路徑不寫進 commit 的 doc、改純文字描述；長期 memory／wiki 不連 scratchpad 或 /tmp 暫存檔，要留的證據先搬到持久位置再連
+- 不要只用 inline code backtick 包路徑（不會 render 成 clickable link）；例外是附在宣稱旁的短出處標註（`檔名:行號`），要使用者打開、編輯或確認的檔案仍給 `[檔名](file:///絕對路徑)` 可點連結
 
 ## 程式碼風格
 

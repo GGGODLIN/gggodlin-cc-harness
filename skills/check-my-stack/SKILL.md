@@ -105,15 +105,19 @@ Verdict 定案、write-back 落帳後，完成後接 Self-Verify：Done → Step
 
 Dispatch 規格：
 
-- 報告草稿先落到暫存檔（session scratchpad 或 `mktemp`），verify agent 自己 Read；草稿同時包含聊天主報告與完整證據副檔內容（預設路徑與退役／缺口盤點路徑皆然）
+- 報告草稿先落到唯讀快照檔（session scratchpad 或持久證據副檔，`chmod 444 <path>`）並以 `wc -l < <path>` 取得實際總行數 `{lines}`；草稿同時包含聊天主報告與完整證據副檔內容（預設路徑與退役／缺口盤點路徑皆然）
 - `Agent` tool、`subagent_type: skill-verify-auditor`（sonnet+low、tools 僅 Read，定義檔釘死）
 - description 固定含 marker 字串 `skill-verify:check-my-stack`（採用率統計 grep 用，不要改字）
-- prompt 給報告草稿的絕對路徑 + 下方 template 全文
+- prompt 開頭固定放 `AUDIT_INPUT_MODE: FILE_SNAPSHOT`、`SNAPSHOT_PATH: {path}`、`SNAPSHOT_TOTAL_LINES: {lines}` 三行標頭，再接下方 template 全文（`skill-verify-auditor` 定義檔規定未帶這三行時不啟用讀檔模式、直接拒讀並全判 FAIL）
 
-Verify prompt template（原文嵌入、`{path}` 換成報告草稿絕對路徑）：
+Verify prompt template（原文嵌入、`{path}` 換成報告草稿絕對路徑、`{lines}` 換成該檔實際總行數正整數）：
 
 ```
-你是 adversarial 合規審查員。Read {path}，檢查這份競合分析報告是否遵守 check-my-stack skill 的規矩。偏置是「找違規」：無法確認有遵守就判 FAIL，不要善意推定。
+AUDIT_INPUT_MODE: FILE_SNAPSHOT
+SNAPSHOT_PATH: {path}
+SNAPSHOT_TOTAL_LINES: {lines}
+
+你是 adversarial 合規審查員。用 Read 從第 1 行讀到第 {lines} 行讀取 SNAPSHOT_PATH，檢查這份競合分析報告是否遵守 check-my-stack skill 的規矩。偏置是「找違規」：無法確認有遵守就判 FAIL，不要善意推定。輸出第一行固定回報 `READ_RANGE: 1-{lines} / {lines}`，接著輸出 R1–R5 與最後一行 VERDICT。
 
 逐條檢查（每條回 PASS / FAIL / EVIDENCE-UNAVAILABLE + 一句證據引述）：
 
