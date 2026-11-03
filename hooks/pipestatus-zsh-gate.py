@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
-# 防漂移型提示 gate：只認常見入口（字串比對 $PIPESTATUS），不承諾完整語意，也會攔到只是談論該變數的文字。
-# 外層 shell 以 hook 行程繼承的 SHELL 判定（CC 的 settings env.SHELL 同時決定 Bash tool 用哪個 shell）：
-# basename 是 bash 才放行；zsh、未設定或判不出來時照舊 deny（2026-09-23 使用者拍板）。
+# 防漂移型提示 gate：
+# 1. 字串比對 $PIPESTATUS（外層 shell 非 bash 時 deny）；
+# 2. 掃描單引號 `python3 -c '...'` 內含 `\"` 的腳本並以 `ast.parse` 驗證語法，若因反斜線跳脫雙引號觸發 SyntaxError 則 deny；
+# 3. 掃描測試／型別檢查／建置命令（pytest、unittest、vitest、jest、tsc、cargo/go/bun/npm/pnpm test 或 build）直接 `| tail`／`| head` 且未設 `pipefail` 或 `PIPESTATUS` 的吞錯寫法並 deny。
+# 不承諾完整 shell 語意，也會攔到只是談論該指令的文字（替代路徑：改用 Write/Edit 落檔或 `python3 - <<'PY'` 單引號 heredoc）。
+# Surface table: Locked = 本 gate 與測試檔；Editable = 待檢 Bash 指令；Append-only = 審計 JSONL；Human-controlled = settings.json hooks 註冊。
+# Locked lifecycle: bootstrap 由 settings.json 掛載；update 直接編輯本檔並跑 pipestatus-zsh-gate.test.py；recovery 從 settings.json 移除或改用落檔執行。
+import ast
 import json
 import os
 from pathlib import Path
@@ -13,6 +18,21 @@ PIPESTATUS_USE = re.compile(r'\$(?:\{PIPESTATUS(?:\[[^\]]+\])?\}|PIPESTATUS\b)')
 BASH_PREFIX = re.compile(
   r'^\s*(?:[A-Za-z_][A-Za-z0-9_]*=\S+\s+)*(?:command\s+)?(?:/[^\s]*/)?bash\s+(?:-[A-Za-z]*c\b|<<)'
 )
+PYTHON_C_SINGLE_QUOTED = re.compile(
+  r'(?:^|[;&|()\s])(?:/[^\s;()|&]*/)?python(?:3(?:\.\d+)?)?\s+(?:-[IubBdEJsSOqVv]+\s+)*-c\s+\'(?P<code>[^\']*)\''
+)
+TEST_PIPE_SWALLOW = re.compile(
+  r'(?:^|[;&()\n]|&&|\|\|)\s*'
+  r'(?:env\s+(?:[A-Za-z_][A-Za-z0-9_]*=(?:\"[^\"]*\"|\'[^\']*\'|\S+)\s+)*|(?:[A-Za-z_][A-Za-z0-9_]*=(?:\"[^\"]*\"|\'[^\']*\'|\S+)\s+)+)?'
+  r'(?:(?:uv|poetry|pipenv)\s+run\s+|(?:npx|pnpm|yarn|bunx)\s+(?:--no-install\s+)?)?'
+  r'(?P<runner>'
+  r'(?:[^\s;|&\n]*/)?(?:pytest|py\.test|vitest|jest|tsc)\b'
+  r'|(?:[^\s;|&\n]*/)?python(?:3(?:\.\d+)?)?\s+(?:-[IubBdEJsSOqVv]+\s+)*-m\s+(?:pytest|unittest)\b'
+  r'|(?:bun|npm|pnpm|yarn|cargo|go)\s+(?:run\s+)?(?:test|typecheck|build)\b'
+  r')'
+  r'(?:[^;&|\n]|(?<=>)&)*\|(?!\|)[ \t]*(?:[^\s;|&\n]*/)?(?P<sink>tail|head)\b'
+)
+PIPEFAIL_GUARD = re.compile(r'\b(?:pipefail|PIPESTATUS|pipestatus)\b')
 SAFE_QUOTED_HEREDOC = re.compile(
   r'^(?P<prefix>\s*[^<#\r\n]*\S)\s*(?<!\\)<<(?P<strip_tabs>-)?\s*'
   r'(?P<quote>[\'\"])(?P<delimiter>[^\'\"\r\n]+)(?P=quote)\s*$'
@@ -59,13 +79,13 @@ def outer_shell_is_bash(shell):
   return os.path.basename(shell.strip()) == 'bash'
 
 
-def append_audit(command, session, shell):
+def append_audit(command, session, shell, reason='outer-zsh-pipestatus'):
   path = Path(os.environ.get('PIPESTATUS_GATE_AUDIT', os.path.expanduser('~/.claude/logs/pipestatus-zsh-gate-audit.jsonl')))
   row = {
     'ts': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
     'session': session,
     'action': 'deny',
-    'reason': 'outer-zsh-pipestatus',
+    'reason': reason,
     'shell': shell,
   }
   try:
@@ -74,6 +94,27 @@ def append_audit(command, session, shell):
       handle.write(json.dumps(row, ensure_ascii=False) + '\n')
   except OSError as error:
     print(f'[pipestatus-zsh-gate] audit write failed: {error}', file=sys.stderr)
+
+
+def find_python_c_escaped_quote_error(command):
+  for match in PYTHON_C_SINGLE_QUOTED.finditer(command):
+    code = match.group('code')
+    if '\\"' not in code:
+      continue
+    try:
+      ast.parse(code)
+    except SyntaxError as err:
+      return err.msg or 'SyntaxError'
+  return None
+
+
+def find_unprotected_test_pipe(command):
+  if PIPEFAIL_GUARD.search(command):
+    return None
+  match = TEST_PIPE_SWALLOW.search(command)
+  if not match:
+    return None
+  return f"{match.group('runner').strip()} | {match.group('sink')}"
 
 
 def main():
@@ -89,11 +130,43 @@ def main():
   if not isinstance(command, str):
     return
   scan_command = strip_safe_single_quoted_heredoc(command)
+  shell = outer_shell()
+  py_err = find_python_c_escaped_quote_error(scan_command)
+  if py_err is not None:
+    append_audit(command, payload.get('session_id', ''), shell, reason='python-c-escaped-quote-syntax-error')
+    reason = (
+      f'單引號 `python3 -c \'...\'` 內含 `\\"` 且無法通過 Python AST 語法解析（{py_err}）。'
+      '在單引號腳本的雙引號 f-string 表達式內寫 `\\"` 會直接觸發 SyntaxError；'
+      '請改用 `python3 - <<\'PY\'` 多行單引號 heredoc、在 f-string 內改用單引號（或 Python 3.12+ 直接不加反斜線），或先抽為局部變數。'
+    )
+    print(json.dumps({
+      'hookSpecificOutput': {
+        'hookEventName': 'PreToolUse',
+        'permissionDecision': 'deny',
+        'permissionDecisionReason': reason,
+      }
+    }, ensure_ascii=False))
+    return
+  swallowed = find_unprotected_test_pipe(scan_command)
+  if swallowed is not None:
+    append_audit(command, payload.get('session_id', ''), shell, reason='unprotected-test-pipe-tail-head')
+    reason = (
+      f'偵測到測試／檢查命令直接 pipe 給 tail/head（`{swallowed}`），但未設定 `pipefail`。'
+      '這會讓 tail/head 的 exit 0 吞掉上游測試或編譯失敗的退出碼；'
+      '請在命令開頭加上 `set -o pipefail;`（或移除 `| tail`／`| head` 直接跑測試），若只是寫文件或測試資料請改用 Write/Edit 落檔或 `<<\'EOF\'` 單引號 heredoc。'
+    )
+    print(json.dumps({
+      'hookSpecificOutput': {
+        'hookEventName': 'PreToolUse',
+        'permissionDecision': 'deny',
+        'permissionDecisionReason': reason,
+      }
+    }, ensure_ascii=False))
+    return
   if not PIPESTATUS_USE.search(scan_command):
     return
   if BASH_PREFIX.search(scan_command):
     return
-  shell = outer_shell()
   if outer_shell_is_bash(shell):
     return
 

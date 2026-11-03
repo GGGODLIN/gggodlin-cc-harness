@@ -314,6 +314,16 @@ assert_parse_grep "explicit tier token still sets the tier (regression pin)" '�
 assert_parse_grep "explicit yagni token still routes to the YAGNI axis (regression pin)" '第一個 token 是 `yagni` → 走下方「YAGNI 軸」段'
 assert_parse_grep "explicit tier or yagni invocations run as before without re-selection" '明列級別.*`1`–`4`.*`yagni`.*照原流程執行.*不經自選'
 
+# 獨立新人理解席（Comprehension Goldfish / Paraphrase First）
+assert_grep "Tier 2 dispatches 2 isolated subagents in parallel" '在同一則訊息平行派出 \*\*2 隻獨立零記憶 subagent\*\*'
+assert_grep "Tier 2 includes independent Comprehension seat" '席位 B — 獨立新人理解席（Comprehension Goldfish，Paraphrase First）'
+assert_grep "Comprehension seat requires two-part Paraphrase First" '這份規格提議做什麼（What this proposes）'
+assert_grep "Comprehension seat requires system baseline paraphrase" '依本文件，現有系統如何運作（How the existing system works, per this document）'
+assert_grep "Tier 3 also dispatches independent Comprehension Opus seat" '獨立新人理解席（Comprehension，固定隨 T3 平行派出 1 席 Opus）'
+assert_grep "wrong paraphrase with 0 findings still counts as misread" '即使該席回傳 0 條 finding 也必驗.*錯誤重述本身即自動構成一條成立的 `題目誤讀（misread）` finding'
+assert_grep "forbids excusing wrong paraphrase due to missing chat history" '嚴禁以「它只是沒看過前面對話／它自己讀錯」為由拒絕修改 spec'
+assert_grep "triage misread checks Comprehension paraphrase first" '題目誤讀.*先核對「獨立新人理解席 Comprehension」開頭寫出的兩段白話重述'
+
 printf '%s\n' '----'
 printf 'PASS=%s FAIL=%s\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

@@ -218,6 +218,64 @@ def provider_env():
   return environment, secrets
 
 
+@contextmanager
+def ensure_local_ollama(environment):
+  base = (environment or {}).get("SKILL_EVAL_EMBEDDING_BASE_URL", "")
+  # 僅在預設本機 11434 且非測試覆寫時按需拉起 ollama serve，跑完即停
+  if (
+    base != "http://127.0.0.1:11434/v1"
+    or "SKILLEVALUATOR_KEYS_FILE" in os.environ
+    or "SKILL_EVAL_EMBEDDING_BASE_URL" in os.environ
+  ):
+    yield
+    return
+  version_url = "http://127.0.0.1:11434/api/version"
+  try:
+    with urlopen(version_url, timeout=1.5) as resp:
+      if resp.status == 200:
+        yield
+        return
+  except Exception:
+    pass
+  ollama_bin = shutil.which("ollama") or "/opt/homebrew/bin/ollama"
+  if not Path(ollama_bin).is_file():
+    yield
+    return
+  proc = subprocess.Popen(
+    [ollama_bin, "serve"],
+    stdout=subprocess.DEVNULL,
+    stderr=subprocess.DEVNULL,
+    env=subprocess_environment(),
+    start_new_session=True,
+  )
+  try:
+    deadline = time.monotonic() + 15.0
+    while time.monotonic() < deadline:
+      if proc.poll() is not None:
+        break
+      try:
+        with urlopen(version_url, timeout=1.0) as resp:
+          if resp.status == 200:
+            break
+      except Exception:
+        time.sleep(0.25)
+    yield
+  finally:
+    if proc.poll() is None:
+      try:
+        os.killpg(proc.pid, signal.SIGTERM)
+      except ProcessLookupError:
+        pass
+      try:
+        proc.wait(timeout=5.0)
+      except subprocess.TimeoutExpired:
+        try:
+          os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+          pass
+        proc.wait(timeout=2.0)
+
+
 def safe_directory(path):
   path = path.expanduser()
   if path.is_symlink():
@@ -643,21 +701,24 @@ def run_skill(args):
     "exit_code": None,
     "reason": provider_error,
     "failure_kind": "provider",
-  } if provider_error else run_check(
-    binary,
-    [
-      "context-optimization-check",
-      str(skill),
-      "--model",
-      environment["SKILL_EVAL_EMBEDDING_MODEL"],
-      "--llm-model",
-      environment["SKILL_EVAL_LLM_MODEL"],
-    ],
-    run_root / "tier2",
-    environment,
-    secrets,
-    "tier2",
-  )
+  } if provider_error else None
+  if tier2 is None:
+    with ensure_local_ollama(environment):
+      tier2 = run_check(
+        binary,
+        [
+          "context-optimization-check",
+          str(skill),
+          "--model",
+          environment["SKILL_EVAL_EMBEDDING_MODEL"],
+          "--llm-model",
+          environment["SKILL_EVAL_LLM_MODEL"],
+        ],
+        run_root / "tier2",
+        environment,
+        secrets,
+        "tier2",
+      )
   skill_changed = file_stamp(skill_file) != skill_stamp_before
   secret_leak = contains_secret(run_root, secrets)
   overall_reason = None
@@ -971,43 +1032,44 @@ def run_weekly(args):
     return weekly_infrastructure_failure(args, collection, len(skills), binary, run_root, started_ns, "skillevaluator binary is unavailable", "evaluator")
   except (OSError, ValueError, RuntimeError) as error:
     return weekly_infrastructure_failure(args, collection, len(skills), binary, run_root, started_ns, str(error), "provenance")
-  if provider_error:
-    tier2_preflight = {
-      "status": "infrastructure_failure",
-      "attempts": 0,
-      "finding_count": 0,
-      "reason": provider_error,
-    }
-  else:
-    tier2_preflight = embedding_preflight(environment)
-  tier2_error = tier2_preflight["reason"] if tier2_preflight["status"] == "infrastructure_failure" else None
-  with ThreadPoolExecutor(max_workers=args.workers) as executor:
-    items = list(executor.map(lambda skill: weekly_skill_result(binary, skill, run_root, environment, secrets, tier2_error, policy), skills))
-  if tier2_error:
-    inter = {
-      "status": "infrastructure_failure",
-      "finding_count": 0,
-      "artifact_path": None,
-      "exit_code": None,
-      "reason": tier2_error,
-      "failure_kind": "provider",
-    }
-  else:
-    with tempfile.TemporaryDirectory(prefix="skillevaluator-weekly-") as temporary:
-      canonical_collection = Path(temporary) / "canonical-collection"
-      safe_directory(canonical_collection)
-      for entry_name, skill in skills:
-        destination = canonical_collection / entry_name
-        safe_directory(destination)
-        safe_write(destination / "SKILL.md", (skill / "SKILL.md").read_text())
-      inter = run_check(
-        binary,
-        ["similarity-check", str(canonical_collection), "--type", "skill", "--model", environment["SKILL_EVAL_EMBEDDING_MODEL"]],
-        run_root / "tier2-inter",
-        environment,
-        secrets,
-        "tier2",
-      )
+  with ensure_local_ollama(environment):
+    if provider_error:
+      tier2_preflight = {
+        "status": "infrastructure_failure",
+        "attempts": 0,
+        "finding_count": 0,
+        "reason": provider_error,
+      }
+    else:
+      tier2_preflight = embedding_preflight(environment)
+    tier2_error = tier2_preflight["reason"] if tier2_preflight["status"] == "infrastructure_failure" else None
+    with ThreadPoolExecutor(max_workers=args.workers) as executor:
+      items = list(executor.map(lambda skill: weekly_skill_result(binary, skill, run_root, environment, secrets, tier2_error, policy), skills))
+    if tier2_error:
+      inter = {
+        "status": "infrastructure_failure",
+        "finding_count": 0,
+        "artifact_path": None,
+        "exit_code": None,
+        "reason": tier2_error,
+        "failure_kind": "provider",
+      }
+    else:
+      with tempfile.TemporaryDirectory(prefix="skillevaluator-weekly-") as temporary:
+        canonical_collection = Path(temporary) / "canonical-collection"
+        safe_directory(canonical_collection)
+        for entry_name, skill in skills:
+          destination = canonical_collection / entry_name
+          safe_directory(destination)
+          safe_write(destination / "SKILL.md", (skill / "SKILL.md").read_text())
+        inter = run_check(
+          binary,
+          ["similarity-check", str(canonical_collection), "--type", "skill", "--model", environment["SKILL_EVAL_EMBEDDING_MODEL"]],
+          run_root / "tier2-inter",
+          environment,
+          secrets,
+          "tier2",
+        )
   secret_failure = weekly_secret_failure(args, collection, len(skills), binary, run_root, started_ns, secrets)
   if secret_failure is not None:
     return secret_failure

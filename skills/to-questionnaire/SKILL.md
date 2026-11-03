@@ -4,6 +4,7 @@ description: "Turn a decision the user can't answer alone into a Markdown questi
 upstream: mattpocock/skills
 upstream-path: skills/productivity/to-questionnaire/SKILL.md
 upstream-pinned: 6654f6b
+disable-model-invocation: true
 ---
 
 Turn something the user can't answer alone into a **questionnaire** — a Markdown document they hand to one person to fill in async, or fill out together over a meeting. The recipient holds knowledge the user lacks; the questionnaire pulls it out of them.

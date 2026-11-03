@@ -28,6 +28,9 @@ class Base(unittest.TestCase):
     self.logf = self.tmp / "log.jsonl"
     self.calls = self.tmp / "herdr-calls.txt"
     self.agent_json = self.tmp / "agent.json"
+    self.hc_calls_file = self.tmp / "hc-calls.txt"
+    self.hc_term_json = self.tmp / "hc-term.json"
+    self.app_data = self.tmp / "herdr-app-data"
     fake = self.tmp / "herdr"
     fake.write_text(
       "#!/bin/bash\n"
@@ -35,17 +38,28 @@ class Base(unittest.TestCase):
       f'if [ "$1 $2" = "agent get" ]; then cat "{self.agent_json}"; fi\n'
     )
     fake.chmod(0o755)
+    fake_hc = self.tmp / "hc"
+    fake_hc.write_text(
+      "#!/bin/bash\n"
+      f'printf "%s\\n" "$*" >> "{self.hc_calls_file}"\n'
+      f'if [ "$1" = "get" ]; then cat "{self.hc_term_json}"; fi\n'
+    )
+    fake_hc.chmod(0o755)
     self.set_agent(SESSION, "idle")
+    self.set_hc_term("idle")
     self.env = {
       "CC_AUTO_CONTINUE_STATE_DIR": str(self.state),
       "CC_AUTO_CONTINUE_LOG": str(self.logf),
       "HERDR_BIN_PATH": str(fake),
+      "HC_BIN_PATH": str(fake_hc),
+      "HERDR_APP_DATA_DIR": str(self.app_data),
       "HERDR_ENV": "1",
       "HERDR_PANE_ID": "w9:p1",
     }
-    self.old_env = {k: os.environ.get(k) for k in [*self.env, "CC_AUTO_CONTINUE"]}
+    self.old_env = {k: os.environ.get(k) for k in [*self.env, "CC_AUTO_CONTINUE", "HC_TERMINAL_ID"]}
     os.environ.update(self.env)
     os.environ.pop("CC_AUTO_CONTINUE", None)
+    os.environ.pop("HC_TERMINAL_ID", None)
     self.hook = load_hook()
     self.hook.SEND_DELAY_SECONDS = 0
     self.hook.READY_POLL_SECONDS = 2
@@ -61,6 +75,19 @@ class Base(unittest.TestCase):
 
   def set_agent(self, session, status):
     self.agent_json.write_text(json.dumps({"result": {"agent": {"agent_session": {"value": session}, "agent_status": status}}}))
+
+  def set_hc_term(self, state, app="claude-code"):
+    self.hc_term_json.write_text(json.dumps({"address": "t13", "state": "live", "status": {"app": app, "state": state}}))
+
+  def set_cc_status(self, term, session):
+    d = self.app_data / "cc-status"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / f"{term.replace('/', '_')}.json").write_text(json.dumps({"terminal": term, "session_id": session}))
+
+  def set_cc_controls(self, term, session):
+    d = self.app_data / "cc-controls"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / f"{term.replace('/', '_')}.json").write_text(json.dumps({"terminal": term, "sessionId": session}))
 
   def transcript(self, entrypoint="cli"):
     path = self.tmp / "t.jsonl"
@@ -78,6 +105,12 @@ class Base(unittest.TestCase):
 
   def herdr_calls(self):
     return self.calls.read_text().splitlines() if self.calls.exists() else []
+
+  def hc_calls(self):
+    if not self.hc_calls_file.exists():
+      return []
+    with open(self.hc_calls_file, "r", encoding="utf-8", newline="\n") as f:
+      return [line[:-1] if line.endswith("\n") else line for line in f]
 
 
 class Classify(Base):
@@ -149,6 +182,20 @@ class Guards(Base):
     self.assertEqual(self.spawned, [])
     self.assertEqual(self.actions(), ["no_herdr"])
 
+  def test_invalid_hc_terminal_id_rejected_without_fallback(self):
+    os.environ["HC_TERMINAL_ID"] = "bad;id"
+    self.hook.on_failure(self.payload())
+    self.assertEqual(self.spawned, [])
+    self.assertEqual(self.actions(), ["no_herdr"])
+
+  def test_hc_terminal_id_schedules_with_hc_prefix(self):
+    os.environ["HC_TERMINAL_ID"] = "t13"
+    os.environ.pop("HERDR_ENV", None)
+    os.environ.pop("HERDR_PANE_ID", None)
+    self.hook.on_failure(self.payload())
+    self.assertEqual(self.spawned, [["--send", "hc:t13", SESSION, self.transcript()]])
+    self.assertEqual(self.actions(), ["continue_scheduled"])
+
   def test_cap_reached_notifies_instead_of_typing(self):
     self.hook.write_count(SESSION, 2)
     self.hook.on_failure(self.payload())
@@ -191,6 +238,87 @@ class Send(Base):
     self.hook.notify(SESSION)
     self.assertTrue(any(c.startswith("notification show") for c in self.herdr_calls()))
     self.assertEqual(self.actions(), ["notified"])
+
+  def test_notify_skips_herdr_in_hc_mode(self):
+    self.hook.notify(SESSION, "hc:t13")
+    self.assertEqual(self.herdr_calls(), [])
+    self.assertEqual(self.actions(), ["skip_hc_notify"])
+    os.environ["HC_TERMINAL_ID"] = "t13"
+    self.hook.notify(SESSION)
+    self.assertEqual(self.herdr_calls(), [])
+    self.assertEqual(self.actions(), ["skip_hc_notify", "skip_hc_notify"])
+
+  def test_verify_hc_session_matches_requires_positive_match(self):
+    self.assertEqual(self.hook._verify_hc_session_matches("t13", ""), "match")
+    self.assertEqual(self.hook._verify_hc_session_matches("t13", SESSION), "pending")
+    self.set_cc_status("t13", SESSION)
+    self.assertEqual(self.hook._verify_hc_session_matches("t13", SESSION), "match")
+    self.set_cc_controls("t13", "other-session")
+    self.assertEqual(self.hook._verify_hc_session_matches("t13", SESSION), "mismatch")
+    self.set_cc_controls("t13", SESSION)
+    self.assertEqual(self.hook._verify_hc_session_matches("t13", SESSION), "match")
+
+  def test_hc_sends_continue_text_when_idle_and_same_session(self):
+    self.set_cc_status("t13", SESSION)
+    self.hook.send("hc:t13", SESSION, self.transcript())
+    calls = self.hc_calls()
+    self.assertIn("get t13", calls)
+    self.assertIn(f"send t13 {self.hook.CONTINUE_TEXT}\r", calls)
+    self.assertEqual(self.actions(), ["sent"])
+
+  def test_hc_missing_session_files_polls_then_skips(self):
+    self.hook.READY_POLL_SECONDS = 0.05
+    orig_sleep = self.hook.time.sleep
+    self.hook.time.sleep = lambda _s: None
+    try:
+      self.hook.send("hc:t13", SESSION, self.transcript())
+    finally:
+      self.hook.time.sleep = orig_sleep
+      self.hook.READY_POLL_SECONDS = 15
+    self.assertFalse(any(c.startswith("send ") for c in self.hc_calls()))
+    self.assertEqual(self.actions(), ["skip_session_mismatch"])
+
+  def test_hc_waits_for_delayed_session_file_then_sends(self):
+    sleeps = 0
+    orig_sleep = self.hook.time.sleep
+    def fake_sleep(_s):
+      nonlocal sleeps
+      sleeps += 1
+      if sleeps >= 2:
+        self.set_cc_status("t13", SESSION)
+    self.hook.time.sleep = fake_sleep
+    try:
+      self.hook.send("hc:t13", SESSION, self.transcript())
+    finally:
+      self.hook.time.sleep = orig_sleep
+    self.assertIn(f"send t13 {self.hook.CONTINUE_TEXT}\r", self.hc_calls())
+    self.assertEqual(self.actions(), ["sent"])
+
+  def test_hc_session_mismatch_in_cc_controls_skips(self):
+    self.set_cc_controls("t13", "other-session")
+    self.hook.send("hc:t13", SESSION, self.transcript())
+    self.assertFalse(any(c.startswith("send ") for c in self.hc_calls()))
+    self.assertEqual(self.actions(), ["skip_session_mismatch"])
+
+  def test_hc_non_claude_app_skips_as_mismatch(self):
+    self.set_hc_term("idle", app="zsh")
+    self.hook.send("hc:t13", SESSION, self.transcript())
+    self.assertFalse(any(c.startswith("send ") for c in self.hc_calls()))
+    self.assertEqual(self.actions(), ["skip_session_mismatch"])
+
+  def test_send_aborts_if_disabled_during_sleep(self):
+    def disable_on_sleep(_delay):
+      self.state.mkdir(parents=True, exist_ok=True)
+      (self.state / "DISABLED").touch()
+    orig_sleep = self.hook.time.sleep
+    self.hook.time.sleep = disable_on_sleep
+    try:
+      rc = self.hook.send("w9:p1", SESSION, self.transcript())
+    finally:
+      self.hook.time.sleep = orig_sleep
+    self.assertEqual(rc, 0)
+    self.assertEqual(self.herdr_calls(), [])
+    self.assertEqual(self.actions(), ["disabled"])
 
 
 class Lifecycle(Base):

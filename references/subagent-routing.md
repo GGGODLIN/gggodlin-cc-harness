@@ -188,7 +188,7 @@ T2-routing-gate hook 強制 enforce；互動式 `routed-mech` 即使 sentinel �
 
 實際 routing 仍由 main 自決：token 只強制過 gate、不指定具體 model。但 main 為 Fable 時多一道檢查（fable-gate 注入 `CC_FABLE_MAIN=1`）：general-purpose 派工**未指定 model → deny**，需顯式指定（判斷 → opus、機械/實作 → sonnet）或在 description 標 `<fable-ok>`（僅限失敗升級終級；prompt 內同名文字不算授權）。effort 無 tool 參數、在 prompt 內寫「以 xhigh 深度推理」等指示。
 
-實作 / 重構型派工 prompt 先套模板（目標 / 不變量 / 範圍 / spec / 驗收 / 回報合約六件套）→ 見 memory `reference_dispatch_prompt_templates`。
+實作 / 重構型派工 prompt 先套模板（目標 / 不變量 / 範圍 / spec / 驗收 / 回報合約六件套）→ 見 memory `reference_dispatch_prompt_templates`。若目標檔案受契約測試保護（檔頭含 `<!-- 本檔在契約測試底下：... -->`），派工前確認受委派 subagent 的 `tools` 含 `Bash` 可執行契約測試，不派無 `Bash` 的 subagent 直接修改受保護檔案（`contract-test-preflight-gate.sh` 會在首次 Edit/Write 前攔截無 `Bash` 的改動）。
 
 #### Read-only worktree preflight
 

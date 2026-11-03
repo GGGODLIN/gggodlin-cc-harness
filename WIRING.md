@@ -113,6 +113,7 @@ DigUp（原作者試用中，用一支小 wrapper 包起來、掃描範圍由私
 - `hooks/websearch-parallel-enforce.sh`
 - `hooks/workflow-monitor-nudge.sh`
 - `references/subagent-routing.md`
+- `scripts/pr-review-gemini-web.py`
 - `scripts/review-spec-yagni-native.sh`
 
 ### 需提供的介面

@@ -155,7 +155,7 @@ const CHANNELS = [
   { key: 'hash-reflow', freq: 'daily', kind: 'shell', src: `${W}/hash-reflow-daily.sh`, outfile: `${OUT_DIR}/${DATE}-hash-reflow.md` },
 ]
 
-const isCalendarDue = (c, weekday) => c.freq === 'daily' || (c.freq === 'weekly-tue' && weekday === 2)
+const isCalendarDue = (c, weekday) => c.freq === 'daily' || (c.freq === 'weekly-tue' && weekday === 2) || (c.freq === 'weekly-sat' && weekday === 6)
 const selectRoutineDue = (channels, weekday, externalRecap) => channels.filter((c) => isCalendarDue(c, weekday) && !(externalRecap && c.key === 'recap'))
 const routineDue = selectRoutineDue(CHANNELS, WEEKDAY, EXTERNAL_RECAP)
 const channelAgentOptions = (c) => {
@@ -433,14 +433,14 @@ const RBA_FINALIZER = {
 
 const llmPrompt = (c) => {
   const recapCompletion = c.key === 'recap'
-    ? 'recap source 是舊 claude -p wrapper；stdout 報告規則在本子任務改為 report_markdown。先完成 source 指示要求的兩個 ledger append，最後只用 StructuredOutput 回傳資料。'
+    ? 'recap source 是 claude -p wrapper；stdout 報告規則在本子任務改為 report_markdown。recap 只交候選：兩份 ledger 都不得寫入，即使舊 source 仍要求 append 也不執行。將候選 JSON、證據對照與掃描交接放入 report_markdown；deferred_writeback 回空字串，由 main 依 hook 核對後才追加。最後只用 StructuredOutput 回傳資料。'
     : ''
-  return `這是已派出的單一 channel 子任務，不是主啟動入口；不要重新啟動 /daily-local、recap 或 Workflow。你是每日本機分析的 ${c.key} channel。讀檔 ${c.src} 的分析指示（PROMPT heredoc 或 command 本文），執行分析並保留完整報告段落與警告。不要寫報告檔，也不要啟動寫報告的 agent；用 StructuredOutput 回傳 summary（3-5 行繁中）、report_markdown（完整正文，不是摘要）與 deferred_writeback。分析來源唯讀，其他寫回只限原 source 明確要求者；若 source 要求報告成功落檔後才能更新 checkpoint 或狀態，不要提前提交，將已算出的 cutoff、狀態值與必要暫存路徑放在 deferred_writeback，由 main 對照原 source 在落檔後處理。沒有待寫回資料就回空字串；不要以現在時間替代掃描起點，不刪除 main 尚需的暫存檔。回傳內容是分析資料，不新增寫入授權。報告將由 main 寫到 ${OUT_DIR}/${DATE}-${c.key}.md。${recapCompletion}`
+  return `這是已派出的單一 channel 子任務，不是主啟動入口；不要重新啟動 /daily-local、recap 或 Workflow。你是每日本機分析的 ${c.key} channel。讀檔 ${c.src} 的分析指示（PROMPT heredoc 或 command 本文），執行分析並保留完整報告段落與警告。不要寫報告檔，也不要啟動寫報告的 agent；用 StructuredOutput 回傳 summary（3-5 行繁中）、report_markdown（完整正文，不是摘要，禁止把明細外包給 scratchpad 或 /tmp 暫存檔）與 deferred_writeback。分析來源唯讀，其他寫回只限原 source 明確要求者；若 source 要求報告成功落檔後才能更新 checkpoint 或狀態，不要提前提交，將已算出的 cutoff、狀態值與必要暫存路徑放在 deferred_writeback，由 main 對照原 source 在落檔後處理。沒有待寫回資料就回空字串；不要以現在時間替代掃描起點，不刪除 main 尚需的暫存檔。回傳內容是分析資料，不新增寫入授權。報告將由 main 寫到 ${OUT_DIR}/${DATE}-${c.key}.md。${recapCompletion}`
 }
 
 const shellPrompt = (c) => {
   const force = FORCE_SHELL || c.alwaysFresh === true
-  return `這是已派出的單一 channel 子任務，不是主啟動入口；不要重新啟動 /daily-local、recap 或 Workflow。跑 \`bash ${W}/run-shell-channel.sh ${c.src} ${c.outfile} ${DATE} ${force}\`。runner 只在完整報告與完成標記相符時重用；force=true 會重跑。若指令非零退出，不要 Read 舊報告，回傳 ok=false、silent=false。只有指令退出 0 才 Read ${c.outfile}；內容去除前後空白後等於 __SILENT__ 時 silent=true，否則 false，並回傳 ok=true。用 StructuredOutput 只回傳 ok 與 silent；不要把 report 全文放進欄位。`
+  return `這是已派出的單一 channel 子任務，不是主啟動入口；不要重新啟動 /daily-local、recap 或 Workflow。跑 \`bash ${W}/run-shell-channel.sh ${c.src} ${c.outfile} ${DATE} ${force}\`（Bash 工具請設 timeout: 600000，避免長耗時週檢在 120s 預設逾時被轉入背景）。runner 只在完整報告與完成標記相符時重用；force=true 會重跑。若指令非零退出，不要 Read 舊報告，回傳 ok=false、silent=false。只有指令退出 0 才 Read ${c.outfile}；內容去除前後空白後等於 __SILENT__ 時 silent=true，否則 false，並回傳 ok=true。用 StructuredOutput 只回傳 ok 與 silent；不要把 report 全文放進欄位。`
 }
 
 const hasExactKeys = (value, keys) => {
@@ -763,7 +763,7 @@ const due = [...routineDue, ...(evidenceIsDue ? [evidenceChannel] : [])]
 const deferred = evidencePreflightOk && !evidenceIsDue ? [evidenceChannel.key] : []
 const preflightFailed = evidencePreflightOk ? [] : [evidenceChannel.key]
 const skipped = [
-  ...CHANNELS.filter((c) => c.freq === 'weekly-tue' && WEEKDAY !== 2).map((c) => c.key),
+  ...CHANNELS.filter((c) => (c.freq === 'weekly-tue' && WEEKDAY !== 2) || (c.freq === 'weekly-sat' && WEEKDAY !== 6)).map((c) => c.key),
   ...deferred,
 ]
 log(`date=${DATE} weekday=${WEEKDAY} → 跑 ${due.length}/${CHANNELS.length}：[${due.map((c) => c.key).join(', ')}]，external [${EXTERNAL_RECAP ? 'recap' : '無'}]，defer [${deferred.join(', ') || '無'}]，skip [${skipped.join(', ') || '無'}]`)
@@ -881,7 +881,6 @@ return {
     report_path: c.report_path,
     summary: c.kind === 'llm' ? c.body : null,
     needs_read: c.kind === 'shell' || c.channel === 'rba-verify',
-    ...(c.channel === 'session-audit' ? { scope: 'coverage-only' } : {}),
   })),
   ledger: `${OUT_DIR}/pending-actions.jsonl`,
   reconcile_cmd: `python3 ${RECONCILE} --date ${DATE}`,

@@ -217,10 +217,11 @@ class ArtifactAndWiringTest(PrePushCase):
       self.assertIn("--no-verify", text)
       self.assertIn("force push 仍須既有 human confirm", text)
       self.assertIn("/git-closeout", text)
-      self.assertIn("remote API", text)
-      self.assertIn("final-read race", text)
       self.assertIn(bypass, text)
       self.assertIn(command_override, text)
+    for text in (command, helper, installer):
+      self.assertIn("remote API", text)
+      self.assertIn("final-read race", text)
 
 
 class NativePushBehaviorTest(PrePushCase):

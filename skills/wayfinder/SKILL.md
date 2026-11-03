@@ -3,7 +3,7 @@ name: wayfinder
 description: Plan a huge, foggy chunk of work — more than one agent session can hold — as a local map of decision tickets, resolved one at a time until the way to the destination is clear. Use when the user types /wayfinder, or when a requirements gate (e.g. to-spec step 0) reports wayfinder-scale fog and the user explicitly agrees to chart a map. Do not use for well-scoped features (to-spec / to-tickets handle those), single-session work, or without the user's explicit go-ahead.
 upstream: mattpocock/skills
 upstream-path: skills/engineering/wayfinder/SKILL.md
-upstream-pinned: 49dd158
+upstream-pinned: 7739eaed7f8f3915437a8def198a6d0d7206dbc7
 ---
 
 <!-- 本檔在契約測試底下：python3 ~/.claude/commands/tests/test_skill_verify_one_shot_callers.py -->
@@ -90,7 +90,7 @@ Assets created while resolving (research files, mockups) are linked from the tic
 
 Every ticket is either **HITL** — human in the loop, worked *with* the user — or **AFK**, driven by the agent alone. A HITL ticket only resolves through live exchange; the agent never stands in for the user's side of it (a grilling session that answers its own questions has broken this — the questioning discipline already in context applies).
 
-- **Research** (AFK): reading documentation, third-party APIs, codebases, or the user's own knowledge base to surface a fact a decision waits on. Resolve by dispatching a background research agent per the routing rules already in context; the agent leaves a cited findings file linked from the ticket.
+- **Research** (AFK): reading documentation, third-party APIs, codebases, or the user's own knowledge base to surface a fact a decision waits on. Resolve by dispatching a background research agent with a fresh context window per the routing rules already in context; the agent leaves a cited findings file linked from the ticket.
 - **Prototype** (HITL): raise the fidelity of the discussion with a cheap, rough, concrete artifact to react to. Resolve via the /prototype skill — it picks the branch (single shareable HTML file for logic/state questions, structurally different UI variants behind a URL param for looks questions) and defines the capture protocol. Use when "how should it look / behave" is the key question.
 - **Grilling** (HITL): interview the user — one question at a time, each with a recommended answer; asking several at once is bewildering. Look up facts the environment can answer (filesystem, git, docs) instead of asking; the decisions are the user's — put each one to them and wait, never answering in their place. Propose /grill-me when the decision tree is deep; invoke /domain-modeling when a term turns out fuzzy or a resolution deserves a decision record. The default type.
 - **Task** (HITL or AFK): manual work that must happen before a decision can be made — provisioning access, signing up for a service, moving data so its shape can be seen. The one type that *does* rather than decides, earning its place by unblocking a decision. The agent drives it alone where it can; otherwise it hands the user a precise numbered checklist. The resolution records what was done and any resulting facts (credential locations, URLs, counts) later tickets depend on.
@@ -120,7 +120,7 @@ User invokes with a loose idea, or accepts the proposal after a requirements gat
 2. **Map the frontier.** Interview again, **breadth-first**: fan out across the whole space rather than deep on any one thread, surfacing the open decisions and the first steps takeable now. **If this surfaces no fog** — the way is already clear, the journey small enough for one session — stop, tell the user a map isn't needed, and route to /to-spec or direct work instead. Done when: open decisions and fog patches are listed and the user confirms nothing major is missing, or the no-fog exit fired.
 3. **Create the board**: map.md with Destination and Notes filled in, Decisions-so-far empty, fog sketched into Not yet specified. Done when: map.md exists with all five sections.
 4. **Create the tickets you can specify now**, then wire `blocked-by` in a **second pass** (tickets need numbers before they can reference each other). Everything you can't yet specify stays in the fog. Done when: every sharp question has a ticket file and blocking edges are wired.
-5. **Fire the research agents.** For each research ticket, dispatch a background agent per the routing rules in context, pointing its findings file back at the ticket. Done when: every research ticket has an agent dispatched, or a stated reason to defer.
+5. **Fire the research agents.** For each research ticket, dispatch a background agent with a fresh context window per the routing rules in context, pointing its findings file back at the ticket. Done when: every research ticket has an agent dispatched, or a stated reason to defer.
 6. **Self-Verify** (mandatory — board written, before presenting). Dispatch an `Agent` with `subagent_type: skill-verify-auditor` (sonnet+low, Read-only, pinned in the agent definition), description containing the marker string `skill-verify:wayfinder` (statistics grep — keep verbatim)。
 
    **Prompt 要內嵌 board 全文，不要給目錄路徑。** 兩個理由：

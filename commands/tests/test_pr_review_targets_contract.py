@@ -87,23 +87,19 @@ class PrReviewTargetsContractTest(unittest.TestCase):
     self.assertIn("selection-required", step)
     self.assertIn("`authorize-dispatch` 回 `allowed:true` 前不得進入 Step 3", step)
 
-  def test_authorization_splits_claude_seats_from_extra_quota_seats(self):
+  def test_authorization_requires_confirmation_for_every_seat(self):
     step = self.finalize()
-    self.assertIn("review-dispatch-principles.md", step)
-    self.assertIn("兩層授權", step)
-    self.assertIn("claude-seats-auto", step)
-    self.assertIn("只選 Claude 側席位且沒有未裁決的容量超界", step)
-    self.assertIn("不需要使用者確認", step)
-    self.assertIn("Codex、Gemini、web GPT Pro、任何 Fable 席", step)
-    self.assertIn("一律當外部額度席，回 `awaiting-confirmation`", step)
-    self.assertIn("判不出來時多問一次，不當成 Claude 側席位放行", step)
+    self.assertIn("`/pr-review` 不套用共用原則的兩層授權", step)
+    self.assertIn("不分 Claude 側或外部席", step)
+    self.assertIn("**使用者本輪明確確認**", step)
+    self.assertIn("`reason: confirmed`", step)
+    self.assertIn("不論選的是哪一種席位，一律回 `awaiting-confirmation`，不放行", step)
     self.assertIn("缺 `selection` 或 `capacity` 資料時回 `awaiting-confirmation`，不放行", step)
-    for seat in ("typescript-reviewer", "python-reviewer", "code-reviewer",
-                 "security-reviewer", "spec-compliance-reviewer"):
-      with self.subTest(seat=seat):
-        self.assertIn(seat, step)
+    self.assertIn("沒有使用者本輪的明確確認，授權程式不會放行", step)
+    self.assertNotIn("claude-seats-auto", step)
+    self.assertNotIn("不需要使用者確認", step)
 
-  def test_capacity_adjudication_still_outranks_claude_only_auto_release(self):
+  def test_capacity_adjudication_still_outranks_confirmation(self):
     step = self.finalize()
     self.assertIn("不論選的是哪一層席位都回 `awaiting-adjudication`", step)
     self.assertIn("確認不能代替裁決", step)

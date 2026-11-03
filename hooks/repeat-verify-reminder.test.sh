@@ -234,12 +234,24 @@ for cmd in \
   'git ls-remote origin refs/heads/main' \
   'git -C /absolute/repo ls-remote origin refs/heads/main' \
   'git -C "/absolute path/repo" ls-remote origin refs/heads/main' \
+  'git show-ref --heads --tags' \
+  'git branch --show-current' \
+  'herdr tab list --workspace w4' \
+  'herdr pane read p1 --source recent' \
+  'GH_TOKEN=$(gh auth token -u example-owner) gh run list -R example-owner/project-a --commit abc1234' \
+  'python3 ~/.claude/scripts/closeout-provenance.py --self-repos' \
   'gh pr checks 123'; do
   reset_state
   call Bash "$cmd" >/dev/null
   out=$(call Bash "$cmd")
   check "regression: 純查詢 $cmd 不提醒" "$out" no
 done
+
+reset_state
+call Bash "npm run test:unit -- --run" >/dev/null
+call Agent >/dev/null
+out=$(call Bash "npm run test:unit -- --run")
+check "known-good: 同指令但中間有 Agent 完成 → 不提醒" "$out" "no"
 
 for cmd in \
   'git -C /absolute/repo push origin main' \

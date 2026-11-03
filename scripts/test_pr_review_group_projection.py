@@ -414,6 +414,17 @@ class GroupProjectionTest(unittest.TestCase):
     self.assertIn("## 這次審查範圍", main_text)
     self.assertIn("底線未完成：typescript-reviewer 停審（CI 紅燈）", main_text)
 
+  def test_group_main_report_keeps_open_questions_section(self):
+    rendered = run_group("render", group_payload())
+    first_h2 = rendered.index("\n## ")
+    questions = "\n## 待確認問題\n\n本輪有 1 題重要未知尚未排除。\n\n- Q-01 正式環境有幾個租戶？\n"
+    draft = rendered[:first_h2] + "\n" + questions + rendered[first_h2:]
+    _, main = self.published_pair(draft)
+    main_text = main.read_text()
+    self.assertIn("## 待確認問題", main_text)
+    self.assertIn("正式環境有幾個租戶？", main_text)
+    self.assertLess(main_text.index("## 待確認問題"), main_text.index("## 發現總覽"))
+
   def test_group_report_reads_markdown_and_rejects_json_blobs(self):
     prior = {
       "set_identity": SET_IDENTITY,

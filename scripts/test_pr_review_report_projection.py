@@ -303,6 +303,17 @@ F-01 0123456789abcdef0123
     self.assertIn("STILL_OPEN", main)
     self.assertNotIn("[fedcba9876543210fedc](pr-1-review.audit.md#發現總覽)", main)
 
+  def test_open_questions_section_is_preserved_before_findings(self):
+    module = load_module()
+    source = schema2_report().replace(
+      "## 上一輪 findings 對帳",
+      "## 待確認問題\n\n本輪有 1 題重要未知尚未排除。\n\n| # | 問題 | 相關的已確認改動 | 未知 | 查過 | 答案好／壞時的處置 |\n|---|---|---|---|---|---|\n| Q-01 | 正式環境有幾個租戶？ | `src/jobs/rollup.ts:12` | 正式租戶數 | PR 描述、票 | 數百以內不處理／上萬要分批 |\n\n## 上一輪 findings 對帳",
+    )
+    main = module.project_report(source, "pr-1-review.audit.md", require_schema=True)
+    self.assertIn("## 待確認問題", main)
+    self.assertIn("正式環境有幾個租戶？", main)
+    self.assertLess(main.index("## 待確認問題"), main.index("## 發現總覽"))
+
   @unittest.skipUnless(MODULE_PATH.is_file(), "projection helper not implemented")
   def test_schema_two_requires_exact_prior_continuity_contract(self):
     module = load_module()

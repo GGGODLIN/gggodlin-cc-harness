@@ -3,8 +3,8 @@ name: auto-choice
 description: "Use when 一段實作已完成、交回或合併前，需要列出實作者在規格或 prompt 沒寫到的地方自己做了哪些決定——implement closeout 在 commit 前呼叫；使用者說「列出你替我做的決定」「auto-choice」「這段你自己拍板了什麼」，或臨時修改越改越大、/goal 或 handoff-impl 跑完、subagent 交件回來時也用。Do not use for 正確性 code review（/code-review）、範圍或 YAGNI 審查（review-implement）、實作前的 spec review（review-spec）、修改程式碼或修 bug。"
 metadata:
   upstream: dzhng/skills
-  upstream-path: skills/engineering/audit-choices/SKILL.md
-  upstream-pinned: d513228
+  upstream-path: skills/engineering/audit-decisions/SKILL.md
+  upstream-pinned: 5e69685d935be8fffccfbe0224f9aa57d078e611
 ---
 
 <!-- 本檔在契約測試底下：python3 ~/.claude/commands/tests/test_skill_verify_one_shot_callers.py；bash ~/.claude/skills/implement/scripts/tests/review-implement-handoff-contract.test.sh（接線） -->

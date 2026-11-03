@@ -17,7 +17,7 @@ description: 把新的第三方模型接進本機模型池，並判定它值不�
 
 同時問清楚**額度來源與共用對象**：這顆的額度是訂閱、PAYG、免費層還是本機 engine？跟既有哪幾顆共用？共用額度的新模型不增加容量，能力再好也沒有存在意義——這件事在 WIRE 就要問，不要等能力都測完才發現。
 
-完成條件：**`:8317/v1/models` 列得出 `<provider>/<model>`，且實打一發回 200、回應的 model 對得上**，是實際 curl 的輸出，不是「CLI 說加好了所以應該有」；**額度來源與共用對象已寫下來**。
+完成條件：**`:8317/v1/models` 列得出 `<provider>/<model>`，且實打一發回 200、回應的 model 對得上、抽出的正文 `content` 去除空白後非空且符合探針預期輸出（如 `PONG`；只有 reasoning 而無預期正文視為未通過，思考模型探針起始 `max_tokens` 建議設 `>= 128` 並依下方「輸出預算」核實）**，是實際 curl 的輸出，不是「CLI 說加好了所以應該有」；**額度來源與共用對象已寫下來**。
 
 改 `providers.json` 前先備份；版控內的檔照自動 commit 慣例 commit。接著完成下方「輸出預算」，才進 SMOKE。
 
@@ -73,7 +73,9 @@ SMOKE 全綠之後才有意義。跑 `bench/` 底下移植自 cline 系的題組
 
 順帶測 context 上限：直接對端點送遞增長度的 prompt，看回報的 `prompt_tokens` 與何時失敗。第三方端點的實際上限常與宣稱不符，而這個數字決定 `CLAUDE_CODE_MAX_CONTEXT_TOKENS` 該釘多少——沒實測就別亂釘，亂設比不設更危險。
 
-完成條件：**拿到該 session 的 jsonl，四條分析指令都跑過，五條通過條件逐條有結論；context 上限有實測數字**。
+量到上限後，用 `$M model context <provider/model>` 讀 Magpie 記的窗口（`$M` 的定義見 [references/wiring-layers.md](references/wiring-layers.md)）；讀數跟實測不符，就用 `$M model context <provider/model> <n>` 寫入最後一次成功的長度，再從 gateway `/v1/models`（帶 caller key）的 `context_window` 讀回。原因：多模型 group 送出前會依登記窗口估算請求長度，若 catalog 預設值低於實測值，長對話時該成員會被移到最後備援而被跳過。
+
+完成條件：**拿到該 session 的 jsonl，四條分析指令都跑過，五條通過條件逐條有結論；context 上限有實測數字，且 Magpie 讀回的窗口等於實測可用值**。
 
 這顆模型若不打算給 CC 或其他 agent harness 用（例如只給腳本做單次翻譯），這階段可以跳過，但要在裁決裡寫明「未在 CC 內驗證」。
 

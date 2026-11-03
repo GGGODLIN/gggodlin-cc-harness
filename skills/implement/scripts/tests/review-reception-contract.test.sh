@@ -42,6 +42,7 @@ assert_grep "reception skill succeeds before triage" 'matching tool result succe
 assert_grep "later review rounds reuse loaded method" 'Later review rounds in the same implement run reuse the loaded method' "$IMPLEMENT"
 assert_grep "next implement run loads again" 'A later .*Skill\(implement\).* invocation starts a new run' "$IMPLEMENT"
 assert_grep "fix threshold remains current policy" 'does not change the current severity or scope policy' "$IMPLEMENT"
+assert_grep "prefer deleting narrowing or reusing existing mechanisms" 'among fixes that satisfy the accepted criteria and current severity or scope policy, prefer deleting, narrowing, or reusing existing mechanisms' "$IMPLEMENT"
 assert_grep "review reception does not restart full review" 'Do not start a new full review solely because findings were fixed' "$IMPLEMENT"
 
 printf '%s\n' '----'

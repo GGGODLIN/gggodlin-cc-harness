@@ -4,6 +4,10 @@
 
 把本機 **Claude Code**、**Codex** 與 **Pi** 的 `.jsonl` 對話紀錄建進 SQLite FTS5（`tokenize='trigram'`）全文索引，並提供跨工具的正規化 JSONL 事件流。全靠單一 Python 標準庫腳本運作，不裝第三方套件。
 
+https://github.com/user-attachments/assets/4cd592d2-1cb5-4b1a-a1f0-5212c901bb6f
+
+影片裡的對話是虛構的。0.05 秒是在作者的真實索引上跑同一句搜尋的耗時（2026-10-20，含 Python 啟動）。
+
 對話紀錄累積到幾十 GB 之後，每次回頭找舊結論都跑 `grep -r` 會慢到打斷工作。現成的對話記憶工具不是用 SQLite 預設的 `unicode61` 分詞（切不出中文子字串），就是綁了純英文的 embedding 模型。
 
 在作者的機器上（`44 GB`、`53,016` 個 `.jsonl` 檔、`150 萬`列索引紀錄，SQLite 檔 `3.5 GB`，2026-10-19 量測），首次全量建庫耗時 `371.5 秒`，日常增量更新約 `0.6～6.0 秒`。

@@ -261,8 +261,23 @@ class PrReviewGeminiWebTest(unittest.TestCase):
     result = run_cli(SCRIPT, "materials", self.channel_payload(
       "gemini-pro", preparation_path=finalized["preparation_path"], confirmation=True))
     self.assertEqual(result["status"], "OK")
-    self.assertEqual(len(result["executions"]), 1)
-    execution = result["executions"][0]
+    self.assertEqual(len(result["executions"]), 2)
+    self.assertEqual(result["dispatch_call_count"], 1)
+    primary, execution = result["executions"]
+    self.assertEqual(primary["role"], "primary")
+    self.assertEqual(primary["via"], "ccp-gemini-argon")
+    self.assertEqual(primary["requested_model"], "google/gemini-4-argon:high")
+    self.assertEqual(primary["argv"][primary["argv"].index("-p") + 1], primary["prompt"])
+    self.assertEqual(primary["cwd"], self.prepared["targets"][0]["review_root"])
+    primary_dirs = [primary["argv"][index + 1] for index, arg in enumerate(primary["argv"])
+                    if arg == "--add-dir"]
+    self.assertEqual(
+      sorted(primary_dirs),
+      sorted(target["review_root"] for target in self.prepared["targets"]),
+    )
+    self.assertEqual(execution["role"], "fallback")
+    self.assertIn("Argon 端點不通", execution["run_if"])
+    self.assertEqual(execution["prompt"], primary["prompt"])
     self.assertEqual(execution["command"], "agy")
     argv = execution["argv"]
     print_args = [arg for arg in argv if str(arg).startswith("--print=")]
@@ -403,7 +418,8 @@ class PrReviewGeminiWebTest(unittest.TestCase):
     result = run_cli(SCRIPT, "materials", self.channel_payload(
       "gemini-pro", preparation_path=adjudicated["preparation_path"], confirmation=True))
     self.assertEqual(result["status"], "OK")
-    self.assertEqual(len(result["executions"]), 1)
+    self.assertEqual(result["dispatch_call_count"], 1)
+    self.assertEqual([item["role"] for item in result["executions"]], ["primary", "fallback"])
 
   def test_selection_and_model_are_kept_and_no_extra_channel_appears(self):
     finalized = run_cli(TARGETS_SCRIPT, "finalize", {
@@ -545,6 +561,43 @@ class PrReviewGeminiWebTest(unittest.TestCase):
     self.assertIn("github:github.com/acme/saas#11", draft)
     self.assertIn("| gemini |", draft)
     self.assertIn("F-01", draft)
+
+  def test_argon_primary_runs_read_only_without_user_hooks_or_mcp(self):
+    finalized = run_cli(TARGETS_SCRIPT, "finalize", {
+      "preparation_path": self.prepared["preparation_path"],
+      "selection": [{"seat": "agy", "angle": "Gemini Pro"}],
+    })
+    result = run_cli(SCRIPT, "materials", self.channel_payload(
+      "gemini-pro", preparation_path=finalized["preparation_path"], confirmation=True))
+    argv = result["executions"][0]["argv"]
+    self.assertEqual(argv[argv.index("--permission-mode") + 1], "dontAsk")
+    self.assertEqual(json.loads(argv[argv.index("--settings") + 1]), {"disableAllHooks": True})
+    self.assertIn("--strict-mcp-config", argv)
+    self.assertEqual(argv[argv.index("--setting-sources") + 1], "local")
+    self.assertNotIn("--dangerously-skip-permissions", argv)
+    allowed = argv[argv.index("--allowedTools") + 1:argv.index("--add-dir")]
+    self.assertFalse({"Edit", "Write", "Bash"} & set(allowed))
+    self.assertTrue(all(not tool.startswith("Bash(") or tool.startswith("Bash(git ") for tool in allowed))
+
+  def test_collect_accepts_the_magpie_and_the_agy_argon_names_only(self):
+    finalized = run_cli(TARGETS_SCRIPT, "finalize", {
+      "preparation_path": self.prepared["preparation_path"],
+      "selection": [{"seat": "agy", "angle": "Gemini Pro"}],
+    })
+    packet = run_cli(SCRIPT, "materials", self.channel_payload(
+      "gemini-pro", preparation_path=finalized["preparation_path"], confirmation=True))
+    for model in ("google/gemini-4-argon:high", "Gemini 4 Argon (High)"):
+      with self.subTest(model=model):
+        result = run_cli(SCRIPT, "collect", {
+          "packet_path": packet["packet_path"],
+          "reply": {"status": "ok", "model": model, "output": "[]"},
+        })
+        self.assertEqual(result["status"], "OK")
+    other = run_cli(SCRIPT, "collect", {
+      "packet_path": packet["packet_path"],
+      "reply": {"status": "ok", "model": "google/gemini-3.8-flash:high", "output": "[]"},
+    })
+    self.assertEqual(other["reason"], "model-mismatch")
 
   def test_reports_never_claim_runtime_model_verification(self):
     finalized = run_cli(TARGETS_SCRIPT, "finalize", {

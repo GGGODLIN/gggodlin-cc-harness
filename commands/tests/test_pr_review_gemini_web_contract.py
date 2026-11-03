@@ -20,15 +20,15 @@ class PrReviewGeminiWebContractTest(unittest.TestCase):
     return self.command[start:end]
 
   def gemini_multi(self):
-    return self.section("#### 多目標整組材料", "#### web GPT Pro 多目標整組材料")
+    return self.section("#### 多目標整組材料", "🔌 接線點：ChatGPT 網頁版席位 — 見 WIRING.md")
 
   def web_multi(self):
-    return self.section("#### web GPT Pro 多目標整組材料", "## Step 4: Cross-Axis Verification Pass")
+    return self.section("🔌 接線點：ChatGPT 網頁版席位 — 見 WIRING.md", "## Step 4: Cross-Axis Verification Pass")
 
   def test_multi_target_sections_live_inside_the_gemini_block_before_step4(self):
     gemini_block = self.section("### Gemini Pro / Flash Review", "## Step 4: Cross-Axis Verification Pass")
     self.assertIn("#### 多目標整組材料", gemini_block)
-    self.assertIn("#### web GPT Pro 多目標整組材料", gemini_block)
+    self.assertIn("🔌 接線點：ChatGPT 網頁版席位 — 見 WIRING.md", gemini_block)
     self.assertLess(
       self.command.index("#### 多目標整組材料"),
       self.command.index("## Step 4: Cross-Axis Verification Pass"),
@@ -37,7 +37,7 @@ class PrReviewGeminiWebContractTest(unittest.TestCase):
   def test_gemini_multi_target_keeps_one_execution_with_every_root_and_version(self):
     step = self.gemini_multi()
     self.assertIn("多目標才跑；單輸入沿上方既有 Gemini 段", step)
-    self.assertIn("一次 `agy` 執行取得整組", step)
+    self.assertIn("以一次執行取得整組", step)
     self.assertIn("**每一個目標**的 `review_root`", step)
     self.assertIn("authored_diff_base", step)
     self.assertIn("不按 PR 或 repo 數量拆成多次完整審查", step)
@@ -77,15 +77,35 @@ class PrReviewGeminiWebContractTest(unittest.TestCase):
     self.assertIn("一組兩個 argv（`--add-dir`，`<review_root>`）", step)
     self.assertIn("--model=", step)
 
+  def test_multi_target_argon_runs_magpie_first_and_agy_only_as_fallback(self):
+    step = self.gemini_multi()
+    self.assertIn("Pro 先走 `ccp-gemini-argon`，失敗才換 `agy`", step)
+    self.assertIn("`role: primary`", step)
+    self.assertIn("`role: fallback`", step)
+    self.assertIn("`dispatch_call_count` 只數 primary，兩筆不會都跑", step)
+    self.assertIn("`google/gemini-4-argon:high` 與 `Gemini 4 Argon (High)`", step)
+    self.assertIn("選席鍵沿用 `seat: agy`", step)
+
+  def test_single_target_argon_runs_magpie_read_only_before_agy(self):
+    block = self.section("### Gemini Pro / Flash Review", "#### 多目標整組材料")
+    pro = block[block.index("case \",$EXTRA_AXES,\" in *,pro,*)"):block.index("case \",$EXTRA_AXES,\" in *,flash,*)")]
+    self.assertLess(pro.index("ccp-gemini-argon"), pro.index("agy --print="))
+    for needle in ("--setting-sources local", "--strict-mcp-config", '{"disableAllHooks": true}',
+                   "--permission-mode dontAsk", "--output-format json", "jq -e '.is_error == false'"):
+      with self.subTest(needle=needle):
+        self.assertIn(needle, pro)
+    self.assertNotIn("GEMINI_FLASH_MODEL", pro)
+    flash = block[block.index("case \",$EXTRA_AXES,\" in *,flash,*)"):]
+    self.assertIn("model-routing.sh\" GEMINI_FLASH_MODEL", flash)
+    self.assertIn("Argon 相容端點", block)
+    self.assertIn("預設 CLI 額度", block)
+    self.assertIn("不用 `--bare`", block)
+
   def test_flash_model_comes_from_routing_not_invention(self):
     step = self.gemini_multi()
     self.assertIn("MODEL_UNAVAILABLE", step)
     self.assertIn("$GEMINI_FLASH_MODEL", step)
     self.assertIn("model-routing.sh", step)
-
-  def test_web_fetch_uses_detail_with_conversation_id_placeholder(self):
-    step = self.web_multi()
-    self.assertIn("detail <id> --markdown true -f json", step)
 
   def test_head_marker_and_exam_list_register_the_ninth_exam(self):
     head = self.command[:self.command.index("## Step 1: Parse Input")]
@@ -117,32 +137,6 @@ class PrReviewGeminiWebContractTest(unittest.TestCase):
     self.assertIn("Step 4.8", step)
     self.assertIn("不得以 CC 或其他通道結果代替", step)
     self.assertIn("未實跑的通道明列未驗", step)
-
-  def test_web_multi_target_sends_one_labeled_full_text_diff_send(self):
-    step = self.web_multi()
-    self.assertIn("已選角度只送一次", step)
-    self.assertIn("--materials-only", step)
-    self.assertIn("--new --wait false --window background -f json", step)
-    self.assertIn("detail <id> --markdown true -f json", step)
-    self.assertIn("不帶 `--wait true`", step)
-
-  def test_web_multi_target_never_assumes_local_paths(self):
-    step = self.web_multi()
-    self.assertIn("不假設它可讀本機路徑", step)
-    self.assertIn("有 target 標籤的完整文字差異", step)
-    self.assertIn("### Target <target_identity>", step)
-    self.assertIn("必填 `target` 欄", step)
-    self.assertIn("不傳 `$REVIEW_ROOT` 絕對路徑、不用 `--add-dir`", step)
-
-  def test_web_channel_keeps_existing_failure_and_report_contract(self):
-    step = self.web_multi()
-    self.assertIn("channel `web-gpt`", step)
-    self.assertIn("派工閘、定位回映、失敗處置與共同報告規則同上段", step)
-    self.assertIn("source: web", step)
-    self.assertIn("[web-Pro]", step)
-    self.assertIn("不與 Codex 軸合併", step)
-    self.assertIn("INCOMPATIBLE_INTERFACE", step)
-    self.assertIn("不自動換執行路徑、不偷換模型", step)
 
   def test_head_contract_note_lists_the_ninth_exam(self):
     head = self.command[:self.command.index("## Step 1: Parse Input")]

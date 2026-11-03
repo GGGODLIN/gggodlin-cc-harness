@@ -51,7 +51,9 @@ INLINE_TITLES = {
 }
 SET_LOCATIONS_TITLE = "跨目標位置"
 ATTRIBUTION_TITLE = "歸因三欄"
+OPEN_QUESTIONS_TITLE = "待確認問題"
 GROUP_KEEP_TITLES = (
+  OPEN_QUESTIONS_TITLE,
   "發現總覽",
   SET_LOCATIONS_TITLE,
   PRIOR_REVIEW_TITLE,
@@ -63,6 +65,7 @@ LOCATION_HEADERS = ("group_id", "finding_uid", "target_identity", "file", "line"
 LINE_SENTINEL = "需人工確認（anchor 未在綁定來源中比中或證據 binding 失效）"
 LOCATION_UID_HEADING = "### finding_uid 索引"
 KEEP_TITLES = (
+  OPEN_QUESTIONS_TITLE,
   "發現總覽",
   PRIOR_REVIEW_TITLE,
   "React-doctor 機械掃描",

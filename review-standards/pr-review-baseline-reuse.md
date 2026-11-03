@@ -21,3 +21,6 @@ Apply these patterns in addition to your language/domain checks. Search-before-f
 1. Search for existing utilities/helpers that could replace newly written code — common locations: utility directories, shared modules, files adjacent to the changed ones. (Per Step 2.7 search discipline, attach search-proof when flagging a gap.)
 2. Flag any new function that duplicates existing functionality. Suggest the existing one.
 3. Flag inline logic that could use an existing utility — hand-rolled string manipulation, manual path handling, custom environment checks, ad-hoc type guards.
+4. 找第二份：從新程式挑一段少見的字面片段（錯誤訊息、格式字串、少見的預設值或常數）用 grep 搜整個 repo。語意搜尋容易漏掉「早就有人寫過一份」的複製品，字面比對反而準。
+5. 先看底下那層：新寫 helper、wrapper 或 hook 前，先讀它擴充的元件或模組的完整 API，以及底下的框架或函式庫（例如 react-query、NestJS、Mongoose）是否已內建同樣能力。「為什麼不用現成的」多半出自被改檔案的隔壁，或它底下的框架。
+6. 重用的成本比這個 PR 還大時（得先做一個比 PR 本身更大的重構才能共用），不要求這次改；寫成「這次先不用，但別再加第三份」並附既有那份的位置，嚴重度不高於 Nice to Have。

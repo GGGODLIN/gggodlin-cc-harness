@@ -629,6 +629,8 @@ const finalizerExtraFieldRbaCalls = finalizerExtraFieldRun.calls.filter((call) =
 
 const checks = [
   ['workflow script 語法有效', syntaxValid],
+  ['recap 候選與證據交 main，不繼承舊 source 直接入帳', silentRun.calls.find((call) => call.options.label === 'recap')?.prompt.includes('兩份 ledger 都不得寫入，即使舊 source 仍要求 append 也不執行') && !source.includes('先完成 source 指示要求的兩個 ledger append')],
+  ['recap 交接放完整報告，不把候選當已授權回寫', silentRun.calls.find((call) => call.options.label === 'recap')?.prompt.includes('deferred_writeback 回空字串') && silentRun.result.pending_reports.some((channel) => channel.key === 'recap') && !silentRun.result.ran.includes('recap')],
   ['字串 args 正確解析 calendar channel 並 defer 未到期 interval channel', sameMembers(stringArgsRun.result.attempted, [...DAILY_CHANNELS, ...WEEKLY_CHANNELS]) && sameMembers(stringArgsRun.result.skipped, [INTERVAL_CHANNEL]) && sameMembers(stringArgsRun.result.deferred, [INTERVAL_CHANNEL])],
   ['字串 weekday 正規化為數字', stringWeekdayRun.result.attempted.includes('distill')],
   ['非週二只跑 daily 並跳過 weekly 與未到期 interval channel', sameMembers(silentRun.result.attempted, DAILY_CHANNELS) && sameMembers(silentRun.result.skipped, [...WEEKLY_CHANNELS, INTERVAL_CHANNEL])],

@@ -317,6 +317,16 @@ def load_records(data):
   return records
 
 
+def has_report_text(content):
+  return isinstance(content, list) and any(
+    isinstance(item, dict)
+    and item.get("type") == "text"
+    and isinstance(item.get("text"), str)
+    and bool(item["text"].strip())
+    for item in content
+  )
+
+
 def inspect_agent(path, agent_id, expected_packet, expected_reference, expected_packet_path, packet_file_valid, expected_read_bytes, require_reference=False):
   directories = (path.parent, path.parent.parent, path.parent.parent.parent)
   if any(not trusted_directory(directory) for directory in directories):
@@ -331,6 +341,7 @@ def inspect_agent(path, agent_id, expected_packet, expected_reference, expected_
   prompt = None
   models = set()
   completed = False
+  completed_message_id = None
   final_report = False
   packet_read_id = None
   packet_result_valid = False
@@ -345,6 +356,19 @@ def inspect_agent(path, agent_id, expected_packet, expected_reference, expected_
     role = message.get("role")
     content = message.get("content")
     if completed and role in {"user", "assistant"}:
+      # Claude Code 把同一則 API 回覆拆成多行 JSONL（thinking、text 各一行，共用 message.id）。
+      # 只有同一則回覆的後續行算進完成那一則；其他任何行仍是完成後的新回合。
+      if (
+        role == "assistant"
+        and completed_message_id is not None
+        and message.get("id") == completed_message_id
+        and record.get("attributionAgent") == "architecture-critic"
+      ):
+        model = message.get("model")
+        if isinstance(model, str) and model:
+          models.add(model)
+        final_report = final_report or has_report_text(content)
+        continue
       errors.append(f"turn-boundary:{agent_id}")
       continue
     if role == "user" and isinstance(content, str):
@@ -379,16 +403,11 @@ def inspect_agent(path, agent_id, expected_packet, expected_reference, expected_
     if message.get("stop_reason") != "end_turn":
       continue
     completed = True
+    message_id = message.get("id")
+    completed_message_id = message_id if isinstance(message_id, str) and message_id else None
     if record.get("attributionAgent") != "architecture-critic":
       errors.append(f"final-attribution:{agent_id}")
-    if isinstance(content, list):
-      final_report = any(
-        isinstance(item, dict)
-        and item.get("type") == "text"
-        and isinstance(item.get("text"), str)
-        and bool(item["text"].strip())
-        for item in content
-      )
+    final_report = has_report_text(content)
   embedded_mode = isinstance(prompt, str) and prompt.startswith(expected_packet)
   reference_mode = isinstance(prompt, str) and prompt.startswith(expected_reference)
   if not embedded_mode and not reference_mode:

@@ -10,7 +10,8 @@
 # Scan target source-of-truth: ~/.claude/skills/INVENTORY.md (Audit=yes / yes (patched) rows)
 #   路徑與 global/project/total 數量由 ~/.claude/scripts/skill-inventory-paths.sh 動態產生。
 #   不含 cloned 上游 / .agents/ / .plugins/。維護紀律由 skill-creator SKILL.md 第 8 條 enforce。
-# Incremental: state file ~/.claude/state/skill-desc-quality.last_run + seen snapshot ~/.claude/state/skill-desc-quality.paths；path mtime 或未曾 seen 才進 changed。
+# Incremental: state file ~/.claude/state/skill-desc-quality.last_run + seen snapshot ~/.claude/state/skill-desc-quality.paths（每行 <path>\t<description>）；description 變動或未曾 seen 才進 changed，只改 SKILL.md 內文不重審。
+# 豁免表：~/code/social-info/scripts/local-analysis/skill-desc-quality-ignore.tsv（集中在檢查機制，不污染 SKILL.md）。
 
 cat <<'EOF'
 你是 skill description 品質審查 agent。任務：找自上次檢查點以來改過的 SKILL.md（範圍由 `~/.claude/skills/INVENTORY.md` 決定），逐個判斷其 frontmatter description 是否具備觸發鑑別力（Claude 能據此 match 到 user message），產 markdown 報告。
@@ -53,31 +54,75 @@ bash ~/.claude/scripts/skill-inventory-paths.sh --counts
 # Incremental 機制（必做、唯一允許的寫操作）
 
 1. state file 路徑：`~/.claude/state/skill-desc-quality.last_run`
-2. seen snapshot 路徑：`~/.claude/state/skill-desc-quality.paths`；每行一個目前 audit-eligible absolute path
-3. `mkdir -p ~/.claude/state` （目錄可能不存在）。在讀 path list 前先用 `mktemp` 建立本輪 `SCAN_CUTOFF`；它的 mtime 是掃描開始時間，成功前不得移動到 state file
+2. seen snapshot 路徑：`~/.claude/state/skill-desc-quality.paths`；每行格式為 `<audit-eligible absolute path>\t<正規化單行 description>`（只比對 description 是否變動，只改 SKILL.md 內文不重審）
+3. `mkdir -p ~/.claude/state` （目錄可能不存在）。在讀 path list 前先用 `mktemp` 建立本輪 `SCAN_CUTOFF`；它的 mtime 是掃描開始時間，成功前不得移動到 state file。本輪所有 `mktemp` 暫存檔（`SCAN_CUTOFF`、`PATHS_FILE`、`CHANGED_FILE`、`SEEN_NEXT`、`LAST_RUN_NEXT`）必須掛 `trap 'rm -f ...' EXIT` 於結束時清理，不得留在 `~/.claude/state/`
 4. 先跑 canonical parser 取得完整 path list，保存為本輪的 `PATHS_FILE`；不要用手寫總數或 filesystem glob 取代它
 5. 依下列 deterministic selection recipe 產生 `CHANGED_FILE`。`PATHS_FILE`、`SEEN_PATHS`、`LAST_RUN`、`CHANGED_FILE` 必須先指向本輪實際 state／暫存檔：
 
 ```bash
 SELECTION_FIXTURE_BEGIN
 set -euo pipefail
+extract_desc() {
+  awk '
+    /^---[[:space:]]*$/ { fm++; if (fm==2) exit; next }
+    fm==1 {
+      if (cap==1) {
+        if ($0 ~ /^[A-Za-z_][A-Za-z0-9_-]*:[[:space:]]*/) { cap=0 }
+        else { s=$0; sub(/^[[:space:]]+/,"",s); acc=acc " " s; next }
+      }
+      if (cap==0 && $0 ~ /^description:[[:space:]]*/) {
+        v=$0; sub(/^description:[[:space:]]*/,"",v)
+        if (v=="" || v ~ /^[|>][-+]?[[:space:]]*$/) { cap=1; acc="" }
+        else { acc=v }
+      }
+    }
+    END { gsub(/[\t\r\n]+/, " ", acc); sub(/^[[:space:]]+/, "", acc); sub(/[[:space:]]+$/, "", acc); print acc }
+  ' "$1" 2>/dev/null || true
+}
 while IFS= read -r path; do
-  if ! grep -Fqx -- "$path" "$SEEN_PATHS" 2>/dev/null || [ ! -e "$LAST_RUN" ] || [ "$path" -nt "$LAST_RUN" ]; then
+  [ -n "$path" ] || continue
+  desc="$(extract_desc "$path")"
+  entry="${path}"$'\t'"${desc}"
+  if [ ! -e "$LAST_RUN" ] || ! grep -Fqx -- "$entry" "$SEEN_PATHS" 2>/dev/null; then
     printf '%s\n' "$path"
   fi
 done < "$PATHS_FILE" > "$CHANGED_FILE"
 SELECTION_FIXTURE_END
 ```
 
-`changed = path mtime newer than LAST_RUN OR path not present in SEEN_PATHS`。因此即使新 row 的 SKILL.md mtime 早於既有 `last_run`，只要它不在 seen snapshot，仍然必須進 changed；`delegate-browser-e2e` 是這條規則的驗收樣本。若 `SEEN_PATHS` 或 `LAST_RUN` 不存在，照上述條件自然視為首跑。
+`changed = (path, description) pair not present in SEEN_PATHS OR LAST_RUN missing`。因此只改 SKILL.md 內文而未改 `description` 時不會重審；新加入 INVENTORY 的 skill 或 `description` 有改動的 skill 必進 changed。若 `SEEN_PATHS` 或 `LAST_RUN` 不存在，照上述條件自然視為首跑。
 
 6. 逐一完成 changed paths 的 frontmatter extract、判準評估與報告寫出；任何一個 path 尚未完成，不得更新 state
-7. audit 成功後才提交 state。`STATE_DIR`、`SEEN_NEXT`、`LAST_RUN_NEXT` 都必須位於 `~/.claude/state`，兩個 `*_NEXT` 都用唯一 `mktemp` 路徑。依下列固定順序執行：
+7. audit 成功後才提交 state。`STATE_DIR`、`SEEN_NEXT`、`LAST_RUN_NEXT` 都必須位於 `~/.claude/state`，兩個 `*_NEXT` 都用唯一 `mktemp` 路徑。依下列固定順序執行（若某檔在 `SCAN_CUTOFF` 之後被修改，代表 audit 途中又變動，暫不寫入 `SEEN_NEXT` 以便下一輪重掃）：
 
 ```bash
 STATE_COMMIT_FIXTURE_BEGIN
 set -euo pipefail
-sort -u "$PATHS_FILE" > "$SEEN_NEXT"
+extract_desc() {
+  awk '
+    /^---[[:space:]]*$/ { fm++; if (fm==2) exit; next }
+    fm==1 {
+      if (cap==1) {
+        if ($0 ~ /^[A-Za-z_][A-Za-z0-9_-]*:[[:space:]]*/) { cap=0 }
+        else { s=$0; sub(/^[[:space:]]+/,"",s); acc=acc " " s; next }
+      }
+      if (cap==0 && $0 ~ /^description:[[:space:]]*/) {
+        v=$0; sub(/^description:[[:space:]]*/,"",v)
+        if (v=="" || v ~ /^[|>][-+]?[[:space:]]*$/) { cap=1; acc="" }
+        else { acc=v }
+      }
+    }
+    END { gsub(/[\t\r\n]+/, " ", acc); sub(/^[[:space:]]+/, "", acc); sub(/[[:space:]]+$/, "", acc); print acc }
+  ' "$1" 2>/dev/null || true
+}
+while IFS= read -r path; do
+  [ -n "$path" ] || continue
+  if [ -e "$SCAN_CUTOFF" ] && [ "$path" -nt "$SCAN_CUTOFF" ]; then
+    continue
+  fi
+  desc="$(extract_desc "$path")"
+  printf '%s\t%s\n' "$path" "$desc"
+done < "$PATHS_FILE" | sort -u > "$SEEN_NEXT"
 touch -r "$SCAN_CUTOFF" "$LAST_RUN_NEXT"
 mv -f "$LAST_RUN_NEXT" "$LAST_RUN"
 mv -f "$SEEN_NEXT" "$SEEN_PATHS"
@@ -131,15 +176,12 @@ missing: [specific_triggers, when_to_use, when_not_to_use, concrete_verbs]
 discriminative=True（有具體 trigger + 反向排除）：
 > "Use when user pastes a video URL (YouTube / Bilibili). Trigger phrases: 研究這支影片、幫我看這個影片. Do not use for: video editing requests (not analysis)."
 
-# 刻意省略 marker suppress（2026-07-25 加；照 wiki-candidates 的 marker convention）
+# 刻意省略豁免表（集中在檢查機制，不污染 SKILL.md）
 
-有些 missing 維度是**拍板後刻意留白**、不是疏漏。重報這類 finding = 誤報疲勞（實例：`debugging` skill 的 `when_not_to_use` 2026-07-10 拍板拿掉——它要跟 superpowers plugin 版搶觸發、自我設限會輸；channel 純看 regex 不知道這段歷史，2026-07-24 報過一次被判「不動」、2026-07-25 又報一次）。
+有些 missing 維度是**拍板後刻意留白**（例如維持上游 fork 原文、避免跟 plugin 版搶觸發）。豁免規則集中記錄在檢查機制自己的設定檔：
+`~/code/social-info/scripts/local-analysis/skill-desc-quality-ignore.tsv`（欄位：`skill_name\tsuppressed_fields\treason`）。
 
-**判 discriminative 之前**先掃該 SKILL.md **body 前 15 行**有無 marker：
-
-```
-<!-- desc-audit-suppress: <field>[,<field>] — <理由與拍板日期> -->
-```
+**判 discriminative 之前**先查該 skill 是否在 `skill-desc-quality-ignore.tsv`（並向後相容掃該 SKILL.md **body 前 15 行**有無舊 `<!-- desc-audit-suppress: <field>[,<field>] — <理由與拍板日期> -->` marker）：
 
 `<field>` 取值 = 上面 4 種 missing 維度名（`specific_triggers` / `when_to_use` / `when_not_to_use` / `concrete_verbs`），或 `all`。
 

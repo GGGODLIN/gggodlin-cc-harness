@@ -1,11 +1,21 @@
 # Survived Mutant Decision Tree
 
-每個 survived mutant 依此樹判 A/B/C——不要跳、每個都要有分類。
+每個 survived mutant 依此樹判 A/B/C/D——不要跳、每個都要有分類。
 
 ## 決策樹
 
 ```
-Survived mutant → 問三個問題：
+Survived mutant → 依序問：
+
+Q0.（只對 NoCoverage）還有任何路徑會執行到這段嗎？
+    （查呼叫端；進這個分支的旗標或參數有沒有地方設成會進來的值）
+    │
+    ├─ 沒有 → D. 刪掉這段死碼，不補測試
+    │       防禦性程式碼（retry／timeout／guard／旗標分支）先讀
+    │       ~/.claude/references/verification-recipes-and-probes.md「程式碼歷史動機追查」，
+    │       仍承擔契約就改走 Q1；超出本次範圍或擁有者不明 → 列 D 類建議交使用者
+    │
+    └─ 有／不確定 → Q1
 
 Q1. 這個 mutant 若被線上使用者觸發，會不會產生錯誤的可觀察行為？
     （錯的資料、錯的 UI、錯的 API 回應、錯的計算結果）
@@ -70,7 +80,7 @@ Q3. 這個 mutant 對應的 code path 是 I/O / 防禦性 fallback / catch block
 
 ## 對 rerun 的期待
 
-補完 A/B/C 決策 rerun stryker：
+補完 A/B/C/D 決策 rerun stryker：
 
 - A 修完 → mutation score 上升（killed 增加）
 - B 加完 → mutation score 上升（該 mutant 從 stats 移除）

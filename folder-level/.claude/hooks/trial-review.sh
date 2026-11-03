@@ -13,10 +13,12 @@ EXPECTED="$HOME/Desktop/projects"
 [ "$CWD" != "$EXPECTED" ] && exit 0
 
 MARKER="/tmp/trial-review-session-${SESSION_ID}"
-[ -f "$MARKER" ] && exit 0
-
-# 2026-08-06 fix: /tmp 是 symlink、BSD find 不跟隨起始點 → 補尾斜線才真的會 GC（review finding 9）
-find /tmp/ -maxdepth 1 -name "trial-review-session-*" -type f -mtime +1 -delete 2>/dev/null
+QUERY_ONLY="${TRIAL_REVIEW_QUERY_ONLY:-0}"
+if [ "$QUERY_ONLY" != "1" ]; then
+  [ -f "$MARKER" ] && exit 0
+  # 2026-08-06 fix: /tmp 是 symlink、BSD find 不跟隨起始點 → 補尾斜線才真的會 GC（review finding 9）
+  find /tmp/ -maxdepth 1 -name "trial-review-session-*" -type f -mtime +1 -delete 2>/dev/null
+fi
 
 TRIALS_FILE="$HOME/Desktop/projects/.claude/trials/active.md"
 # 2026-08-06 fix: active.md 不存在只跳過時間制段、不再整支 exit——事件制 sweep 與 trial ledger 是獨立機制（review finding 4）
@@ -178,7 +180,9 @@ while IFS= read -r line; do
 done < "$TRIALS_FILE"
 fi
 
-touch "$MARKER"
+if [ "$QUERY_ONLY" != "1" ]; then
+  touch "$MARKER"
+fi
 
 # 2026-07-03 add: active.md 超 50KB 時的低急迫提示（不燒 context、只影響維護時 Read 一口氣讀不完）
 SIZE_WARN=""
@@ -268,8 +272,9 @@ print(sum(1 for h in pending if h not in known))
   [[ "$UNNOTIFIED" =~ ^[0-9]+$ ]] || UNNOTIFIED="$CNT"
   FRICTION_REPORT=0
   [ "$UNNOTIFIED" -ge "$FRICTION_THRESHOLD" ] && FRICTION_REPORT=1
-  if [ "$FRICTION_REPORT" -eq 1 ]; then
+  if [ "$FRICTION_REPORT" -eq 1 ] && [ "$QUERY_ONLY" != "1" ]; then
     # 報了就把當前待折段全部項目記為已通知（提醒一行指向整個檔，人進 review 時看得到全部）
+    # TRIAL_REVIEW_QUERY_ONLY=1 時（如預檢或 --dry-run）跳過寫入，避免未開 TUI 就吃掉通知水位
     FRICTION_FILE="$f" FRICTION_NOTIFIED="$FRICTION_STATE_FILE" FRICTION_DIR="$FRICTION_STATE_DIR" python3 -c '
 import hashlib, os, re
 path = os.environ["FRICTION_FILE"]

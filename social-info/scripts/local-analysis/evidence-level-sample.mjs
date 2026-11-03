@@ -4,6 +4,7 @@ import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import process from 'node:process'
+import { StringDecoder } from 'node:string_decoder'
 
 const parseArgs = (argv) => {
   const values = {}
@@ -293,6 +294,36 @@ const listJsonlFiles = (root) => {
     .sort()
 }
 
+const JSONL_READ_CHUNK_BYTES = 1024 * 1024
+
+// Session JSONL files with screenshot tool results can exceed V8's 512MB max string length,
+// so readFileSync(file, 'utf8') throws ERR_STRING_TOO_LONG. Streaming UTF-8 chunks keeps memory bounded.
+const forEachJsonlLine = (file, onLine) => {
+  const fd = fs.openSync(file, 'r')
+  const buffer = Buffer.allocUnsafe(JSONL_READ_CHUNK_BYTES)
+  const decoder = new StringDecoder('utf8')
+  let remainder = ''
+  let rowIndex = 0
+  try {
+    for (;;) {
+      const bytesRead = fs.readSync(fd, buffer, 0, buffer.length, null)
+      if (bytesRead === 0) break
+      remainder += decoder.write(buffer.subarray(0, bytesRead))
+      let newlineIndex = remainder.indexOf('\n')
+      while (newlineIndex !== -1) {
+        onLine(remainder.slice(0, newlineIndex), rowIndex)
+        rowIndex += 1
+        remainder = remainder.slice(newlineIndex + 1)
+        newlineIndex = remainder.indexOf('\n')
+      }
+    }
+    remainder += decoder.end()
+    onLine(remainder, rowIndex)
+  } finally {
+    fs.closeSync(fd)
+  }
+}
+
 const collectEligible = (root, date) => {
   const currentDate = parseDate(date)
   const start = `${formatDate(addDays(currentDate, -6))}T00:00:00.000Z`
@@ -300,8 +331,7 @@ const collectEligible = (root, date) => {
   const eligible = []
 
   for (const file of listJsonlFiles(root)) {
-    const rows = fs.readFileSync(file, 'utf8').split('\n')
-    rows.forEach((line, rowIndex) => {
+    forEachJsonlLine(file, (line, rowIndex) => {
       if (line.trim() === '') return
       let row
       try {

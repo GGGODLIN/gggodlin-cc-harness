@@ -74,8 +74,9 @@ Done when: each of the four starting rows plus any added rows has an answer or a
 Put the exits to the user and let them choose; picking for them re-introduces failure mode 2 at the last step.
 
 - **(a) Stop here.** The discussion was the deliverable. A legitimate, common ending — not a failure to reach implementation.
-- **(b) Hand off to the local chain** — continue with `to-spec` → `to-tickets` → `implement`. The user chooses whether to continue at the moment of handoff; this skill does not start implementation.
+- **(b) Hand off to the local chain** — continue with `to-spec` → `to-tickets` → `implement` (or run `/review-brainstorm` first when the user wants the 6-seat isolated zero-context shootdown on the 2–3 sentence hypothesis before writing a full spec). The user chooses whether to continue at the moment of handoff; this skill does not start implementation.
 - **(c) Open a ticket to upgrade into an artifact** — a research ticket, or a prototype built to be thrown away. Propose this when the contest between the last framings rests on a premise nobody can resolve by thinking.
+- **(d) Run `/review-brainstorm` (6-seat early shootdown)** — invoke `Skill(review-brainstorm)` to attack the anchored 2–3 sentence hypothesis across 6 isolated zero-context subagents (YAGNI/reuse, cost/quota, UX/ergonomics, migration/rollback, observability/3AM debuggability, long-term coupling) before spending time on `to-spec`.
 
 **Residue lands whichever exit was taken.** Landing follows topic ownership:
 

@@ -76,6 +76,17 @@ IF can't easily verify:
 
 IF conflicts with your human partner's prior decisions:
   Stop and discuss with your human partner first
+
+IF the finding is correct and does not conflict:
+  Ask whether it is worth fixing. Before deciding, read
+  ~/.claude/references/final-gate-materiality.md
+  IF it matches a criterion (M1-M6) you can cite with a one-line reason,
+  and hits no guardrail (G1-G4):
+    Do not implement it; record it as a known limitation with the criterion and reason
+    - implement closeout: add it to the closeout's not-done list
+    - anywhere else: list it in your reply
+  IF this is a re-review after a correction round:
+    Apply M6 before adding more behavior code
 ```
 
 **your human partner's rule:** "External feedback - be skeptical, but check carefully"

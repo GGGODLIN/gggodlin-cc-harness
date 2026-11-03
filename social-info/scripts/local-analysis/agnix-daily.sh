@@ -88,6 +88,8 @@ allowed_diagnostics = {
     ("error", "agents/task-verifier.md", "CC-AG-005", "Referenced skill 'review-method' not found at .claude/skills/review-method/SKILL.md"),
     ("error", "agents/typescript-reviewer.md", "CC-AG-005", "Referenced skill 'review-method' not found at .claude/skills/review-method/SKILL.md"),
     ("error", "agents/upstream-pr-reviewer.md", "CC-AG-005", "Referenced skill 'review-method' not found at .claude/skills/review-method/SKILL.md"),
+    # AS-013：agnix 0.37.5 的 [[overrides]] 對 AS-013 不生效；unslop 為上游 heydamir/unslop 釘版副本、references/refs/story-dashboard-frames.webp 實存，用 exact allowlist 保留其他 skill 的 AS-013 檢查（exact allowlist）
+    ("warning", "skills/unslop/SKILL.md", "AS-013", "File reference 'references/refs/story-dashboard-frames.webp' is deeper than one level"),
 }
 with open(sys.argv[2], "w") as suppressed:
     for level, file, rule, message in sorted(allowed_diagnostics):

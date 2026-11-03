@@ -3,10 +3,12 @@ name: grill-me
 description: 'Interview the user relentlessly about a plan or design until reaching shared understanding, resolving each branch of the decision tree. Use when user wants to stress-test a plan, get grilled on their design, or mentions "grill me"; propose it proactively when matt-pipeline pre-spec requirements stay fuzzy (deep decision tree, hedgy answers; to-spec step 0 routes here). Do not use for: spec/plan already confirmed and in execution (switch to a fresh session instead), one-off throwaway scripts, or one-shot adversarial review without interaction (use /review-spec).'
 upstream: mattpocock/skills
 upstream-path: skills/productivity/grilling/SKILL.md
-upstream-pinned: 6654f6b
+upstream-pinned: 7739eaed7f8f3915437a8def198a6d0d7206dbc7
 ---
 
 <!-- 本檔在契約測試底下：bash ~/.claude/commands/tests/memory-audit-contract.test.sh -->
+
+# Grill Me
 
 Interview me relentlessly until we reach a shared understanding. Map this as a **design tree**: every decision branches into the decisions that hang off it.
 
@@ -28,7 +30,7 @@ Format a round like so:
 
 Each round I answer reshapes the tree — settled decisions push the frontier outward and unblock questions that depended on them. Recompute the frontier and ask the next round. A question whose answer depends on another question still open in this round belongs to a _later_ round, not this one.
 
-Finding _facts_ is your job, never mine. When a frontier question needs a fact from the environment (filesystem, tools, etc.), dispatch a sub-agent to find it — don't ask me for anything you could look up yourself. Don't block on it: a running exploration is an unsettled prerequisite, so only the questions downstream of it wait for the sub-agent to report — ask the rest of the frontier now. When you dispatch a lookup, name in the same round which pending questions it blocks — a question you can't classify against a running lookup belongs to a later round. The _decisions_ are mine — put each one to me and wait for my answer.
+Finding _facts_ is your job, never mine. When a frontier question needs a fact from the environment (filesystem, tools, etc.), dispatch a sub-agent with a fresh context window to find it — don't ask me for anything you could look up yourself. Don't block on it: a running exploration is an unsettled prerequisite, so only the questions downstream of it wait for the sub-agent to report — ask the rest of the frontier now. When you dispatch a lookup, name in the same round which pending questions it blocks — a question you can't classify against a running lookup belongs to a later round. The _decisions_ are mine — put each one to me and wait for my answer.
 
 If a decision belongs to a third party (such as a PM, designer, or coworker), propose `to-questionnaire`; wait for my confirmation before drafting it, and never send it on my behalf.
 
@@ -46,7 +48,7 @@ Product-layer lens (2026-07-11, condensed from gstack /office-hours forcing ques
 
 The final restate covers six fields: Outcome / User / Why now / Success / Constraint / Out of scope. "Out of scope" is where scope creep hides — its absence means the boundary was never actually decided.
 
-Do not enact the plan until I confirm we have reached a shared understanding.
+Do not enact the plan until I confirm we have reached a shared understanding. Once confirmed, if the next step is writing a spec (`to-spec`) and the design involves non-trivial architectural trade-offs, offer the option to run `/review-brainstorm` (6-seat isolated zero-context shootdown) before `to-spec`.
 
 ## 踩過的坑
 

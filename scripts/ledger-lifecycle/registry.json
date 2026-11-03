@@ -130,28 +130,6 @@
       "owner": "skill authoring"
     },
     {
-      "path": "~/Desktop/projects/collie-example-owner/docs/owner/retro/checkpoint.md",
-      "kind": "state",
-      "threshold": [{"metric": "size", "unit": "KB", "operator": ">", "value": 40}],
-      "action": "提醒將已停止追加的 session 水位移到最近 run 的來源清單，保留活的水位；不自動修改",
-      "owner": "collie-retro"
-    },
-    {
-      "path": "~/Desktop/projects/collie-example-owner/docs/owner/retro/LESSONS.md",
-      "kind": "state",
-      "threshold": [{"metric": "size", "unit": "KB", "operator": ">", "value": 40}],
-      "action": "提醒將已處置且低頻的教訓下放到歷史 run；保留穩定 ID 與來源，不自動刪除",
-      "owner": "collie-retro"
-    },
-    {
-      "path": "~/Desktop/projects/collie-example-owner/docs/owner/retro/runs/**",
-      "kind": "pure-log"
-    },
-    {
-      "path": "~/Desktop/projects/collie-example-owner/docs/owner/retro/baseline/**",
-      "kind": "pure-log"
-    },
-    {
       "path": "~/Desktop/projects/example-owner-blog/docs/owner/blog-mechanisms.md",
       "kind": "state",
       "threshold": [
@@ -395,6 +373,24 @@
     {
       "path": "~/.claude/pr-review-reports/**",
       "kind": "pure-log"
+    },
+    {
+      "path": "~/code/social-info/reports/local-analysis/retro-workflow/**",
+      "kind": "pure-log",
+      "owner": "retro-workflow"
+    },
+    {
+      "path": "~/code/social-info/reports/local-analysis/retro-accumulation/records.jsonl",
+      "kind": "append",
+      "threshold": [{"metric": "main_size", "unit": "KB", "operator": ">", "value": 256}],
+      "action": "先用 retro-store list 讀問題投影，再按穩定ID取原件；不整讀帳本、不自動刪除或改寫歷史",
+      "retirement": "保留事件、決策與觀察原件；拆分或歸檔另由使用者拍板",
+      "owner": "retro-workflow／retro-store"
+    },
+    {
+      "path": "~/code/social-info/reports/local-analysis/retro-accumulation/imports/**",
+      "kind": "pure-log",
+      "owner": "retro-workflow／retro-store"
     },
     {
       "path": "~/Desktop/projects/.claude/trials/**/snapshot/before/dirs",

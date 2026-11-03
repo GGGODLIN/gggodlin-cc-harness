@@ -110,17 +110,19 @@ repo 已裝好 Stryker → `npx stryker run` 就夠。**沒裝 → 用「零安�
 
 **Completion criterion**：stryker 跑完、產出 HTML report 在 `reports/mutation/` 底下、terminal 看到 score 表格。
 
-### Step 4. 對每個 survived mutant 走三選一決策
+### Step 4. 對每個 survived mutant 走四選一決策
 
 不要無腦補 test 追 100%。每個 survived 依 `references/survived-decision-tree.md` 判：
+
+- **D. 確認不可達就刪掉（死碼）**：狀態是 NoCoverage 時先判這一類，再考慮 A。用 `command grep -rn` 查這段的呼叫端，以及進入這個分支的旗標或參數有沒有任何地方會設成進來的值；查不到任何會進來的路徑，就刪掉這段程式碼，不替它補測試。刪的是防禦性程式碼（retry、timeout、guard、旗標分支）時，先讀 `~/.claude/references/verification-recipes-and-probes.md` 的「程式碼歷史動機追查」；查到它仍在保證某個契約就回到 A／B／C。刪除超出本次範圍，或公司 repo 的擁有者不明時，列成 D 類建議交使用者決定，不自行刪
 
 - **A. 寫新 test 或補 assertion kill 它**（大部分情況）
 - **B. 判定為等價 mutant**：repo 有裝 Stryker 就在原始碼加 `// Stryker disable next-line <MutatorName>` comment；repo 沒裝 Stryker（走 npx 零安裝路徑）或 repo 慣例不收這種 comment 時，把 mutant 位置與等價理由寫進票檔或活規格的 mutation 段，原始碼不加註。理由：Stryker 不在 package.json 的 repo 裡，那行 comment 對團隊是死字，reviewer 讀不到它的用途
 - **C. 判定為合法 NoCoverage**（防禦性寫法、fallback branch 難觸發），理由落點同 B
 
-若對某個 mutant 三選一難決 → 讀 `references/survived-patterns.md` 找對應 pattern。加 disable comment 前讀 `references/disable-syntax.md`——位置限制多、放錯 silently 失效。
+若對某個 mutant 四選一難決 → 讀 `references/survived-patterns.md` 找對應 pattern。加 disable comment 前讀 `references/disable-syntax.md`——位置限制多、放錯 silently 失效。
 
-**Completion criterion**：**每個** survived mutant 都有明確歸類 A/B/C（不要跳 mutant）。歸 B/C 的都有一行原因，落在原始碼 comment 或票檔／活規格其中一處。
+**Completion criterion**：**每個** survived mutant 都有明確歸類 A/B/C/D（不要跳 mutant）。歸 B/C 的都有一行原因，落在原始碼 comment 或票檔／活規格其中一處；歸 D 的寫明查過哪些呼叫端，以及刪了哪段或交給使用者的建議。
 
 ### Step 5. Rerun 驗證
 
@@ -154,17 +156,20 @@ Audit mutation-testing skill 執行結果
 
 Skill 執行資料：
 - Baseline test 檔案跟數量：[填]
+- Mutate 範圍（conf 的 mutate array 或 CLI --mutate）：[填]
 - Stryker mutation score before/after：[填]
-- Survived mutant 處理清單：[列每個 mutant → A/B/C + 原因]
+- Survived mutant 處理清單：[列每個 mutant → A/B/C/D + 原因]
+- A 類新增測試 diff 原文：[貼 git diff；無 A 類填「無 A 類」]
+- B/C 類理由落點原文：[貼原始碼 disable comment 或票檔／活規格／收據段落原文；無 B/C 類填「無 B/C 類」]
 
 對以下 rubric 逐項回 PASS/FAIL + 一句證據引述：
 
 R1. Baseline 全綠：Step 1 有記錄目標 test PASS 且 count 符合預期
 R2. Mutate 範圍收斂：mutate 範圍（conf 的 array 或 CLI 的 --mutate）只列這次改動檔、沒拉整個 src/
-R3. 每個 survived 有分類：清單覆蓋所有 survived mutant、每個標 A/B/C
-R4. B/C 分類有原因：每個 B/C mutant 都有一行理由，位置是原始碼 disable comment，或（repo 未裝 Stryker／慣例不收 comment 時）票檔或活規格的 mutation 段；兩處都沒有才 FAIL
+R3. 每個 survived 有分類：清單覆蓋所有 survived mutant、每個標 A/B/C/D
+R4. B/C 分類有原因與落點原文：每個 B/C mutant 都有一行理由，且上方「B/C 類理由落點原文」已直接貼出原始碼 disable comment 或（repo 未裝 Stryker／慣例不收 comment 時）票檔／活規格／收據中的實際段落原文；僅在清單自稱已寫入、只填路徑或寫「略」而未貼出落點原文（且未宣告 AUDIT_INPUT_MODE: FILE_SNAPSHOT）一律判 FAIL
 R5. Rerun 有實跑：Step 5 有 rerun stryker、score 有變化或明確理由不變
-R6. 沒偷分數：assertion 補在 test、等價判定走 B 的兩條落點之一，沒用 test.skip / mock 掩蓋
+R6. 沒偷分數且附測試 diff 原文：A 類補測已在上方「A 類新增測試 diff 原文」貼出實際測試 diff，確認 assertion 補在 test、沒用 test.skip / mock 掩蓋，且等價判定走 R4 的合法落點；有 A 類卻只填路徑、寫「略」或未貼出測試 diff 原文（且未宣告 AUDIT_INPUT_MODE: FILE_SNAPSHOT）一律判 FAIL
 
 無法確認 = FAIL（偏置嚴審）。最後一行輸出 VERDICT: PASS | FAIL
 ```
@@ -199,6 +204,6 @@ R6. 沒偷分數：assertion 補在 test、等價判定走 B 的兩條落點之�
 ## References
 
 - `references/survived-patterns.md` — 6 大 survived pattern 詳細分析 + code example + 修法
-- `references/survived-decision-tree.md` — Survived mutant A/B/C 判定流程
+- `references/survived-decision-tree.md` — Survived mutant A/B/C/D 判定流程
 - `references/changed-files-workflow.md` — 只跑 git-changed 檔的變體工作流
 - `references/disable-syntax.md` — `// Stryker disable` comment 完整規則跟位置限制

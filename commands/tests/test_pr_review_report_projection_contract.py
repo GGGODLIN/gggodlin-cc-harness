@@ -109,7 +109,7 @@ class PrReviewReportProjectionContractTest(unittest.TestCase):
     agent = (Path(__file__).resolve().parents[2] / "agents/spec-compliance-reviewer.md").read_text()
     self.assertNotIn("這次審查範圍", agent)
 
-  def test_late_replies_and_unselected_external_seats_are_disclosed_in_the_scope_section(self):
+  def test_late_replies_and_unselected_seats_are_disclosed_in_the_scope_section(self):
     scope = self.report_structure[self.report_structure.index("## 這次審查範圍"):]
     self.assertIn("派出後才到的回覆", scope)
     self.assertIn("已派出的席位照常完成", scope)
@@ -145,7 +145,8 @@ class PrReviewReportProjectionContractTest(unittest.TestCase):
       with self.subTest(marker=marker):
         self.assertIn(marker, checklist)
     self.assertIn("**Review selection**:", self.report_structure)
-    self.assertIn("Claude 側席位自動選入", self.report_structure)
+    self.assertIn("selected set=<叫用指令或矩陣回覆明確選定的組合>", self.report_structure)
+    self.assertNotIn("Claude 側席位自動選入", self.report_structure)
 
 
 if __name__ == "__main__":

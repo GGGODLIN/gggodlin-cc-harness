@@ -76,6 +76,76 @@ if [ "$BACKEND" = herdr ]; then
     log "notify rc=$? result=$(printf '%s' "$notification" | head -c 200)"
   fi
   exit 0
+elif [ "$BACKEND" = herdr-core ]; then
+  HC_BIN="${HC_BIN:-hc}"
+  target="${WORKER_PANE:-$WORKER}"
+  max_timeouts="${HC_WAIT_MAX_TIMEOUTS:-40}"
+  status=""
+  for ((i = 0; i < max_timeouts; i++)); do
+    result=$("$HC_BIN" wait "$target" 2>&1)
+    rc=$?
+    log "wait rc=$rc result=$(printf '%s' "$result" | head -c 300)"
+    if [ "$rc" -ne 0 ]; then
+      status=""
+      break
+    fi
+    parsed=$(printf '%s' "$result" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+if not isinstance(d, dict) or d.get("ok") is False or d.get("error"):
+  sys.exit(1)
+st = d.get("status")
+if isinstance(st, dict):
+  st = st.get("state")
+if not isinstance(st, str):
+  st = ""
+w = d.get("wait")
+if not st and isinstance(w, dict):
+  wst = w.get("status")
+  st = wst.get("state") if isinstance(wst, dict) else (wst if isinstance(wst, str) else "")
+reason = d.get("reason") or (w.get("reason") if isinstance(w, dict) else "") or ""
+if reason == "timeout" or d.get("ended") is False:
+  print("TIMEOUT")
+  sys.exit(0)
+if st in {"idle", "done", "blocked", "error"}:
+  print(st)
+elif reason in {"idle", "done", "blocked", "exited", "exit", "error"}:
+  print("exited" if reason == "exit" else reason)
+else:
+  print("")
+' 2>/dev/null) || parsed=""
+    if [ "$parsed" = "TIMEOUT" ]; then
+      continue
+    fi
+    status="$parsed"
+    break
+  done
+  if [ -z "$status" ]; then
+    log "wait did not confirm stopped status, worker unverified"
+  fi
+  main_result=$("$HC_BIN" get "$PARENT" 2>&1)
+  main_rc=$?
+  main_ok=0
+  if [ "$main_rc" -eq 0 ]; then
+    main_ok=$(printf '%s' "$main_result" | python3 -c 'import json,sys; d=json.load(sys.stdin); print("1" if isinstance(d,dict) and d.get("state")=="live" and d.get("address",sys.argv[1])==sys.argv[1] else "0")' "$PARENT" 2>/dev/null) || main_ok=0
+  fi
+  if [ "$main_ok" != 1 ]; then
+    log "未送達 main identity unverified parent=$PARENT lookup_rc=$main_rc"
+    exit 1
+  fi
+  if [ -n "$status" ]; then
+    message="[watcher] worker $WORKER stopped, status=$status, $(date +%H:%M). Read its screen and jsonl, then report."
+  else
+    message="[watcher] worker $WORKER 身分未驗證，需調查；不要認定工作已完成。請查看 watcher log。"
+  fi
+  prompt=$("$HC_BIN" send "$PARENT" "$message" 2>&1)
+  prompt_rc=$?
+  log "send rc=$prompt_rc status=$status result=$(printf '%s' "$prompt" | head -c 300)"
+  if [ "$prompt_rc" -ne 0 ]; then
+    log "未送達 hc send failed parent=$PARENT status=$status"
+    exit "$prompt_rc"
+  fi
+  exit 0
 fi
 log "unknown backend, no wake sent"
 exit 2

@@ -32,6 +32,7 @@ HELD_UNTIL_RE = re.compile(
 )
 MONTHS = {"Jan": 1, "Feb": 2, "Mar": 3, "Apr": 4, "May": 5, "Jun": 6,
           "Jul": 7, "Aug": 8, "Sep": 9, "Oct": 10, "Nov": 11, "Dec": 12}
+SAFE_HC_ID_RE = re.compile(r"^[A-Za-z0-9_/-]+$")
 
 
 def state_dir():
@@ -44,6 +45,14 @@ def log_path():
 
 def herdr_bin():
   return os.environ.get("HERDR_BIN_PATH") or "herdr"
+
+
+def hc_bin():
+  return os.environ.get("HC_BIN_PATH") or "hc"
+
+
+def herdr_app_data_dir():
+  return Path(os.environ.get("HERDR_APP_DATA_DIR") or Path.home() / ".config/herdr-app/data")
 
 
 def classify(payload):
@@ -168,11 +177,18 @@ def on_failure(payload):
   if disabled():
     log({**base, "action": "disabled"})
     return
-  pane = os.environ.get("HERDR_PANE_ID")
-  if os.environ.get("HERDR_ENV") != "1" or not pane:
-    log({**base, "action": "no_herdr"})
-    return
-  # claude -p 子程序也會繼承 HERDR_PANE_ID；不擋的話它斷線時會把字打進父 pane。
+  hc_term = os.environ.get("HC_TERMINAL_ID")
+  if hc_term:
+    if not SAFE_HC_ID_RE.match(hc_term):
+      log({**base, "action": "no_herdr"})
+      return
+    pane = f"hc:{hc_term}"
+  else:
+    pane = os.environ.get("HERDR_PANE_ID")
+    if os.environ.get("HERDR_ENV") != "1" or not pane:
+      log({**base, "action": "no_herdr"})
+      return
+  # claude -p 子程序也會繼承 HERDR_PANE_ID / HC_TERMINAL_ID；不擋的話它斷線時會把字打進父 pane。
   # 互動 session 的第一回合，hook 觸發時對話記錄常還沒落檔（讀到 None），留給 send 延遲後再判
   transcript = payload.get("transcript_path") or ""
   entrypoint = transcript_entrypoint(transcript)
@@ -199,15 +215,86 @@ def herdr_json(*args):
   return json.loads(out.stdout) if out.returncode == 0 and out.stdout.strip() else None
 
 
+def hc_json(*args):
+  out = subprocess.run([hc_bin(), *args], capture_output=True, text=True, timeout=10)
+  return json.loads(out.stdout) if out.returncode == 0 and out.stdout.strip() else None
+
+
+def _verify_hc_session_matches(term, sid):
+  if not sid:
+    return "match"
+  safe_term = term.replace("/", "_")
+  data_dir = herdr_app_data_dir()
+  matched = False
+  for sub, key in (("cc-controls", "sessionId"), ("cc-status", "session_id")):
+    path = data_dir / sub / f"{safe_term}.json"
+    if not is_regular_or_absent(path) or not path.exists():
+      continue
+    try:
+      data = json.loads(path.read_text())
+    except (OSError, ValueError):
+      continue
+    if not isinstance(data, dict):
+      continue
+    file_sid = data.get(key) or data.get("session_id") or data.get("sessionId")
+    if file_sid:
+      if file_sid != sid:
+        return "mismatch"
+      matched = True
+  return "match" if matched else "pending"
+
+
+def hc_session_state(term, info, session_id):
+  status_obj = info.get("status") or {}
+  if status_obj.get("app") != "claude-code":
+    return "mismatch"
+  return _verify_hc_session_matches(term, session_id)
+
+
+def hc_session_ok(term, info, session_id):
+  return hc_session_state(term, info, session_id) == "match"
+
+
 def send(pane, session_id, transcript, delay=None):
   time.sleep(SEND_DELAY_SECONDS if delay is None else float(delay))
+  if disabled():
+    log({"event": "send", "session": session_id, "action": "disabled", "pane": pane})
+    return 0
   entrypoint = transcript_entrypoint(transcript)
   if entrypoint != "cli":
     log({"event": "send", "session": session_id, "action": "skip_not_interactive", "entrypoint": entrypoint, "pane": pane})
     return
   deadline = time.time() + READY_POLL_SECONDS
   status = None
+  if pane.startswith("hc:"):
+    term = pane[3:]
+    sess_state = "pending"
+    while time.time() < deadline:
+      if disabled():
+        log({"event": "send", "session": session_id, "action": "disabled", "pane": pane})
+        return 0
+      info = hc_json("get", term) or {}
+      sess_state = hc_session_state(term, info, session_id)
+      if sess_state == "mismatch":
+        log({"event": "send", "session": session_id, "action": "skip_session_mismatch", "pane": pane})
+        return
+      status = (info.get("status") or {}).get("state")
+      if sess_state == "match" and status in ("idle", "done"):
+        if disabled():
+          log({"event": "send", "session": session_id, "action": "disabled", "pane": pane})
+          return 0
+        result = subprocess.run([hc_bin(), "send", term, f"{CONTINUE_TEXT}\r"], capture_output=True, text=True, timeout=15)
+        action = "sent" if result.returncode == 0 else "send_failed"
+        log({"event": "send", "session": session_id, "action": action, "pane": pane, "stderr": result.stderr[-300:]})
+        return
+      time.sleep(1)
+    action = "skip_session_mismatch" if sess_state != "match" else "skip_not_ready"
+    log({"event": "send", "session": session_id, "action": action, "status": status, "pane": pane})
+    return
   while time.time() < deadline:
+    if disabled():
+      log({"event": "send", "session": session_id, "action": "disabled", "pane": pane})
+      return 0
     info = herdr_json("agent", "get", pane) or {}
     agent = (info.get("result") or {}).get("agent") or {}
     if (agent.get("agent_session") or {}).get("value") != session_id:
@@ -215,6 +302,9 @@ def send(pane, session_id, transcript, delay=None):
       return
     status = agent.get("agent_status")
     if status in ("idle", "done"):
+      if disabled():
+        log({"event": "send", "session": session_id, "action": "disabled", "pane": pane})
+        return 0
       result = subprocess.run([herdr_bin(), "agent", "prompt", pane, CONTINUE_TEXT], capture_output=True, text=True, timeout=15)
       action = "sent" if result.returncode == 0 else "send_failed"
       log({"event": "send", "session": session_id, "action": action, "pane": pane, "stderr": result.stderr[-300:]})
@@ -223,7 +313,10 @@ def send(pane, session_id, transcript, delay=None):
   log({"event": "send", "session": session_id, "action": "skip_not_ready", "status": status, "pane": pane})
 
 
-def notify(session_id):
+def notify(session_id, pane=None):
+  if (pane and str(pane).startswith("hc:")) or os.environ.get("HC_TERMINAL_ID"):
+    log({"event": "notify", "session": session_id, "action": "skip_hc_notify"})
+    return
   result = subprocess.run(
     [herdr_bin(), "notification", "show", "API 錯誤自動接續已達上限",
      "--body", f"連續 {MAX_CONSECUTIVE} 次接續後仍斷線，請回 session 手動處理（{session_id[:8]}）",
@@ -251,7 +344,7 @@ def main(argv):
       send(argv[1], argv[2], argv[3], delay)
       return
     if argv[:1] == ["--notify"]:
-      notify(argv[1])
+      notify(argv[1], argv[2] if len(argv) > 2 else None)
       return
     payload = json.load(sys.stdin)
     if argv[:1] == ["stop"]:

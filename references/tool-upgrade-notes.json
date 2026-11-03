@@ -24,10 +24,9 @@
       "package": "chrome-devtools-mcp",
       "server": "chrome-devtools",
       "pin_files": [
-        "~/.claude.json",
-        "~/.claude-max/.claude.json"
+        "~/.claude.json"
       ],
-      "report_note": "⚠️ 釘版於 ~/.claude.json 與 ~/.claude-max/.claude.json 兩處（--experimentalStructuredContent）；升級改兩處後要驗 vendor workflow 的 new_page→evaluate_script→close_page pageId 契約",
+      "report_note": "⚠️ 保留 ~/.claude.json 的 chrome-devtools 釘版；升級前核對現役診斷 MCP 設定與 pageId 契約。一般網頁與 vendor fetcher 已走 LCU，不以舊版多環境設定或 vendor 讀頁流程作驗收。",
       "hold_until": "2026-09-15",
       "hold_reason": "使用者 2026-09-10 拍板可升 1.9.0，但 ~/.npmrc min-release-age=7 使 npx 在 09-15 前解析不到 1.9.0（1.9.0 於 09-08 發布），先釘 1.8.0 等 cooldown 過"
     }

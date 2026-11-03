@@ -381,8 +381,8 @@ class PrReviewTargetsTest(unittest.TestCase):
     self.assertEqual(small["capacity"]["decision"], "within-threshold")
     self.assertFalse(small["capacity"]["adjudication_required"])
     self.assertEqual(small["capacity"]["waiting_seats"], [])
-    self.assertTrue(small["dispatch"]["allowed"])
-    self.assertEqual(small["dispatch"]["reason"], "claude-seats-auto")
+    self.assertFalse(small["dispatch"]["allowed"])
+    self.assertEqual(small["dispatch"]["reason"], "awaiting-confirmation")
 
     bulk = self.fx.saas_pair_platform()
     bulk["github.com/acme/saas#12"]["changed_files"] = [f"src/f{index}.ts" for index in range(40)]
@@ -409,7 +409,7 @@ class PrReviewTargetsTest(unittest.TestCase):
     self.assertEqual(adjudicated["capacity"]["waiting_seats"], [])
     self.assertEqual(adjudicated["capacity"]["adjudication"]["github:github.com/acme/saas#12"],
                      "accept-incomplete")
-    self.assertEqual(adjudicated["dispatch"]["reason"], "claude-seats-auto")
+    self.assertEqual(adjudicated["dispatch"]["reason"], "awaiting-confirmation")
 
     blocked_platform = self.fx.saas_pair_platform()
     blocked_platform["github.com/acme/saas#12"] = {"status": "error", "reason": "not_found"}
@@ -441,7 +441,7 @@ class PrReviewTargetsTest(unittest.TestCase):
     )
     self.assertFalse(accepted["capacity"]["adjudication_required"])
     self.assertEqual([], accepted["capacity"]["unresolved"])
-    self.assertEqual("claude-seats-auto", accepted["dispatch"]["reason"])
+    self.assertEqual("awaiting-confirmation", accepted["dispatch"]["reason"])
 
   def test_any_target_failure_stops_whole_set_and_cancel_only_clears_this_run(self):
     selection = [{"seat": "opus/code-reviewer", "angle": "context-aware primary"}]
@@ -637,31 +637,25 @@ class PrReviewTargetsTest(unittest.TestCase):
     mutate(state)
     Path(path).write_text(json.dumps(state, ensure_ascii=False, sort_keys=True))
 
-  def test_claude_only_selection_without_capacity_gap_needs_no_confirmation(self):
+  def test_claude_only_selection_still_awaits_confirmation(self):
     selection = [
       {"seat": "opus/typescript-reviewer", "angle": "context-aware primary"},
       {"seat": "opus/security-reviewer", "angle": "security"},
       {"seat": "opus/spec-compliance-reviewer", "angle": "formal spec"},
     ]
     state = self.claude_state("run-claude-only", selection)
-    self.assertTrue(state["dispatch"]["allowed"])
-    self.assertEqual(state["dispatch"]["reason"], "claude-seats-auto")
+    self.assertFalse(state["dispatch"]["allowed"])
+    self.assertEqual(state["dispatch"]["reason"], "awaiting-confirmation")
 
     decision = self.authorize(state["preparation_path"], None)
-    self.assertTrue(decision["allowed"])
-    self.assertEqual(decision["reason"], "claude-seats-auto")
-    self.assertEqual(self.recorder.read_text().count("dispatch"), 1)
+    self.assertFalse(decision["allowed"])
+    self.assertEqual(decision["reason"], "awaiting-confirmation")
+    self.assertFalse(self.recorder.exists())
 
     confirmed = self.authorize(state["preparation_path"], {"user_message": "照推薦，開始"})
     self.assertTrue(confirmed["allowed"])
     self.assertEqual(confirmed["reason"], "confirmed")
-
-    for model in ("opus", "claude-opus-4-7"):
-      with self.subTest(model=model):
-        pinned = self.claude_state(
-          f"run-pinned-{model}", [{**selection[0], "model": model}],
-        )
-        self.assertTrue(pinned["dispatch"]["allowed"])
+    self.assertEqual(self.recorder.read_text().count("dispatch"), 1)
 
   def test_extra_quota_seat_in_selection_still_awaits_confirmation(self):
     claude = {"seat": "opus/code-reviewer", "angle": "context-aware primary"}
@@ -675,7 +669,8 @@ class PrReviewTargetsTest(unittest.TestCase):
       "other-model": {**claude, "model": "gpt-6-astra"},
     }
     control = self.claude_state("run-ext-control", [claude])
-    self.assertTrue(control["dispatch"]["allowed"])
+    self.assertFalse(control["dispatch"]["allowed"])
+    self.assertEqual(control["dispatch"]["reason"], "awaiting-confirmation")
     for name, cell in external_cells.items():
       with self.subTest(external=name):
         state = self.claude_state(f"run-ext-{name}", [claude, cell])
@@ -717,7 +712,8 @@ class PrReviewTargetsTest(unittest.TestCase):
       {"github:github.com/acme/saas#12": "accept-incomplete", "review_set": "accept-incomplete"},
     )
     self.assertEqual(adjudicated["capacity"]["waiting_seats"], [])
-    self.assertTrue(self.authorize(adjudicated["preparation_path"], None)["allowed"])
+    self.assertEqual(self.authorize(adjudicated["preparation_path"], None)["reason"], "awaiting-confirmation")
+    self.assertTrue(self.authorize(adjudicated["preparation_path"], {"user_message": "照推薦，開始"})["allowed"])
 
   def test_only_known_adjudication_values_settle_capacity(self):
     selection = [{"seat": "opus/typescript-reviewer", "angle": "context-aware primary"}]
@@ -738,37 +734,12 @@ class PrReviewTargetsTest(unittest.TestCase):
           self.assertEqual(decision["reason"], "awaiting-adjudication")
     self.assertFalse(self.recorder.exists())
 
-  def test_matrix_cells_not_selected_do_not_block_claude_auto_dispatch(self):
-    claude = {"seat": "opus/code-reviewer", "angle": "context-aware primary", "status": "selected"}
-    skipped = [
-      {"seat": "codex", "angle": "Codex 中性", "status": "not-selected"},
-      {"seat": "agy", "angle": "Gemini Pro", "status": "cancelled"},
-      {"seat": "web-gpt", "angle": "web GPT Pro", "status": "unavailable"},
-    ]
-    state = self.claude_state("run-matrix-cells", [claude, *skipped])
-    self.assertEqual(state["dispatch"]["reason"], "claude-seats-auto")
-    nothing_selected = self.claude_state(
-      "run-matrix-none", [{**claude, "status": "not-selected"}, *skipped],
-    )
-    self.assertEqual(nothing_selected["dispatch"]["reason"], "awaiting-confirmation")
-
-  def test_model_names_that_only_start_with_opus_are_not_claude_seats(self):
-    cell = {"seat": "opus/code-reviewer", "angle": "context-aware primary"}
-    for model in ("opus-gpt-6", "opus.codex", "opus_via_proxy"):
-      with self.subTest(model=model):
-        state = self.claude_state(f"run-model-{model}", [{**cell, "model": model}])
-        self.assertEqual(state["dispatch"]["reason"], "awaiting-confirmation")
-    for model in ("opus-5-5", "claude-opus-5-5"):
-      with self.subTest(model=model):
-        state = self.claude_state(f"run-model-{model}", [{**cell, "model": model}])
-        self.assertEqual(state["dispatch"]["reason"], "claude-seats-auto")
-
   def test_state_written_before_this_change_is_never_released_for_missing_data(self):
     selection = [{"seat": "opus/code-reviewer", "angle": "context-aware primary"}]
     state = self.claude_state("run-old-state", selection)
     path = Path(state["preparation_path"])
     pristine = path.read_text()
-    self.assertTrue(self.authorize(path, None)["allowed"])
+    self.assertEqual(self.authorize(path, None)["reason"], "awaiting-confirmation")
 
     def drop_selection(value):
       del value["selection"]
@@ -821,7 +792,7 @@ class PrReviewTargetsTest(unittest.TestCase):
     selection = [{"seat": "opus/code-reviewer", "angle": "context-aware primary"}]
     state = self.claude_state("run-claude-cancel", selection)
     path = Path(state["preparation_path"])
-    self.assertTrue(self.authorize(path, None)["allowed"])
+    self.assertEqual(self.authorize(path, None)["reason"], "awaiting-confirmation")
     pristine = path.read_text()
 
     for status, reason in (("BLOCKED", "preparation-blocked"),

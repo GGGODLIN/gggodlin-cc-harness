@@ -63,14 +63,16 @@ def build_inventory(skills_dir, commands_dir):
       guess = "dual"
     else:
       guess = "auto-only"
-    inv[name] = {"source": "skill", "guess": guess, "path": skill_md}
+    inv[name] = {"source": "skill", "guess": guess, "path": skill_md, "disable": disable}
   for cmd_md in sorted(glob.glob(os.path.join(commands_dir, "*.md"))):
     name = os.path.basename(cmd_md)[:-3]
+    _, cmd_disable = read_frontmatter(cmd_md)
     if name in inv:
       inv[name]["source"] = "skill+command"
       inv[name]["guess"] = "dual"
+      inv[name]["disable"] = inv[name].get("disable", False) or cmd_disable
     else:
-      inv[name] = {"source": "command", "guess": "manual-by-design", "path": cmd_md}
+      inv[name] = {"source": "command", "guess": "manual-by-design", "path": cmd_md, "disable": cmd_disable}
   return inv
 
 
@@ -215,6 +217,7 @@ def main():
   alerts, rows, dead, undecided, new_undecided = [], [], [], [], []
   dead_name_only_excluded = 0
   dead_hook_driven_excluded = 0
+  dead_disabled_excluded = 0
   for name, meta in sorted(inventory.items()):
     mode = registry.get(name, {}).get("mode", meta["guess"])
     decided = registry.get(name, {}).get("decided", False)
@@ -237,6 +240,9 @@ def main():
       if mode == "hook-driven":
         dead_hook_driven_excluded += 1
         continue
+      if meta.get("disable"):
+        dead_disabled_excluded += 1
+        continue
       rel = os.path.relpath(meta["path"], args.claude_git_dir) if args.claude_git_dir else meta["path"]
       inst = install_date(args.claude_git_dir, rel)
       if inst and (now - inst) >= args.dead_min_age_days * 86400:
@@ -254,7 +260,7 @@ def main():
   lines += alerts if alerts else ["無。"]
   lines += ["", f"## 統計儀表（{args.alert_window_days} 天窗、僅列有活動者，共 {len(rows)}/{len(inventory)}）", "", "| skill | mode | auto | manual | 90d 合計 |", "|---|---|---|---|---|"]
   lines += rows if rows else []
-  lines += ["", f"## 死庫存候選（安裝 ≥ {args.dead_min_age_days} 天且 {args.dead_window_days} 天零 invoke；本輪列 {min(len(dead), args.dead_cap)}/{len(dead)}；另排除 name-only {dead_name_only_excluded} 個——router 選單成員、零 invoke 屬設計預期；排除 hook-driven {dead_hook_driven_excluded} 個——由 hook 注入觸發、不經 Skill tool，計數器看不到）", ""]
+  lines += ["", f"## 死庫存候選（安裝 ≥ {args.dead_min_age_days} 天且 {args.dead_window_days} 天零 invoke；本輪列 {min(len(dead), args.dead_cap)}/{len(dead)}；另排除 name-only {dead_name_only_excluded} 個——router 選單成員、零 invoke 屬設計預期；排除 hook-driven {dead_hook_driven_excluded} 個——由 hook 注入觸發、不經 Skill tool，計數器看不到；排除 disable-model-invocation {dead_disabled_excluded} 個——零常駐 token 成本）", ""]
   for inst, name, mode in dead[: args.dead_cap]:
     age = int((now - inst) / 86400)
     lines.append(f"- `{name}`（{mode}、安裝 {age} 天、{args.dead_window_days} 天零 invoke）→ 留/殺候選")

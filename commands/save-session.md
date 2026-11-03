@@ -67,12 +67,17 @@ Dispatch 規格：
 
 - `Agent` tool、`subagent_type: skill-verify-auditor`（sonnet+low、tools 僅 Read，定義檔釘死）
 - description 固定含 marker 字串 `skill-verify:save-session`（採用率統計 grep 用，不要改字）
-- prompt 給 session 檔的絕對路徑（verify agent 自己 Read）+ 下方 template 全文
+- 用 auditor 的讀檔模式：派工前跑 `wc -l < {path}` 取總行數，prompt 只放下方 template 全文（三個快照欄位填實際值）。只給路徑而沒有這三行，auditor 依它的輸入契約會把每條都判 FAIL
+- auditor 回來前不改 session 檔；它讀的是磁碟上的檔，中途改動會讓稽核對象跟著變
 
-Verify prompt template（原文嵌入、`{path}` 換成檔案絕對路徑）：
+Verify prompt template（原文嵌入、`{path}` 換成檔案絕對路徑、`{lines}` 換成總行數）：
 
 ```
-你是 adversarial 合規審查員。Read {path}，檢查這份 session 檔是否遵守 save-session command 的規矩。偏置是「找違規」：無法確認有遵守就判 FAIL，不要善意推定。
+AUDIT_INPUT_MODE: FILE_SNAPSHOT
+SNAPSHOT_PATH: {path}
+SNAPSHOT_TOTAL_LINES: {lines}
+
+你是 adversarial 合規審查員。逐段 Read 上面的快照檔讀到最後一行，檢查這份 session 檔是否遵守 save-session command 的規矩。偏置是「找違規」：無法確認有遵守就判 FAIL，不要善意推定。
 
 逐條檢查（每條回 PASS / FAIL + 一句證據引述）：
 

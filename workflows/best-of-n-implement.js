@@ -78,12 +78,17 @@ const VERDICT = {
     winnerIndex: { type: 'number', description: '最佳候選的「候選編號」（=== 候選 N === 標頭裡的 N）' },
     evidence: { type: 'string', description: '先產生這欄：逐候選列可觀察證據（指向具體 diff 行/邊界處理/測試輸出），不含結論' },
     reasoning: { type: 'string', description: '比較理由，含每個候選一句話評語' },
+    graftableIdeas: {
+      type: 'array',
+      items: { type: 'string' },
+      description: '從落選候選中挑出 0–2 個贏家漏掉、但可低成本嫁接進贏家且不破壞一致性的獨特亮點（附候選編號與具體 diff 區段；沒有就填 []）',
+    },
   },
-  required: ['winnerIndex', 'evidence', 'reasoning'],
+  required: ['winnerIndex', 'evidence', 'reasoning', 'graftableIdeas'],
 }
 const labeled = passers.map((c, i) => ({ ...c, id: i }))
 const judgePrompt = (list) =>
-  `你是 code judge。以下 ${list.length} 個 diff 實作同一個 task 且都通過測試。先對每個候選列出可觀察證據（指向具體 diff 行/邊界處理/測試輸出），全部列完才下結論——證據先於評分。比較品質——正確性與邊界處理、與既有 codebase 慣例一致、簡潔不過度工程、可維護性——選出最佳；難分高下時偏好更簡單、改動更少的候選。\n\nTASK:\n${task}\n\n${list.map((c) => `=== 候選 ${c.id}（取捨：${c.approach}）===\n${c.diff}`).join('\n\n')}\n\nschema：winnerIndex 放最佳候選的候選編號、evidence 放逐候選證據、reasoning 放比較理由。`
+  `你是 code judge。以下 ${list.length} 個 diff 實作同一個 task 且都通過測試。先對每個候選列出可觀察證據（指向具體 diff 行/邊界處理/測試輸出），全部列完才下結論——證據先於評分。比較品質——正確性與邊界處理、與既有 codebase 慣例一致、簡潔不過度工程、可維護性——選出最佳；難分高下時偏好更簡單、改動更少的候選。選出最佳候選後，再回頭檢查落選候選有無 0–2 個贏家漏掉、但可低成本嫁接進贏家且不破壞一致性的獨特亮點（附候選編號與具體 diff 區段，填入 graftableIdeas；若硬塞會破壞贏家一致性或無亮點則填 []）。\n\nTASK:\n${task}\n\n${list.map((c) => `=== 候選 ${c.id}（取捨：${c.approach}）===\n${c.diff}`).join('\n\n')}\n\nschema：winnerIndex 放最佳候選的候選編號、evidence 放逐候選證據、reasoning 放比較理由、graftableIdeas 放可嫁接亮點陣列。`
 const [passA, passB] = await parallel([
   () => agent(judgePrompt(labeled), { label: 'judge:pass1', phase: 'Judge', schema: VERDICT, model: 'opus', effort: 'high' }),
   () => agent(judgePrompt([...labeled].reverse()), { label: 'judge:pass2-swapped', phase: 'Judge', schema: VERDICT, model: 'opus', effort: 'high' }),
@@ -108,6 +113,6 @@ return {
   verdict: { winnerIndex: wi, judgeNote, pass1: passA, pass2: passB },
   losers: passers.filter((_, i) => i !== wi).map((c) => ({ approach: c.approach })),
   note:
-    '呼叫端把 winner.diff 經 git apply 落進真實 working tree，apply 後重跑測試確認。' +
+    '呼叫端把 winner.diff 經 git apply 落進真實 working tree，apply 後重跑測試確認；若採納 verdict.pass1.graftableIdeas 內的落選亮點，整合後亦必重跑測試確認。' +
     (repoPath ? ` 收尾：candidate worktree 留在 ${repoPath}/.worktrees/bon-*，apply 完自己 \`git worktree remove --force\`。` : ''),
 }

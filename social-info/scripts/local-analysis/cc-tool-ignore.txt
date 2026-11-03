@@ -10,6 +10,9 @@ npm
 yarn
 
 # brew（系統 / dev / 語言 runtime / dep）
+smctl
+leaperone/smctl/smctl
+afsctool
 age
 awscli
 clang-format
@@ -28,11 +31,15 @@ go
 graykode/tap/abtop
 # tracce：2026-09-09 第二輪 KILL（eslogger 不帶 --select 燒 CPU/記憶體），改自建 agent-blackbox；brew 殘留不追
 chungchihhan/tap/tracce
+willxup/cpa-usage-keeper/cpa-usage-keeper
+cpa-usage-keeper
 ios-deploy
 ldid
 libgit2
 librsvg
 llama.cpp
+ollama
+lua@5.4
 macmon
 mactop
 mole
@@ -64,6 +71,8 @@ zsh-syntax-highlighting
 # mcp（stdio 非 npx 的先全忽略；npx 釘版的 MCP 走 manifest 的 mcp-npx manager，2026-08-25 起 chrome-devtools 已移出）
 plugin
 context7
+# 遠端 HTTP MCP 沒有可由本機套件管理器追蹤的版本；只排除版本提醒，不停用服務。
+context
 chakra-ui
 postman
 oldco-tool
@@ -97,3 +106,5 @@ cua-driver
 # mcp：code_search 是 stdio 註冊、exec 自建 ~/Desktop/projects/code-search-mcp/dist/index.js（非 npx 釘版），版本隨該 repo git 走；
 # 依「stdio 非 npx 先全忽略」慣例（同 cua-driver 2026-09-30），2026-10-15 歸忽略
 code_search
+
+

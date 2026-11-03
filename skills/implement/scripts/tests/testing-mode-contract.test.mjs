@@ -51,6 +51,16 @@ test('回歸收尾只讀品質 reference，允許必要案例提前留下', () =
     assert.ok(existsSync(resolve(root, path)))
     assert.ok(regression.includes(`/${path}`))
   }
+  const testsRef = read('skills/tdd/tests.md')
+  assert.match(testsRef, /Secret-echoing assertions/)
+  assert.match(testsRef, /assertFalse\(fake_key in full_env_output/)
+  assert.match(testsRef, /Vacuous negative or invariance assertions/)
+  assert.match(testsRef, /Swallowed mid-script failures in shell test runners/)
+  assert.match(tdd, /Secret-echoing assertions/)
+  assert.match(tdd, /Vacuous negative or invariance assertions/)
+  assert.match(tdd, /Swallowed mid-script failures in shell checks/)
+  assert.match(regression, /正向觸發對照組/)
+  assert.match(regression, /set -euo pipefail/)
 })
 
 test('核票保留義務、回歸範圍與豁免，模式留到 implement', () => {

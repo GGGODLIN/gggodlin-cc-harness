@@ -33,7 +33,7 @@ SHARED_BASENAMES = ("friction-log.md",)
 VENDOR_MANAGED_PREFIXES = ("skills/.trash/", "skills/synced/")
 BASH_PATH_TOKEN = re.compile(r"(?:~|/Users/[A-Za-z0-9_.-]+)(?:/[^\s'\"`;|<>()&]+)+")
 PROJECTS_DIR = Path.home() / ".claude" / "projects"
-CODEX_SESSIONS = Path.home() / ".codex" / "sessions"
+CODEX_SESSIONS = Path(os.environ.get("CLOSEOUT_CODEX_SESSIONS", str(Path.home() / ".codex" / "sessions"))).expanduser()
 
 
 def run_git(repo, *args):
@@ -229,6 +229,51 @@ def collect_writers(targets, days):
   return writers
 
 
+def is_strictly_readonly_codex_rollout(raw):
+  # 保守排除：只有整份 rollout 每一行 JSON 皆可解析、具備明確唯讀證據（所有 turn_context 的
+  # sandbox_policy.type 均為 read-only，或全程處於 EnteredReviewMode..ExitedReviewMode 唯讀審查）、
+  # 且無寫檔工具事件時，才確認為純唯讀審查並排除；其餘一律保留 codex_touched。
+  try:
+    text = raw.decode("utf-8")
+  except UnicodeDecodeError:
+    return False
+  seen_turn_context = False
+  seen_entered_review = False
+  seen_exited_review = False
+  for line in text.splitlines():
+    if not line.strip():
+      continue
+    try:
+      obj = json.loads(line)
+    except json.JSONDecodeError:
+      return False
+    if not isinstance(obj, dict):
+      return False
+    kind = obj.get("type")
+    payload = obj.get("payload")
+    if not isinstance(payload, dict):
+      continue
+    if kind == "turn_context":
+      seen_turn_context = True
+      policy = payload.get("sandbox_policy")
+      if not isinstance(policy, dict) or policy.get("type") != "read-only":
+        return False
+    elif kind == "response_item":
+      if payload.get("name") in ("apply_patch", "write_file", "edit_file"):
+        return False
+    elif kind == "event_msg":
+      item = payload.get("item")
+      if isinstance(item, dict):
+        item_type = item.get("type")
+        if item_type in ("FileChange", "PatchApply"):
+          return False
+        if item_type == "EnteredReviewMode":
+          seen_entered_review = True
+        elif item_type == "ExitedReviewMode":
+          seen_exited_review = True
+  return seen_turn_context or (seen_entered_review and seen_exited_review)
+
+
 def codex_touched(targets, days):
   if not CODEX_SESSIONS.exists():
     return set()
@@ -242,9 +287,12 @@ def codex_touched(targets, days):
       raw = rollout.read_bytes()
     except OSError:
       continue
-    for needle, path in names.items():
-      if needle in raw:
-        touched.add(path)
+    matched = [path for needle, path in names.items() if needle in raw]
+    if not matched:
+      continue
+    if is_strictly_readonly_codex_rollout(raw):
+      continue
+    touched.update(matched)
   return touched
 
 
@@ -333,6 +381,46 @@ def build_report(repo, days, session_id):
   }
 
 
+def build_plan(report, repo, out_dir):
+  # 完整報告動輒上百 KB（大多是別的 session 的檔），讀進 context 只為了被判成「未收」；
+  # 分欄在這裡做完，context 只拿得到要動手的路徑與異常
+  out_dir.mkdir(parents=True, exist_ok=True)
+  slug = str(repo).strip("/").replace("/", "_")
+  detail = out_dir / f"{slug}.json"
+  detail.write_text(json.dumps(report, ensure_ascii=False, indent=2))
+  held, shared, self_owned, bash_only = [], [], [], []
+  unclaimed = 0
+  for row in report["dirty"]:
+    if row["vendor_managed"]:
+      continue
+    if row["staged_differs"]:
+      held.append(row["path"])
+    elif row["shared"]:
+      shared.append(row["path"])
+    elif row["self_owned"]:
+      self_owned.append(row["path"])
+    elif row["self_bash_only"]:
+      bash_only.append(row["path"])
+    else:
+      unclaimed += 1
+  shared_file = out_dir / f"{slug}.shared.txt"
+  shared_file.write_text("".join(f"{p}\n" for p in sorted(shared)))
+  return {
+    "repo": report["repo"],
+    "branch": run_git(repo, "branch", "--show-current").strip() or None,
+    "has_origin": bool(run_git(repo, "remote", "get-url", "origin").strip()),
+    "has_upstream": bool(run_git(repo, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}").strip()),
+    "detail": str(detail),
+    "shared": {"count": len(shared), "pathspec_file": str(shared_file)},
+    "self_owned": sorted(self_owned),
+    "self_bash_only": sorted(bash_only),
+    "held_staged_differs": sorted(held),
+    "held_vendor_managed": sum(1 for r in report["dirty"] if r["vendor_managed"]),
+    "staged_foreign": report["staged_foreign"],
+    "unclaimed": unclaimed,
+  }
+
+
 def print_table(report):
   print(f"repo: {report['repo']}")
   print(f"self session: {report['self_session'] or '(none)'}")
@@ -358,6 +446,7 @@ def main():
   parser.add_argument("--days", type=int, default=3, help="how many days of session logs to scan")
   parser.add_argument("--json", action="store_true", help="emit JSON instead of a table")
   parser.add_argument("--self-repos", action="store_true", help="list every git repo the self session has edited (Edit/Write or Bash with write markers) plus the fixed shared repos, then exit")
+  parser.add_argument("--plan", metavar="OUT_DIR", help="apply the self-closeout column rules and print a compact summary; full report and the shared-checkpoint pathspec file go to OUT_DIR")
   args = parser.parse_args()
   session_id = self_session_id(args.session)
   if args.self_repos:
@@ -372,7 +461,9 @@ def main():
     print("not a git repo", file=sys.stderr)
     return 2
   report = build_report(repo, args.days, session_id)
-  if args.json:
+  if args.plan:
+    print(json.dumps(build_plan(report, repo, Path(args.plan).expanduser()), ensure_ascii=False, indent=2))
+  elif args.json:
     print(json.dumps(report, ensure_ascii=False, indent=2))
   else:
     print_table(report)

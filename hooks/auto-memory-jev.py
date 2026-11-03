@@ -25,6 +25,8 @@ MODEL = 'type-safe/jev-latest:free'
 BASE = 'https://api.experientiallabs.ai'
 TIMEOUT = 1.5
 THRESHOLD = 0.5
+TAIL_FROM_BYTES = 64 * 1024 * 1024
+TAIL_START_BYTES = 8 * 1024 * 1024
 # 第二腿 Drex（nace，從贈額扣款、不在 free_guard 範圍）：Jev 免費層 429／逾時／冷卻中／免費價查核失敗才問。
 # 選 v2.0 不選 v1.5：2026-10-17 用本 hook 的 packet 對 120 個真實回合並列，v2.0 在 0.5 門檻觸發 11 次對 Jev 16 次、
 # 一致 107/120；v1.5 要 0.8 才對齊，而且多抓的是結案狀態回報。題目與門檻沿用、不另校。
@@ -91,72 +93,128 @@ def snapshot(path):
   fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
   try:
     info = os.fstat(fd)
-    if not stat.S_ISREG(info.st_mode) or info.st_size > 64 * 1024 * 1024:
+    if not stat.S_ISREG(info.st_mode):
       raise ValueError('unsafe_transcript')
-    with os.fdopen(fd, encoding='utf8', errors='replace') as source:
+    with os.fdopen(fd, 'rb') as source:
       fd = None
-      records = []
-      turns = 0
-      compact = ''
-      owner = True
-      seen = set()
-      message_id = None
-      for line in source:
-        try:
-          entry = json.loads(line)
-        except ValueError:
-          continue
-        if entry.get('isSidechain'):
-          continue
-        uid = entry.get('uuid')
-        if uid and uid in seen:
-          continue
-        if uid:
-          seen.add(uid)
-        content = (entry.get('message') or {}).get('content')
-        # This counter deliberately matches checkpoint's legacy sentinel unit.
-        if entry.get('type') == 'user' and isinstance(content, str) and not entry.get('isMeta'):
-          turns += 1
-        if entry.get('type') == 'system' and entry.get('subtype') == 'compact_boundary':
-          compact = str(uid or entry.get('timestamp', ''))
-        if human(entry):
-          user = text_of(content)
-          records.append({'turn': sha(str(uid or turns) + '\n' + user), 'user': user,
-                          'assistant': '', 'saved': False, 'tools': set(), 'terminal': False})
-          records = records[-2:]
-          message_id = None
-          owner = True
-          continue
-        if entry.get('type') == 'user' and (entry.get('origin') or {}).get('kind') not in (None, 'human', 'sdk'):
-          owner = False
-        if entry.get('type') == 'user' and (entry.get('turnOrigin') not in (None, 'human', 'sdk')
-            or entry.get('promptSource') not in (None, 'typed', 'sdk')):
-          owner = False
-        if entry.get('type') == 'user' and not entry.get('isMeta') and SYNTHETIC.match(text_of(content)):
-          owner = False
-        if not records or entry.get('type') != 'assistant':
-          continue
-        row = records[-1]
-        message = entry.get('message') or {}
-        text = text_of(content)
-        if text:
-          mid = message.get('id', uid)
-          row['assistant'] = (row['assistant'] + '\n' + text) if mid == message_id else text
-          message_id = mid
-          row['terminal'] = message.get('stop_reason') == 'end_turn'
-        for block in content if isinstance(content, list) else []:
-          if not isinstance(block, dict) or block.get('type') != 'tool_use':
-            continue
-          name = block.get('name', '')
-          row['tools'].add(name)
-          inp = block.get('input') or {}
-          fp = str(inp.get('file_path', '')) if isinstance(inp, dict) else ''
-          if name in ('Write', 'Edit', 'MultiEdit') and '/.claude/memory/' in fp:
-            row['saved'] = True
-      return {'records': records, 'turns': turns, 'compact': compact, 'owner': owner}
+      if info.st_size <= TAIL_FROM_BYTES:
+        return scan(source)
+      return tail_snapshot(source, info.st_size)
   finally:
     if fd is not None:
       os.close(fd)
+
+
+def tail_snapshot(source, size):
+  # 截圖驗收型 session 常到幾百 MB，整份解析會超過 deliver 的 3 秒上限；原本整份跳過，提醒就停擺。
+  # 只解析檔尾：從 8MB 起倍增到含兩個人類回合為止。回合數與最後一次 compact 改用只解析
+  # 少數候選行的全檔快掃補上，與整份解析同一套判斷（跨窗口的重複 uuid 不去重，僅影響回合數）。
+  window = TAIL_START_BYTES
+  while True:
+    start = max(0, size - window)
+    source.seek(start)
+    if start:
+      source.readline()
+    context = scan(source)
+    if start == 0:
+      return context
+    if len(context['records']) >= 2:
+      break
+    window *= 2
+  source.seek(0)
+  context['turns'], context['compact'] = count_turns(source)
+  return context
+
+
+def count_turns(source):
+  turns = 0
+  compact = ''
+  seen = set()
+  for line in source:
+    # 回合是字串內容的 user 紀錄，不會含 tool_result 區塊；圖片多半在 tool_result 行，略過它們才快
+    if b'compact_boundary' not in line and (b'"user"' not in line or b'"tool_result"' in line):
+      continue
+    try:
+      entry = json.loads(line.decode('utf8', 'replace'))
+    except ValueError:
+      continue
+    if not isinstance(entry, dict) or entry.get('isSidechain'):
+      continue
+    uid = entry.get('uuid')
+    if uid and uid in seen:
+      continue
+    if uid:
+      seen.add(uid)
+    content = (entry.get('message') or {}).get('content')
+    if entry.get('type') == 'user' and isinstance(content, str) and not entry.get('isMeta'):
+      turns += 1
+    if entry.get('type') == 'system' and entry.get('subtype') == 'compact_boundary':
+      compact = str(uid or entry.get('timestamp', ''))
+  return turns, compact
+
+
+def scan(source):
+  records = []
+  turns = 0
+  compact = ''
+  owner = True
+  seen = set()
+  message_id = None
+  for line in source:
+    try:
+      entry = json.loads(line.decode('utf8', 'replace'))
+    except ValueError:
+      continue
+    if not isinstance(entry, dict):
+      continue
+    if entry.get('isSidechain'):
+      continue
+    uid = entry.get('uuid')
+    if uid and uid in seen:
+      continue
+    if uid:
+      seen.add(uid)
+    content = (entry.get('message') or {}).get('content')
+    # This counter deliberately matches checkpoint's legacy sentinel unit.
+    if entry.get('type') == 'user' and isinstance(content, str) and not entry.get('isMeta'):
+      turns += 1
+    if entry.get('type') == 'system' and entry.get('subtype') == 'compact_boundary':
+      compact = str(uid or entry.get('timestamp', ''))
+    if human(entry):
+      user = text_of(content)
+      records.append({'turn': sha(str(uid or turns) + '\n' + user), 'user': user,
+                      'assistant': '', 'saved': False, 'tools': set(), 'terminal': False})
+      records = records[-2:]
+      message_id = None
+      owner = True
+      continue
+    if entry.get('type') == 'user' and (entry.get('origin') or {}).get('kind') not in (None, 'human', 'sdk'):
+      owner = False
+    if entry.get('type') == 'user' and (entry.get('turnOrigin') not in (None, 'human', 'sdk')
+        or entry.get('promptSource') not in (None, 'typed', 'sdk')):
+      owner = False
+    if entry.get('type') == 'user' and not entry.get('isMeta') and SYNTHETIC.match(text_of(content)):
+      owner = False
+    if not records or entry.get('type') != 'assistant':
+      continue
+    row = records[-1]
+    message = entry.get('message') or {}
+    text = text_of(content)
+    if text:
+      mid = message.get('id', uid)
+      row['assistant'] = (row['assistant'] + '\n' + text) if mid == message_id else text
+      message_id = mid
+      row['terminal'] = message.get('stop_reason') == 'end_turn'
+    for block in content if isinstance(content, list) else []:
+      if not isinstance(block, dict) or block.get('type') != 'tool_use':
+        continue
+      name = block.get('name', '')
+      row['tools'].add(name)
+      inp = block.get('input') or {}
+      fp = str(inp.get('file_path', '')) if isinstance(inp, dict) else ''
+      if name in ('Write', 'Edit', 'MultiEdit') and '/.claude/memory/' in fp:
+        row['saved'] = True
+  return {'records': records, 'turns': turns, 'compact': compact, 'owner': owner}
 
 
 def clean(text, cap):

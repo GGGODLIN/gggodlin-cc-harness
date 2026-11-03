@@ -23,19 +23,28 @@ SKILLS_ROOT="$HOME/.claude/skills"
 PREPASS_FINDINGS=()
 
 # inline-code 路徑檢查的 suppress 名單：教學型 meta-skill 的 `scripts/...` 多為假想示例
-# （2026-07-19 加：skill-creator 12 條示例路徑連續誤報；markdown link 形式不 suppress 照查）
-INLINE_REF_SUPPRESS=("skill-creator")
+# （2026-07-19 加：skill-creator 12 條示例路徑連續誤報；2026-10-27 補 software-factory；markdown link 形式不 suppress 照查）
+INLINE_REF_SUPPRESS=("skill-creator" "software-factory")
 
 extract_ref_paths() {
   local file="$1"
   local skill="$2"
-  # 路徑尾的參數 / placeholder（如 `scripts/reconcile.sh <name>`）截掉再查存在
-  grep -oE '\]\((references|scripts|assets)/[^)]+\)' "$file" 2>/dev/null | sed -E 's/^\]\(//; s/\)$//; s/ .*$//' || true
+  local skill_dir
+  skill_dir="$(dirname "$file")"
+  # 路徑尾的參數 / placeholder（如 `scripts/reconcile.sh <name>`）截掉再查存在；排除含 glob (*) 或佔位符 (<...>) 的模式
+  grep -oE '\]\((references|scripts|assets)/[^)]+\)' "$file" 2>/dev/null | sed -E 's/^\]\(//; s/\)$//; s/ .*$//' | grep -vE '[*<>]' || true
   local suppressed
   for suppressed in "${INLINE_REF_SUPPRESS[@]}"; do
     [ "$skill" = "$suppressed" ] && return 0
   done
-  grep -oE '`(references|scripts|assets)/[^`]+`' "$file" 2>/dev/null | sed -E 's/^`//; s/`$//; s/ .*$//' || true
+  while IFS= read -r inline_ref; do
+    [ -n "$inline_ref" ] || continue
+    # 若 skill 自身不含 scripts/ 目錄，或該 skill 是針對特定專案 repo 的操作指南（含 ~/Desktop/projects/），正文的 inline `scripts/...` 可指目標專案腳本
+    if [[ "$inline_ref" == scripts/* ]] && { [ ! -d "$skill_dir/scripts" ] || grep -q "Desktop/projects/" "$file" 2>/dev/null; }; then
+      continue
+    fi
+    printf '%s\n' "$inline_ref"
+  done < <(grep -oE '`(references|scripts|assets)/[^`]+`' "$file" 2>/dev/null | sed -E 's/^`//; s/`$//; s/ .*$//' | grep -vE '[*<>]' || true)
 }
 
 if [ -d "$SKILLS_ROOT" ]; then
@@ -46,7 +55,7 @@ if [ -d "$SKILLS_ROOT" ]; then
 
     while IFS= read -r ref_path; do
       [ -n "$ref_path" ] || continue
-      if [ ! -e "$skill_dir/$ref_path" ]; then
+      if [ ! -e "$skill_dir/$ref_path" ] && [ ! -e "$HOME/.claude/vendor/$skill_name/$skill_name/$ref_path" ]; then
         PREPASS_FINDINGS+=("$skill_name/SKILL.md: dead link '$ref_path' not found")
       fi
     done < <(extract_ref_paths "$skill_md" "$skill_name")

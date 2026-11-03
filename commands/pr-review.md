@@ -9,7 +9,7 @@ argument-hint: "<target-1> [<target-2> ...] | --merged <PR URL...> [--since <own
 
 # PR Review
 
-> ⚠️ **本檔在契約測試底下**：`skills/bitbucket-pr-mutation/scripts/tests/test_no_raw_bitbucket_writes.py` 會讀 Step 8，斷言步驟 marker 的順序與 tier 保證句；`commands/tests/test_pr_review_report_projection_contract.py` 會讀 Step 5–6，斷言雙層報告投影接線；`commands/tests/test_pr_review_c4_dispatch_contract.py` 會讀 C4 派工段，斷言 prepared marker 接線與人工 prompt 退役，並讀 Step 2.8／2.98／3，斷言兩層席位授權、共用 prompt 的範圍三欄與目錄指引；`commands/tests/test_pr_review_self_verify_contract.py` 會讀 Step 6，斷言 Self-Verify 接線與 advisory 行為；`commands/tests/test_pr_review_followup_continuity_contract.py` 會讀 Step 2.52／4.7／5，斷言前輪 finding 對帳與 fresh reviewer 隔離；`commands/tests/test_pr_review_repo_profile_contract.py` 會讀 Step 2／2.5／2.55／2.6／2.65／3 與 codex 起手段，斷言 repo profile 接線、zsh 相容寫法、`--paginate` 與 C4 三態；`commands/tests/test_pr_review_targets_contract.py` 會讀 Step 2.05／2.98.1，斷言多目標準備的段落順序與先決資料、容量裁決、派工授權閘與 cancel 範圍；`commands/tests/test_pr_review_group_report_contract.py` 會讀 Step 4.8，斷言整組後處理、群組 UID／報告格式與歷史對帳接線；`commands/tests/test_pr_review_gemini_web_contract.py` 會讀 Gemini／web 多目標整組材料段，斷言一次執行、容量裁決閘、定位回映與失敗揭露；`commands/tests/test_pr_review_cc_group_contract.py` 會讀 Step 2.5／3／4.5，斷言逐目標 worktree、一次 CC 派工帳與有限補漏接線；`commands/tests/test_pr_review_codex_group_contract.py` 會讀 Codex 中性／對抗多目標整組材料段，斷言一次原生 Custom 執行、原 plugin 模板重用、容量／契約閘與定位回映。改動對應段落後十一套都要跑；`--merged` 範圍模式另有第十二套 `commands/tests/test_pr_review_merged_range_contract.py`，會讀 Input／Step 1／2.06／2.2／2.55／2.9／2.95／C4 派工段／CC shared prompt／多目標材料段／4.5／4.8／Step 7 尾，斷言範圍模式的接線、派工前確認與不接 Step 8，動到這些段落也要跑。
+> ⚠️ **本檔在契約測試底下**：`skills/bitbucket-pr-mutation/scripts/tests/test_no_raw_bitbucket_writes.py` 會讀 Step 8，斷言步驟 marker 的順序與 tier 保證句；`commands/tests/test_pr_review_report_projection_contract.py` 會讀 Step 5–6，斷言雙層報告投影接線；`commands/tests/test_pr_review_c4_dispatch_contract.py` 會讀 C4 派工段，斷言 prepared marker 接線與人工 prompt 退役，並讀 Step 2.8／2.98／3，斷言派工前選席停點、共用 prompt 的範圍三欄與目錄指引；`commands/tests/test_pr_review_self_verify_contract.py` 會讀 Step 6，斷言 Self-Verify 接線與 advisory 行為；`commands/tests/test_pr_review_followup_continuity_contract.py` 會讀 Step 2.52／4.7／5，斷言前輪 finding 對帳與 fresh reviewer 隔離；`commands/tests/test_pr_review_repo_profile_contract.py` 會讀 Step 2／2.5／2.55／2.6／2.65／3 與 codex 起手段，斷言 repo profile 接線、zsh 相容寫法、`--paginate` 與 C4 三態；`commands/tests/test_pr_review_targets_contract.py` 會讀 Step 2.05／2.98.1，斷言多目標準備的段落順序與先決資料、容量裁決、派工授權閘與 cancel 範圍；`commands/tests/test_pr_review_group_report_contract.py` 會讀 Step 4.8，斷言整組後處理、群組 UID／報告格式與歷史對帳接線；`commands/tests/test_pr_review_gemini_web_contract.py` 會讀 Gemini／web 多目標整組材料段與單目標 Gemini 段，斷言一次執行、Argon 先走主通道再退 agy、容量裁決閘、定位回映與失敗揭露；`commands/tests/test_pr_review_cc_group_contract.py` 會讀 Step 2.5／3／4.5，斷言逐目標 worktree、一次 CC 派工帳與有限補漏接線；`commands/tests/test_pr_review_codex_group_contract.py` 會讀 Codex 中性／對抗多目標整組材料段，斷言一次原生 Custom 執行、原 plugin 模板重用、容量／契約閘與定位回映。改動對應段落後十一套都要跑；`--merged` 範圍模式另有第十二套 `commands/tests/test_pr_review_merged_range_contract.py`，會讀 Input／Step 1／2.06／2.2／2.55／2.9／2.95／C4 派工段／CC shared prompt／多目標材料段／4.5／4.8／Step 7 尾，斷言範圍模式的接線、派工前確認與不接 Step 8，動到這些段落也要跑。
 > `cd ~/.claude/skills/bitbucket-pr-mutation/scripts && python3 -m unittest discover -s tests -q`
 > `python3 ~/.claude/commands/tests/test_pr_review_report_projection_contract.py`
 > `python3 ~/.claude/commands/tests/test_pr_review_c4_dispatch_contract.py`
@@ -24,7 +24,7 @@ argument-hint: "<target-1> [<target-2> ...] | --merged <PR URL...> [--since <own
 > `python3 ~/.claude/commands/tests/test_pr_review_codex_group_contract.py`
 > `python3 ~/.claude/commands/tests/test_pr_review_merged_range_contract.py`
 
-Orchestrate a PR review by showing the existing execution paths, recommending task-fit angles, dispatching Claude-side seats on the recommendation and external-quota seats only on explicit selection, and producing a Traditional Chinese comparison report.
+Orchestrate a PR review by showing the existing execution paths, recommending task-fit angles, dispatching only the seats the user explicitly selects (Claude-side seats included), and producing a Traditional Chinese comparison report.
 
 **Scope**: Workflow orchestration only. Review criteria and checklists are the responsibility of each reviewer agent and the topic groups in `~/.claude/review-standards/` — this command does not define what to review, only how to run and compare. The Step 2.8 cross-cutting baseline also lives there now (the `pr-review-baseline-*` groups, marked 由 `/pr-review` 派出時必套); this command only tells each dispatched reviewer, in the Step 3 shared prompt, that it was dispatched from `/pr-review`. The strict-liability list is not defined here: its members, conditions and exceptions live in `~/.claude/review-standards/must-report.md` (direct-report tier), and the Step 3 shared prompt and Step 4 only point to it.
 
@@ -644,18 +644,18 @@ Deterministic CLI = same output every run → do **NOT** inject results into any
 | `$CODEX_MODEL`／bare `codex review` | — | — | — | 可選；diff-only | — | — | — | — |
 | `$CODEX_MODEL`／companion `adversarial-review` | — | — | — | — | 可選；diff-only | — | — | — |
 | `$GEMINI_FLASH_MODEL`／`agy` | — | — | — | — | — | 可選；model id 由 routing 取得 | — | — |
-| `Gemini 4 Argon (High)`／`agy` | — | — | — | — | — | — | 可選 | — |
+| `google/gemini-4-argon:high`／`ccp-gemini-argon`（Argon 相容端點；失敗才退 `agy` 的 `Gemini 4 Argon (High)`） | — | — | — | — | — | — | 可選 | — |
 | web GPT Pro／direct（備援 `web-cli chatgpt`） | — | — | — | — | — | — | — | 可選；實驗性既有路徑 |
 
 每個可配 cell 另外標一個 `recommendation`（`recommended` 或 `optional`）與一個 `status`：`selected | not-selected | cancelled | unavailable | needs-material`。同級 model 只是可選路徑，不是品質排名；`selected` cell 必須保留 `path`、requested model／effort、適用條件與 selection reason；runtime 回來後再填 observed model，不猜底層識別。
 
-矩陣照常列出，作為揭露，不是等回覆的停點。席位分兩層授權（原則見 `~/.claude/references/review-dispatch-principles.md`「兩層授權」，這裡不重述）：
+矩陣是派工前的停點：列出來之後先停下，等使用者本輪明確選定才派，Claude 側席位也一樣。這是共用派工原則「兩層授權」的 `/pr-review` 例外（`~/.claude/references/review-dispatch-principles.md`），review-implement 與 `/review-spec` 不受影響。本入口不自動選任何席位。
 
-- **Claude 側席位**：context-aware primary 裡標 `recommended` 的語言 reviewer（沒有 dominant language 時是 code-reviewer）、符合 `ANGLE_ELIGIBILITY` 觸發條件的 security-reviewer、`gate=ELIGIBLE` 且 evidence requirements 通過的 spec-compliance-reviewer，照推薦與適用條件直接轉成 `selected`，不等回覆；`reason` 寫「Claude 側席位自動選入」加推薦依據。標 `optional` 的同層 cell 不因此被選。
-- **外部額度席**（Codex 中性、Codex 對抗、Gemini Flash、Gemini Pro、web GPT Pro 與任何 Fable 席）只在叫用指令或派工前的回覆明確選了才轉成 `selected`，例如「照推薦」「加 Codex 中性」「只用 Codex 中性」「把 Flash 換成 Pro」；外部額度席的推薦不等於必跑，preset 與語言判定都不是選擇。沒選的外部額度席保持 `status: not-selected` 與 `recommendation: recommended`，報告標「推薦但未選」，不新增欄位。之後要補跑，再叫用 `/pr-review` 並在指令點名席位，前輪對帳走 Step 2.52／4.7。
-- **取消與替換**：叫用時明說取消或替換 Claude 側席位就照辦（取消的 cell 記 `cancelled`，替換則原 cell 記 `cancelled`、新 cell `selected`）。派出後才到的回覆只影響還沒派出的席位；已派出的席位照常完成，並在報告「這次審查範圍」揭露。
-- **無人值守**：無人值守且沒有保存的選擇時，Claude 側席位照跑、外部額度席不派，也不記 `REVIEW_SELECTION=SKIPPED`；只有一個席位都派不出才記 `REVIEW_SELECTION=SKIPPED`（例如叫用時取消了全部 Claude 側席位又沒明選外部席）。
-- **已保存的選擇**：改版前已明確保存的 `REVIEW_SELECTION` 照原格式讀取並照用，schema 不變；它列出的 cell 以保存的 `status` 為準，沒列到的 cell 才走上面兩層。
+- **呈現**：列矩陣時，每個 `recommended` cell 附一句推薦理由（語言 reviewer 寫 dominant language，security 寫命中的觸發條件，spec-compliance 寫 gate 結果），結尾給可以直接回的選項，例如「照推薦」「只跑 typescript-reviewer」「加 Codex 中性」。列完就結束這一輪等回覆，任何席位都還不派。
+- **怎樣才算選定**：叫用指令本身或列出矩陣之後的回覆明確選了，cell 才轉成 `selected`。例如「照推薦」（採用所有標 `recommended` 的 cell）、「加 Codex 中性」（所有 `recommended` cell 再加上 Codex 中性）、「只用 Codex 中性」（只有這一席）、「把 Flash 換成 Pro」（推薦組裡的 Flash 換成 Pro，其餘推薦照選）。推薦不等於必跑：推薦、preset、語言判定與適用條件都不是選擇，催促或交代背景（例如「趕時間」）也不是；未回覆不等於接受推薦。叫用指令已經明確點名席位或說「照推薦」時，照點名轉成 `selected`，不必再停下問。`reason` 寫使用者怎麼選的（例如「使用者回『照推薦』」）加推薦依據。沒選的 cell 保持 `status: not-selected` 與原本的 `recommendation`；其中標 `recommended` 的，報告標「推薦但未選」，不新增欄位。之後要補跑，再叫用 `/pr-review` 並在指令點名席位，前輪對帳走 Step 2.52／4.7。
+- **取消與替換**：使用者明說取消或替換某個席位就照辦（取消的 cell 記 `cancelled`，替換則原 cell 記 `cancelled`、新 cell `selected`）。派出後才到的回覆只影響還沒派出的席位；已派出的席位照常完成，並在報告「這次審查範圍」揭露。
+- **無人值守**：無人值守且沒有保存的選擇時，一個席位都不派，記 `REVIEW_SELECTION=SKIPPED` 並在報告寫明原因；不因為沒人回覆就套用推薦。
+- **已保存的選擇**：已明確保存的 `REVIEW_SELECTION` 照原格式讀取並照用，schema 不變；它列出的 cell 以保存的 `status` 為準，沒列到的 cell 維持 `not-selected`。
 
 `REVIEW_SELECTION` 至少保留以下投影，供 Step 3、Step 4、Step 5 共用：
 
@@ -701,10 +701,10 @@ JSON
 - `division_of_labor` 逐席分開列主責材料、額外 context 與共用材料體積，避免「主責唯一」掩蓋重複傳遞。
 - 只有 `preparation_path` 指向的準備狀態為 `READY` 時才接受 finalize；`BLOCKED`／`NEEDS_INPUT`／已取消一律回 `PREPARATION_NOT_READY`，不寫入選席。
 
-派工授權與確認（每個階段的派工前都跑同一道閘）。授權程式依準備狀態裡 `selection` 的每個 cell 判定席位層級，兩層授權原則見 `~/.claude/references/review-dispatch-principles.md`「兩層授權」，這裡不重述，只寫授權程式怎麼落地：
+派工授權與確認（每個階段的派工前都跑同一道閘）。`/pr-review` 不套用共用原則的兩層授權（見 Step 2.98），授權程式只看使用者本輪有沒有明確確認，不分 Claude 側或外部席：
 
-- **只選 Claude 側席位且沒有未裁決的容量超界**：回 `allowed:true`、`reason: claude-seats-auto`，不需要使用者確認。cell 要同時符合才算 Claude 側席位：`seat` 寫 `opus/<agent 名>`（`typescript-reviewer`、`python-reviewer`、`code-reviewer`、`security-reviewer`、`spec-compliance-reviewer` 其中之一），`angle` 寫該席在 Step 2.98 矩陣的欄名（語言 reviewer 與 code-reviewer 是 `context-aware primary`，security-reviewer 是 `security`，spec-compliance-reviewer 是 `formal spec`），且 `model` 欄不指向 Opus 以外的模型。
-- **任何一個 cell 不是 Claude 側席位**（Codex、Gemini、web GPT Pro、任何 Fable 席，或欄位缺漏、寫法對不上上面那張表而判不出層級）：一律當外部額度席，回 `awaiting-confirmation`，使用者對本輪的明確確認（`confirmation` 帶當則 message）才轉 `allowed:true`、`reason: confirmed`。判不出來時多問一次，不當成 Claude 側席位放行。
+- **使用者本輪明確確認**（`confirmation` 帶當則 message）且沒有未裁決的容量超界：回 `allowed:true`、`reason: confirmed`。
+- **沒有確認**：不論選的是哪一種席位，一律回 `awaiting-confirmation`，不放行。
 - **容量超界未裁決**：不論選的是哪一層席位都回 `awaiting-adjudication`，確認不能代替裁決；需要等裁決的席位不派，報告「這次審查範圍」把它們列為未完成，不標成通過。
 - 取消、準備狀態未就緒、沒有選席的回應（`cancelled`／`preparation-blocked`／`no-net-diff`／`selection-required`）與 `cancel` 的清理範圍照舊。改版前寫下的準備狀態檔沿用同一組欄位判定，缺 `selection` 或 `capacity` 資料時回 `awaiting-confirmation`，不放行。
 
@@ -712,7 +712,7 @@ JSON
 python3 ~/.claude/scripts/pr-review-targets.py authorize-dispatch <<JSON
 {"preparation_path": "$PREPARATION_PATH", "confirmation": null}
 JSON
-# allowed:true 且 reason 為 claude-seats-auto（只選 Claude 側席位）或 confirmed（使用者本輪明確確認）
+# allowed:true 且 reason 為 confirmed（使用者本輪明確確認）
 # allowed:false 且 reason 為 awaiting-confirmation / awaiting-adjudication / selection-required / preparation-blocked / cancelled / no-net-diff
 ```
 
@@ -727,7 +727,7 @@ JSON
 # state 被竄改成指向別處時回 STATE_MATERIALS_OUT_OF_SCOPE，不刪任何外部路徑。
 ```
 
-`authorize-dispatch` 回 `allowed:true` 前不得進入 Step 3；只選 Claude 側席位時授權程式自己放行，不必等使用者確認。
+`authorize-dispatch` 回 `allowed:true` 前不得進入 Step 3；沒有使用者本輪的明確確認，授權程式不會放行。
 
 完成後接 Step 3 dispatch checklist。
 
@@ -737,10 +737,10 @@ JSON
 
 - [ ] 跑 Step 2.9 blast radius script（空輸出、噪音或工具不可用都在報告揭露，不把它當成 reviewer 席位）
 - [ ] 跑 Step 2.95 deterministic change inventory（建 F + 決定 chunked 與否，>15 檔或 >800 行強制切塊）
-- [ ] 凍結 `REVIEW_SELECTION`（Claude 側席位已依 Step 2.98 自動選入；外部額度席只含叫用指令或派工前回覆明選的），並保留每個 cell 的 `status`、model／effort、適用條件與 reason
+- [ ] 凍結 `REVIEW_SELECTION`（只含叫用指令或列出矩陣後的回覆明確選定的 cell，Claude 側席位也一樣），並保留每個 cell 的 `status`、model／effort、適用條件與 reason
 - [ ] 只對 `REVIEW_SELECTION` 中 `status=selected` 的席位派工；未選定或 cancelled 的席位不得派工
 - [ ] 多目標先以 `python3 ~/.claude/scripts/pr-review-cc-group-flow.py plan` 讀 `$PREPARATION_PATH` 與已確認的 selected cells，建立 CC dispatch ledger：helper 機械上只接受 `context-aware primary` 與 `security` 兩種 CC initial angles；formal spec、Codex、Gemini、web 等非 CC cell 即使 selected 也不進 CC ledger，只沿各自專用路徑派工。**每個 selected CC 視角恰一筆**，帶逐 target 版本／材料與 file ownership，**不按 target 或 repo 複製**整套 reviewer；只派 selected ledger entry，單輸入沿用既有 CC 路徑
-- [ ] 不把 preset 當成使用者選擇；Claude 側席位依 Step 2.98 的推薦與適用條件自動選入，不需要使用者逐席點名；外部額度席只在叫用指令或派工前的回覆明確選了才派
+- [ ] 不把推薦、preset 或語言判定當成使用者選擇；所有席位都只在叫用指令或列出矩陣後的回覆明確選了才派
 - [ ] 派出後才到的回覆只影響還沒派出的席位（例如派出後才到的「取消 security」）；已派出的席位照常完成，結果照常進報告並在「這次審查範圍」揭露
 - [ ] 跑 Step 2.55 provenance 判定（一律跑；base = trunk 時結果全 authored；inherited 檔清單注入 selected reviewer prompt、Step 5 分級 cap 參考用）
 - [ ] 派 selected CC reviewers（含範圍三欄與「由 /pr-review 派出」一行〔2.8 基準經標準目錄套用，不貼清單〕+ 2.9 輸出注入 + 2.95 chunked dispatch 若觸發 + 2.55 provenance 清單）
@@ -749,11 +749,11 @@ JSON
 - [ ] 依 selected cells 派 Codex 中性、Codex 對抗、agy 或 web GPT Pro；各路徑沿用既有 background／poll／parse／failure contract，失敗不得靜默當成功
 - [ ] **預備 Step 4.2 Codex 驗 CC first-pass**（對 selected CC first-pass findings 依既有 verification contract 派既有 Codex verifier；verification 不是可選的初次席位，不因 selection set 減少而免驗；Step 3 跑完後序列觸發，不在本 dispatch checklist 並行範圍內）
 
-Launch all selected reviews **simultaneously** using parallel Agent calls. If no cell is selected even after Step 2.98's automatic Claude-side selection, stop before dispatch and record `REVIEW_SELECTION=SKIPPED`; do not invent a default seat.
+Launch all selected reviews **simultaneously** using parallel Agent calls. If the user's selection leaves no cell selected (for example every seat was cancelled), stop before dispatch and record `REVIEW_SELECTION=SKIPPED`; do not invent a default seat.
 
 ### CC Review (Multi-Agent Routing)
 
-Do not hard-code `code-reviewer` or any other initial seat. Treat each existing CC path as the corresponding matrix cell. Route only cells with `status=selected`; the language table and domain triggers provide the recommendation and eligibility that Step 2.98 turns into automatic Claude-side selection, and they never select an external-quota seat. Selected reviewers run in parallel. Model comparison trials do not run inside `/pr-review`.
+Do not hard-code `code-reviewer` or any other initial seat. Treat each existing CC path as the corresponding matrix cell. Route only cells with `status=selected`; the language table and domain triggers provide only the recommendation and eligibility; they never select a seat. Selected reviewers run in parallel. Model comparison trials do not run inside `/pr-review`.
 
 #### Chunked dispatch (ENH-A — only when a selected primary cell is chunked)
 
@@ -776,7 +776,7 @@ Detect dominant source-code language by counting changed lines per extension (ex
 
 "Dominant" = language with the most changed lines among source files. If the top language has < 40% of changes, or the PR is cross-language-heavy, recommend `code-reviewer`.
 
-The recommendation becomes a selected cell through automatic Claude-side selection (Step 2.98) and may be cancelled or replaced by the invocation or a pre-dispatch reply. A selected language reviewer uses its pinned model and effort. An unselected or cancelled primary reviewer is not dispatched, does not contribute per-file accounting, and is not required for completion.
+The recommendation becomes a selected cell only when the user selects it in Step 2.98 (for example by replying 「照推薦」); the invocation or a pre-dispatch reply may also cancel or replace it. A selected language reviewer uses its pinned model and effort. An unselected or cancelled primary reviewer is not dispatched, does not contribute per-file accounting, and is not required for completion.
 
 #### Parallel Domain Reviewers (selected and eligible only)
 
@@ -852,6 +852,11 @@ Each reviewer returns its own finding list. Merge into a single "CC findings" bu
 - **Disagreement on severity**: keep higher severity; note the disagreement in 備註
 - **Source tag**: every consolidated CC finding must carry its source reviewer tag (e.g. `[typescript-reviewer]`, `[security-reviewer]`) in the final report, so user sees which specialty caught which issue
 - **No finding dropped** in consolidation — only deduplicated
+- **`OPEN_QUESTION` 區塊**（reviewer 依 `review-standards/change-integrity.md` 第 5 段輸出）不是 finding：不進 CC findings bucket、不送 Step 4 驗證、不分級。Main 在本步依序處理，結果帶到 Step 5 的「待確認問題」段：
+  1. 合併：問的是同一項未知（`unknown` 相同）就併成一題，保留每位來源 reviewer 的 tag。
+  2. 入場核對：`relevance` 引用的 `path:line` 由 Main 實際讀過、確認是本 PR 的改動或執行路徑；除了 `unknown` 那一項，題目依賴的其他前提都已查證；`impact` 寫出「答案是壞的」時會到 Must Fix 等級（不修就壞會出貨的東西）。任一項不成立就捨棄，捨棄的題數寫進「這次審查範圍」。
+  3. Main 試答一次：用自己讀得到、能回答這一題的權威來源查（PR 的 spec 或票、repo 文件、團隊知識庫、對方服務的程式碼），查到就停。查到答案而且顯示有缺陷，改寫成 finding 回到本 bucket，照常走 Step 4；查到答案而且沒問題，就捨棄並記進「這次審查範圍」。
+  4. 仍答不了的題目，原樣保留五欄，進 Step 5「待確認問題」。
 - **C4 deterministic result validation**: before admission, pass the packet, raw candidate, raw runtime input, and review root to the reducer. It re-reads the transcript and requires the extracted reviewer output to equal the candidate; no caller-built runtime receipt is trusted. Require `reviewer="spec-compliance-reviewer"`, top-level `dispatch_id` to equal the bound packet, `status="COMPLETE"`, and `errors=[]`; validate classification against the eight-value allowlist; require every input clause ID and spec path exactly once in their accounting arrays, every referenced `finding_id` to resolve to exactly one finding, every finding to be referenced by exactly one accounting row, and no unknown, duplicate, or omitted IDs. For each row, require `contract_type`, `normative_quote`, and `spec_anchor` to equal the trusted input clause byte-for-byte. For each finding, require those duplicated fields and all four same-flow values to equal its packet clause, require its trace-anchor ID set to equal the complete authored-plus-guard set in that clause's `clause_traces` row, and recompute the finding line range from the anchor's unique offset inside an authored quote whose exact line overlaps a reducer-derived Git hunk. Re-read canonical clauses and `side=head` evidence from regular-file blobs in the immutable `review_head` Git object; symlink-mode entries fail. Revalidate `side=base` only after proving `provenance_base_tree^{tree}` equals `authored_diff_base^{tree}`, then match `old_path`, `blob_oid`, exact quote range, and `blob_size_bytes`; query and enforce the 120,000-byte size before reading blob content, and never require the old path at PR HEAD. The reducer computes stale range/provenance invalidations itself, retains unaffected findings, suppresses accounting that depends on invalid evidence, and recomputes human-safe classification counts after filtering. Reject malformed containers, packet-budget overflow, authority mismatch, binding mismatch, missing concrete impact, or count mismatch. Any batch-level failure finalizes C4 as `FAILED`, admits zero C4 findings, and preserves only a stable validation error without re-dispatch.
 - **C4 admission**: only a validated spec reviewer row with an observable shortfall plus complete `normative_quote`, `spec_anchor`, `same_flow`, authored-hunk code `anchor`, `behavioral_evidence`, and concrete runtime/data/build/CI impact enters the CC findings bucket. Main session attaches the exactly matched trusted packet-allowlist entry as `evidence_binding` before any Step 4 routing; the reviewer neither supplies nor alters this binding. `undocumented_behavior` also requires an explicit closed-world or prohibitive clause. Other classifications remain in `spec_compliance_observations`, not findings. On multi-target runs, the reducer resolves the finding's code location to exactly one authored code binding target; zero or multiple target matches fail with `C4_CODE_TARGET_AMBIGUOUS`. It emits only admitted rows through `group_findings`, stamped with that code target's canonical `target_identity` and the `reducer_validated` marker before Step 4.8 routing, so the group helper's existing `C4_NOT_VALIDATED` gate admits them into the set report; main forwards this projection unchanged, and a row the reducer refuses never reaches the report.
 - **C4 dedup**: merge only when hunk, root cause, clause ID set, required observable result, behavioral delta, and remediation are all equivalent. Otherwise keep separate obligations even when they point to the same hunk. Preserve every C4 trace field on the consolidated row.
@@ -1130,25 +1135,33 @@ sqlite3 ~/.codex/logs_2.sqlite "SELECT feedback_log_body FROM logs WHERE thread_
 
 **Trigger**：Gemini Pro 與 Gemini Flash 都是矩陣中的可選 cell；只有對應 cell `status=selected` 才啟動。`$EXTRA_AXES` 只是已選 Gemini cell 的相容性投影，空值代表本輪沒有選 Gemini。
 
-**目的**：沿用既有 Gemini 路徑，提供獨立觀點；既有 trial 觀察只用來說明推薦理由，不是模型品質排名，也不會把 Flash 或 Pro 變成強制席位。詳見 [[feedback_agy_v1_0_12_pr_review_trial_2026_06_25]] + archived.md `pr-review-gemini-axes` 結案段。
+**目的**：沿用既有 Gemini 路徑，提供獨立觀點；既有 trial 觀察只用來說明推薦理由，不是模型品質排名，也不會把 Flash 或 Pro 變成強制席位。
 
 **並行 dispatch**：只有兩個以上 Gemini cell 都是 `selected` 時才並行；每個 cell 的啟動與等待都以 `REVIEW_SELECTION`／`$EXTRA_AXES` 的實際成員為 guard。未選定、cancelled 或 unavailable 的 cell 不啟動。
 
-**Invocation**：沿用既有 `agy` pattern；先取得 routing model，再只執行已 selected 的 command。下方 guarded block 是唯一啟動形狀：
+**Invocation**：Pro 先走 `ccp-gemini-argon`：Claude Code 經使用者自備的 Argon 相容端點跑 `google/gemini-4-argon:high`（端點與 token 由使用者自行接入，見 WIRING.md「跨模型後端」），在 `$REVIEW_ROOT` 以 headless 唯讀 agent 自己讀檔。它不可用才退回 `agy`，那條吃的是預設 CLI 額度，所以作為備援。Flash 只走 `agy`。只執行已 selected 的 command，下方 guarded block 是唯一啟動形狀。
 
-**v1.0.12 gotcha workaround**（[[feedback_agy_v1_0_12_pr_review_trial_2026_06_25]] line 30-44 + 本 session probe A/B 2026-06-25 雙重驗證）：
+**`ccp-gemini-argon` 的旗標**（精簡唯讀旗標可大幅降低長上下文輸入 token）：
+
+- `--settings '{"disableAllHooks": true}' --strict-mcp-config --setting-sources local`：不載入使用者的 hook、MCP、個人設定，也不載入被審 repo 的 project 設定。前三者只增加 token；project 設定的 allow 規則可能重新放行寫入
+- `--permission-mode dontAsk --allowedTools Read Grep Glob "Bash(git diff:*)" "Bash(git show:*)" "Bash(git log:*)"`：白名單外的工具一律拒絕，等於唯讀（實測叫它 Write，回 `permission_denials: ["Write"]`、檔案沒產生）
+- `--output-format json`：stdout 是 JSON envelope。`.result` 是模型回覆；`.modelUsage` 的 key 是實際跑的模型，直接當 observed model；`.is_error` 為 true 視同失敗
+- 不用 `--bare`：它只認 `ANTHROPIC_API_KEY`，讀不到 ccp 設的 `ANTHROPIC_AUTH_TOKEN`，會回「Not logged in」
+- `ccp-gemini-argon` 是使用者的 Argon 啟動函式（見 WIRING.md「後端標記 CC_VENDOR」）；端點回 429 時啟動函式自己會重試（`CLAUDE_CODE_MAX_RETRIES=60`），跑得久不代表壞了，不要中途砍掉改跑 `agy`
+
+**`agy` 的 v1.0.12 gotcha workaround**（Flash 與 Pro 備援都適用）：
 
 - ✅ **`--model=` / `--print=` 等號綁**：避開 Go flag parser 的 greedy-consume bug（`-p "X" --flag` 會把 `--flag` 當 `-p` value、prompt 被吃掉）
 - ✅ **`--add-dir "$REVIEW_ROOT"` 必加**：沒 active workspace 時 agy 把 prompt 當「請說明 CLI 參數」處理
 - ✅ **Prompt 內必含 anti-confirmation + JSON strict**（見下方 prompt template）：headless `-p` 模式即使有 `--dangerously-skip-permissions` 仍會 pause 等 user 確認、然後 exit；prompt 開頭強制 forbid
-- ✅ **`</dev/null` 必加**（2026-07-10 加、[[feedback_agy_v1_0_12_pr_review_trial_2026_06_25]] Addendum）：v1.1.0 的 `--print` 即使 prompt 由 flag 提供仍讀 stdin，subprocess 內 stdin 永不 EOF → request 送出前無限 hang、且 `--print-timeout` 只蓋 response 等待階段不會觸發（PR #299 兩軸全滅實證）。v1.1.1 已修，但 `</dev/null` 對任何版本免疫同類 bug、零成本永久保留
+- ✅ **`</dev/null` 必加**（2026-07-10 加）：v1.1.0 的 `--print` 即使 prompt 由 flag 提供仍讀 stdin，subprocess 內 stdin 永不 EOF → request 送出前無限 hang、且 `--print-timeout` 只蓋 response 等待階段不會觸發（PR #299 兩軸全滅實證）。v1.1.1 已修，但 `</dev/null` 對任何版本免疫同類 bug、零成本永久保留
 
-**Prompt template**（寫進 `/tmp/agy-{pro,flash}-prompt.txt`）：
+**Prompt template**（寫進 `/tmp/gemini-{pro,flash}-prompt.txt`；下方 block 讀進 `$PRO_PROMPT`／`$FLASH_PROMPT`）：
 
 ```
 DO NOT ASK FOR CONFIRMATION. The PR scope below is ALREADY confirmed — begin code review immediately and produce the JSON output. Any text other than the final JSON array is forbidden.
 
-You are reviewing a PR at $REVIEW_ROOT (already in your workspace via --add-dir). Read the changed files at HEAD, compare against base branch origin/$BASE_BRANCH. Find bugs, regressions, security issues, missed edge cases.
+You are reviewing a PR at $REVIEW_ROOT (your working directory, or already in your workspace via --add-dir). Read the changed files at HEAD, compare against base branch origin/$BASE_BRANCH. Find bugs, regressions, security issues, missed edge cases.
 
 Output STRICT JSON only — start with [ and end with ], no prose, no markdown fence. Schema:
 
@@ -1177,25 +1190,41 @@ PR context (use this for "out of scope" judgement):
 **並行 dispatch——每軸啟動與等待都以 `REVIEW_SELECTION` 中 selected Gemini cell 的 `$EXTRA_AXES` 相容投影為 guard**：
 
 ```bash
-GEMINI_FLASH_MODEL=$(bash "$HOME/.claude/scripts/model-routing.sh" GEMINI_FLASH_MODEL)
-: "${GEMINI_FLASH_MODEL:?missing or invalid GEMINI_FLASH_MODEL in ~/.claude/model-routing.env}"
-
 PIDS=""
 case ",$EXTRA_AXES," in *,pro,*)
-  (agy --print="$PRO_PROMPT" --model="Gemini 4 Argon (High)" --dangerously-skip-permissions --add-dir "$REVIEW_ROOT" --print-timeout 10m </dev/null > /tmp/agy-pro-output.txt 2>&1) &
+  PRO_PROMPT=$(cat /tmp/gemini-pro-prompt.txt)
+  (
+    if zsh -c 'printf "%s\n" "harness: wiring point \"後端標記 CC_VENDOR\" is not provided in this public copy; see WIRING.md" >&2; exit 1' \
+         ccp-gemini-argon "$REVIEW_ROOT" -p "$PRO_PROMPT" --output-format json --permission-mode dontAsk --no-session-persistence \
+         --settings '{"disableAllHooks": true}' --strict-mcp-config --setting-sources local \
+         --allowedTools Read Grep Glob "Bash(git diff:*)" "Bash(git show:*)" "Bash(git log:*)" \
+         </dev/null > /tmp/gemini-pro-envelope.json 2> /tmp/gemini-pro-ccp.err \
+       && jq -e '.is_error == false' /tmp/gemini-pro-envelope.json >/dev/null 2>&1; then
+      jq -r '.result' /tmp/gemini-pro-envelope.json > /tmp/gemini-pro-output.txt
+      echo "ccp-gemini-argon" > /tmp/gemini-pro-path.txt
+    else
+      echo "agy" > /tmp/gemini-pro-path.txt
+      agy --print="$PRO_PROMPT" --model="Gemini 4 Argon (High)" --dangerously-skip-permissions --add-dir "$REVIEW_ROOT" --print-timeout 10m </dev/null > /tmp/gemini-pro-output.txt 2>&1
+    fi
+  ) &
   PIDS="$PIDS $!" ;;
 esac
 case ",$EXTRA_AXES," in *,flash,*)
-  (agy --print="$FLASH_PROMPT" --model="$GEMINI_FLASH_MODEL" --dangerously-skip-permissions --add-dir "$REVIEW_ROOT" --print-timeout 10m </dev/null > /tmp/agy-flash-output.txt 2>&1) &
+  GEMINI_FLASH_MODEL=$(bash "$HOME/.claude/scripts/model-routing.sh" GEMINI_FLASH_MODEL)
+  : "${GEMINI_FLASH_MODEL:?missing or invalid GEMINI_FLASH_MODEL in ~/.claude/model-routing.env}"
+  FLASH_PROMPT=$(cat /tmp/gemini-flash-prompt.txt)
+  (agy --print="$FLASH_PROMPT" --model="$GEMINI_FLASH_MODEL" --dangerously-skip-permissions --add-dir "$REVIEW_ROOT" --print-timeout 10m </dev/null > /tmp/gemini-flash-output.txt 2>&1) &
   PIDS="$PIDS $!" ;;
 esac
 [ -n "$PIDS" ] && wait $PIDS
 ```
 
+Pro 跑完先讀 `/tmp/gemini-pro-path.txt` 確認實際走哪條：`ccp-gemini-argon` 時 observed model 取 `jq -r '.modelUsage | keys[]' /tmp/gemini-pro-envelope.json`，報告 Quota 行寫 envelope 的 `total_cost_usd` 與 `usage.input_tokens`（Argon 端點用量）；`agy` 時 observed model 寫 `UNAVAILABLE`，Quota 行照 Step 5 報告模板寫 Antigravity dashboard 快照（未取就寫原因），並在報告寫明「Argon 走 agy 備援（CLI 備援額度）」與 `/tmp/gemini-pro-ccp.err` 末行的失敗原因。
+
 **Parse 兩階段 fallback**：
 
 1. 預期 stdout 是 fenced ```json block 或 raw JSON array → 解出 findings
-2. **第一次 parse 失敗**（output 含 prose / 卡 confirmation / 撞 user CLAUDE.md inject 行為） → retry 1 次、prompt 強化 anti-confirm：
+2. **第一次 parse 失敗**（output 含 prose / 卡 confirmation / 撞 user CLAUDE.md inject 行為） → retry 1 次、prompt 強化 anti-confirm。retry 只重跑剛才實際成功執行的那一條指令（`/tmp/gemini-pro-path.txt` 寫 `ccp-gemini-argon` 就只重跑 block 裡的 `zsh -c … ccp-gemini-argon` 那段，成功後同樣用 `jq -r '.result'` 把新回覆寫回 `/tmp/gemini-pro-output.txt` 再解析，不重跑整個 block），所以 retry 時 ccp 執行失敗也不會掉進 `agy`，直接算兩階段失敗，降級用的原文是第一次那份輸出：
 
    ```
    Your previous response did not parse as JSON. STRICT REQUIREMENT: output ONLY a JSON array starting with [ and ending with ]. No prose, no explanation, no markdown fence, no questions back to me. The PR scope is ALREADY confirmed.
@@ -1203,7 +1232,7 @@ esac
    <repeat full prompt>
    ```
 
-3. **Retry 仍失敗** → 降級：原文標 `[Gemini-{pro,flash}-unstructured]` 進 Step 5 報告「參考用」群組、**不入 CC verification**（無法計量結構化 finding）。retry 只能重試同一個 selected path；不得靜默換模型或重跑已成功的席位。
+3. **Retry 仍失敗** → 降級：原文標 `[Gemini-{pro,flash}-unstructured]` 進 Step 5 報告「參考用」群組、**不入 CC verification**（無法計量結構化 finding）。retry 只能重試同一個 selected path，也就是剛才實際跑的那條（`/tmp/gemini-pro-path.txt`）；Pro 的 `agy` 備援只在 `ccp-gemini-argon` 執行失敗時啟動，不拿來補 parse 失敗。不得靜默換模型或重跑已成功的席位。
 
 **標記** finding source：
 
@@ -1211,11 +1240,11 @@ esac
 - 只有 selected Flash cell 的 findings 標 `[Gemini-Flash]`
 - 用於 Step 5「發現總覽」表動態欄位；未選定、cancelled 或 unavailable 的 cell 不產生 finding 欄
 
-**失敗處理**：selected agy 軸失敗 / timeout / parse 兩階段全失敗時，在報告 footer 註明 `FAILED`，保留其他 selected seat 的有效結果，不把缺席寫成成功，也不阻斷其他 selected seat。未選定或 cancelled 的 agy 軸不派工、不列為必須完成。
+**失敗處理**：Pro 的 `ccp-gemini-argon` 失敗（Argon 端點不通、非 0 結束、envelope 不是 JSON 或 `is_error` 為 true）時，上方 block 已自動改跑一次 `agy`；兩條都失敗，或 selected Gemini 軸 timeout／parse 兩階段全失敗時，在報告 footer 註明 `FAILED`，保留其他 selected seat 的有效結果，不把缺席寫成成功，也不阻斷其他 selected seat。未選定或 cancelled 的 Gemini 軸不派工、不列為必須完成。
 
 #### 多目標整組材料（Step 2.05 準備的多目標才跑；單輸入沿上方既有 Gemini 段）
 
-多目標時 Gemini 的**已選角度以一次 `agy` 執行取得整組**：`--add-dir` 重複列出**每一個目標**的 `review_root`，prompt 內逐目標寫出 `target_identity`／head／head_ref／base／base_ref／`authored_diff_base`，讓同一個 root 綁同一份版本；**不按 PR 或 repo 數量拆成多次完整審查**。只保留該 cell 的 selected 角色、requested model（Pro 沿 `Gemini 4 Argon (High)`、Flash 沿 `$GEMINI_FLASH_MODEL`，由 `model-routing.sh` 解析後傳入；payload 與環境都缺時回 `MODEL_UNAVAILABLE`＋0 executions，不自創 model id）與材料範圍；不新增通道、不偷換模型。材料構建與執行替身接線走 `scripts/pr-review-gemini-web.py materials`（讀 `$PREPARATION_PATH`，輸出 packet 與 executions；executions 只描述、不代跑）。packet 是唯一持久 receipt，完整 prompt 保留在 packet 的 execution，不另寫 `*-prompt.txt`。`agy` 沿既有契約由 main 直接執行 executions：argv 形狀與既有段相同——`--print=<prompt 全文>`（prompt 全文作為 flag value，不是檔案路徑）、`--model=`／`--print-timeout 10m` 等號綁、每個 root 一組兩個 argv（`--add-dir`，`<review_root>`）、`</dev/null` 必加。
+多目標時 Gemini 的**已選角度以一次執行取得整組**（Pro 先走 `ccp-gemini-argon`，失敗才換 `agy`；Flash 走 `agy`）：`--add-dir` 重複列出**每一個目標**的 `review_root`（`ccp-gemini-argon` 另以第一個 root 為 cwd），prompt 內逐目標寫出 `target_identity`／head／head_ref／base／base_ref／`authored_diff_base`，讓同一個 root 綁同一份版本；**不按 PR 或 repo 數量拆成多次完整審查**。只保留該 cell 的 selected 角色、requested model（Pro 沿 `Gemini 4 Argon (High)`、Flash 沿 `$GEMINI_FLASH_MODEL`，由 `model-routing.sh` 解析後傳入；payload 與環境都缺時回 `MODEL_UNAVAILABLE`＋0 executions，不自創 model id）與材料範圍；不新增通道、不偷換模型。材料構建與執行替身接線走 `scripts/pr-review-gemini-web.py materials`（讀 `$PREPARATION_PATH`，輸出 packet 與 executions；executions 只描述、不代跑）。packet 是唯一持久 receipt，完整 prompt 保留在 packet 的 execution，不另寫 `*-prompt.txt`。`agy` 沿既有契約由 main 直接執行 executions：argv 形狀與既有段相同——`--print=<prompt 全文>`（prompt 全文作為 flag value，不是檔案路徑）、`--model=`／`--print-timeout 10m` 等號綁、每個 root 一組兩個 argv（`--add-dir`，`<review_root>`）、`</dev/null` 必加。Pro 的 executions 有兩筆：`role: primary`（`via: ccp-gemini-argon`、`command: zsh`，argv 已帶單目標段那組精簡唯讀旗標，`cwd` 是第一個 root，回覆是 JSON envelope，取 `.result` 當 `reply.output`、`.modelUsage` 的 key 當 `reply.model`）與 `role: fallback`（上述 `agy` 形狀，`run_if` 寫明只在 primary 失敗時跑）；`dispatch_call_count` 只數 primary，兩筆不會都跑。`collect` 的 `reply.model` 接受 `google/gemini-4-argon:high` 與 `Gemini 4 Argon (High)`。選席鍵沿用 `seat: agy`（`pr-review-targets.py` 用它比對選了哪一席），不代表實際執行路徑。
 
 **派工閘（單一來源，與 Ticket 01 同一道）**：`materials` 重用 `pr-review-targets.py` 的 `dispatch_decision`——selection 確實含對應 seat+angle、容量裁決已得、且 payload 帶 `confirmation=true` 才允許輸出 executions；否則回 `NOT_DISPATCHABLE`（reason = `selection-required`／`awaiting-adjudication`／`awaiting-confirmation`／`seat-not-selected`／`preparation-blocked`／`cancelled`）＋ `executions=[]`、`dispatch_call_count=0`。容量裁決缺時同樣 0 executions、不把 skipped 算通過。
 
@@ -1543,6 +1572,7 @@ JSON
 )
 ```
 
+- **重要性上限在送出前就要生效**：送 `reconcile` 前，先套用 Action Items 的重要性上限（Severity calibration 第 4 項）：判為成立但不重要的 finding，同一根因每個來源帶進 payload 的 `suggestion` 都改成不高於 Nice to Have，並在 `severity_reason` 寫「重要性：<條目編號>＋理由」。群組報告會按同根因取最高的建議，留到 Step 5 才改會被拉回原級。
 - **去重帶目標身分**：去重以目標身分限定——不同 target 即使同 file／line／anchor／root cause 也保持各自一條，**只有輸入明示同一 `failure_chain_id` 且 root cause 相同**時才合成一條跨 repo 多位置 finding；不同 root cause 不為篇幅硬合併。原始來源、各軸建議、標準化後的 `verification_verdict`／`verification_evidence`、`original_severity`／`corrected_severity` 與 `severity_reason` 都保留在 `perspectives` 及證據稿的「來源與分歧」表；Step 4.1 的 `cc_verdict`／`cc_evidence` 與 Step 4.2 的 `codex_verdict`／`codex_evidence` 先映成上述標準欄位，不把 source-specific 欄位寫進 schema 3。逐位置 finding_uid 在既有 20-hex 輸入前加上 canonical 目標身分；跨 target 群組的 `F-xx finding_uid` 使用完整位置集合算出的 `group_id`，位置表仍保留逐位置 UID。單 PR 的既有 UID 與報告格式 byte-for-byte 不變。
 - **群組報告走 schema 3 Markdown**：主報告與完整證據副檔都是人讀的 Markdown（`**Report projection schema**: 3`、`**Review set identity**`、`**Target versions**` 逐目標 `head|base|state`），寫到 `$REPORT_DIR/sets/set-<stable-id>-review.audit.draft.md` 後沿既有 Step 6 流程成對發布到 `.audit.md`／`.md`——發布、generation 綁定、claim 復原與 rollback 全部由 `pr-review-report-projection.py` 一手執行，group helper 只產生 reconcile 資料與 Markdown 草稿，**不得直接寫任何 final path**。發布或讀取前，set 身分或目標清單與本輪不符、或 schema 不是 3，一律拒絕；同一組 PR 重審時允許 `Target versions` 更新，並依下一條先備份再覆蓋。單 PR 的 schema 1／2 報告照舊，不受 schema 3 影響。
 - **歷史只供 Main 定點複查**：載入同組與相關目標的既有報告，以目標身分對帳並保留 legacy UID 出處；`PRIOR_REVIEW_FINDINGS` 與群組 `prior_inputs` 不得進任何 fresh reviewer prompt。目標本輪缺失、set 身分改寫、證據不足或本輪零 finding 都不能判 `FIXED`，預設 `STALE`；不自動擴大目標清單。舊報告只讀不寫回。
@@ -1603,7 +1633,7 @@ JSON
 - 完整證據副檔 header 固定包含 `**Report projection schema**: 2`；schema 2 的 deterministic source contract 會驗 Prior review continuity header 與「上一輪 findings 對帳」段，schema 1 只保留讀取／重播相容性。發布時 helper 會在 audit 與 main 同時加入相同的 `**Report generation**: <YYYY-MM-DDTHH:MM:SSZ>`；讀取或發布前若兩份 generation 不同，視為中途中止留下的混合版本，必須重跑 Step 6，不得把兩份內容混用。
 - Schema 1 每個 finding 的內部結構固定用獨立一行 `F-01 finding_uid: <20-hex> action=<action>`；UID 不得只靠問題文字、任意 hash 或 token 推測。
 - 主報告只能由 deterministic projection helper 產生，不得由模型重寫或摘要；不得新增模型呼叫，也不得改 `REVIEW_SELECTION`、finding admission、排序、severity、action、UID、coverage、C4 或 selected axis state。
-- 主報告保留 header（含 coverage／C4／axis state），另加 `REVIEW_SELECTION` selected set／seat state 與 Prior review continuity 狀態、「上一輪 findings 對帳」、發現總覽、所有 selected finding 的 `action=auto-fix | ask-user` 完整 inline-comment payload、沒做的部分，以及每個 current stable UID 指回副檔的連結。Spec 依據完整內容只留在完整證據副檔；主報告以 header 的 Formal spec traceability 狀態行供拍板。
+- 主報告保留 header（含 coverage／C4／axis state），另加 `REVIEW_SELECTION` selected set／seat state 與 Prior review continuity 狀態、「待確認問題」（有才出現）、「上一輪 findings 對帳」、發現總覽、所有 selected finding 的 `action=auto-fix | ask-user` 完整 inline-comment payload、沒做的部分，以及每個 current stable UID 指回副檔的連結。Spec 依據完整內容只留在完整證據副檔；主報告以 header 的 Formal spec traceability 狀態行供拍板。
 - `action=no-op` 的 inline-comment block 只留在完整證據副檔；發現總覽仍保留所有 finding（限 selected source，含 REFUTED／PARTIAL／參考用），主報告不會把它們從決策表刪掉，也不會為未選定或 cancelled seat 建立空 finding。
 - 下方 Report Structure 是完整證據副檔的 canonical 結構；主報告結構由 `~/.claude/scripts/pr-review-report-projection.py` 固定投影，禁止手工二次整理。
 
@@ -1617,10 +1647,12 @@ JSON
 - [ ] 含假設性措辭（「若有人繞過」「假設 API 回 X」）的 finding severity ≤ Should Fix（strict-liability 豁免。同 skill 6d-1）
 - [ ] **Severity 不得建立在未驗證前提上**（2026-07-30 加）：對每條 Should Fix 以上的 finding 問一次「把其中**沒有實際查證過**的論據拿掉，最終建議會不會降？」會降 → 就用**拿掉之後**的等級，並把該前提在備註標成未驗證。判準是「有沒有第一手證據」不是「聽起來合不合理」：官方文件／實跑輸出／file:line 引文算，模型推論、subagent 自陳「應該是」、多軸都這麼說**都不算**。<br>為什麼這條要獨立存在：未驗證的部分往往正是把 severity 撐高的那一段，而 severity 決定哪幾條會被貼給作者 —— 不擋在這裡，最沒根據的 finding 會被系統性地選出來送出去（PR #4836 實證：貼出的 2 條都是靠未驗證論據升上前兩名，拿掉後一條降 Nice to Have、一條根本不成立；同輪完全驗證過的 3 條全部正確但都落在 Nice to Have、一條沒貼）。上一條 6d-1 抓的是**措辭**上的 hedge，抓不到「把 hedge 刪掉改寫成肯定句」——本條補的就是那個洞。
 - [ ] 每條「移除/削弱既有防護、檢查、guard」類 finding 已過 skill 6c Refactor Intent Gate、查證結論寫進該條備註（執行點在 Action Items「Severity calibration」第 1 項；本 PR 無此類 finding 則免）
+- [ ] 每條帶「重要性：」備註的 finding 都寫了條目編號與依據（M2 另有保護機制位置或前提組合），而且沒有命中防線 G1–G4（執行點在 Action Items「Severity calibration」第 4 項；本輪沒有判不重要的 finding 則免）
 - [ ] 每條 consensus finding 的複查欄有 4.3a baseline verdict（沒有 = 4.3 漏跑、回去補）
 - [ ] 每條 lone finding 的備註有 4.3b 的「他軸為何漏」解釋或降級理由
 - [ ] 「Spec 依據」段含 spec 作者同人標注（Step 2.6 item 5；未偵測到 spec 則免）
-- [ ] 報告最後有「這次審查範圍」段：寫明底線完成與否（語言 reviewer 停審、沒回來、方法組沒載入都是底線未完成）、C4 部分由主 session 從條文對帳整理、推薦但未選的外部額度席、派出後才到的回覆；Step 4.2 仍花 Codex 額度，不得把「外部額度席沒選」寫成外部成本為零
+- [ ] Step 3 收到的每個 `OPEN_QUESTION` 都有去處：併題、捨棄（題數記進「這次審查範圍」）、改寫成 finding，或進「待確認問題」段；沒有任何一題被默默丟掉
+- [ ] 報告最後有「這次審查範圍」段：寫明底線完成與否（語言 reviewer 停審、沒回來、方法組沒載入都是底線未完成）、C4 部分由主 session 從條文對帳整理、推薦但未選的席位、派出後才到的回覆；Step 4.2 仍花 Codex 額度，不得把「外部額度席沒選」寫成外部成本為零
 - [ ] 每個 admitted finding 都經過 Step 4.9 失敗模式分類（標記、缺驗收依據或不標三者之一），三個計數已記下
 - [ ] 報告 header 含 Formal spec traceability 狀態行；`dispatch=PENDING` 不得進報告；「Spec 依據」段含 Step 2.65 finalized gate／dispatch receipt、runtime model/effort/tool count、clause classification counts、admitted finding count、observation count、invalidated count 與 stable reason codes，且未新增獨立 review axis 欄
 - [ ] C4 報告輸入只取自最後一次 reducer `human_projection`；`invalidated_ids ∩ report_finding_ids = ∅`，且 invalidated candidate 的 title／severity／quote／anchor／impact／fix 等語意內容在整份報告 0 命中
@@ -1647,7 +1679,7 @@ JSON
 **Trunk**: `TRUNK=<x> (source: profile <path> | origin/HEAD | default master)`（Step 2.5；provenance 與 C4 authored-hunk 以它為基準）
 **Review continuity**: `source_continuity=CURRENT|NEW_COMMITS|HISTORY_REWRITE|UNKNOWN`；`base_changed=true|false|unknown`；`review_context_changed=true|false`
 **Prior review continuity**: `N-A (no prior audit)` / `SKIPPED (<reason>)` / `CHECKED (fixed F / still-open O / stale S)`
-**Review selection**: `REVIEW_SELECTION` 的完整 cell 狀態與 selection reason；selected set=<Claude 側席位自動選入的組合，加上叫用指令或派工前回覆明選的外部額度席>；`not-selected` 且 `recommended` 的外部額度席標「推薦但未選」
+**Review selection**: `REVIEW_SELECTION` 的完整 cell 狀態與 selection reason；selected set=<叫用指令或矩陣回覆明確選定的組合>；`not-selected` 且 `recommended` 的席位標「推薦但未選」
 **Selected set**: 只列 `status=selected` 的模型／執行路徑與審查角度；只有選定的初次模型／角度才進入審查工具、Reviewer models 與發現總覽欄。cancelled／not-selected／unavailable／needs-material 不派工、不算必須完成、不算成功；既有 verification role 仍依 4.1／4.2 contract 呈現。
 **審查工具**: 只列 selected set 的 CC／Codex／Gemini／web GPT 路徑；每個 reviewer 名稱與實際 runtime model 以下一行及 dispatch receipt 對齊；沒有 selected seat 就寫 `REVIEW_SELECTION=SKIPPED`
 **Reviewer model 記錄規則**: 不以 preset、agent frontmatter 或 logical alias 猜 observed model；requested 與 observed 分開記，模型識別未知就寫 `UNAVAILABLE`，不得補猜。
@@ -1656,10 +1688,22 @@ JSON
 **定位 (ENH-B)**: selected findings anchored exact X / ambiguous Y / **FAILED Z**
 **React-doctor (2.97)**: deterministic conditional check 的新引入 N 條 / 未引入新問題（既有 M 條不計）/ SKIPPED (<reason>) / N-A（非 React PR）；它不是初次 reviewer selection cell
 **Formal spec traceability (2.65)**: selected formal-spec cell 的 `SKIPPED (<reason_code>)` 加三態掃描文字之一——`SKIPPED (no normative source)` / `SKIPPED (normative sources scanned, none intersect)` / `SKIPPED (scan not run: <原因>)`——/ `DISPATCHED（clauses C / findings F / observations O / invalidated I）` / `FAILED (<reason_code>)`；未選定寫 `N-A (not selected)`
-**Quota (selected Gemini only、選填)**: weekly before X% / after Y% / Δ = Z%；5h before A% / after B% / Δ = C%（dashboard snapshot 對照、source https://antigravity.google.com）——沒有 selected Gemini 或未取時寫原因
+**Quota (selected Gemini only、選填)**: Pro 走 `ccp-gemini-argon` 時寫 envelope 的 `total_cost_usd` 與 `usage.input_tokens`（Argon 端點用量）；走 `agy`（Pro 備援或 Flash）時寫 weekly before X% / after Y% / Δ = Z%；5h before A% / after B% / Δ = C%（dashboard snapshot 對照、source https://antigravity.google.com）——沒有 selected Gemini 或未取時寫原因
 **審查軸狀態**: 只列 selected initial set 與既有 4.1／4.2 verification results；每項寫 PASS／FAIL／N-A + 證據或原因，不把 cancelled／not-selected 當作 PASS 或完成，不得殘留 PENDING。取消初次 reviewer 不算未完成，也不算已完成。
 
 ---
+
+## 待確認問題
+
+（Step 3 彙整後仍答不了的 `OPEN_QUESTION` 才出現此段，沒有就整段省略。放在 header 之後的第一段，讓使用者一打開報告就看到。這一段不是 finding：不分級、不進發現總覽、不產生 inline comment、不走 Step 4 驗證；不設題數上限。）
+
+段首第一句固定寫：「本輪有 N 題重要未知尚未排除；發現總覽沒有 Must Fix 或 Should Fix，不代表這些風險已經排除。」每題一列：
+
+| # | 問題 | 相關的已確認改動 | 未知 | 查過 | 答案好／壞時的處置 |
+|---|---|---|---|---|---|
+| Q-01 | <問句，不下斷言> | `<path:line>` | <剩下哪一項前提> | <查過的來源與為什麼答不了> | <兩種答案分別怎麼處理> |
+
+同一份 PR 再審時不承接上一輪的題目；Main 讀到前一輪報告時，自己判斷哪些題已有答案、哪些仍要列。
 
 ## Spec 依據
 
@@ -1859,6 +1903,7 @@ Weighted by verification verdict, but **all findings from selected cells are sti
 1. **6c Refactor Intent Gate** — 對「PR 移除/削弱既有防護、檢查、guard」類 finding，定 severity 前先過 skill 6c：spec / PR description / commit message 三層設計意圖查證 → 判斷是邏輯耦合殘留還是真正防護削弱 → 追蹤新 contract 下該 invariant 由誰接手。查證結論寫進該條備註。
 2. **6d rules** — 6d-1 hedge cap / 6d-3 repro path + release-blocking（Must Fix 雙半條件：具體重現路徑 + 不修就壞「會出貨的東西」）；lone finding 依本 command Step 4.3b 的判斷結論分級。
 3. **Provenance cap（Step 2.55）** — inherited 檔上的 finding 視同範圍外：即使 cross-axis CONFIRMED 也 cap 參考用 + 建議另開 ticket、comment 開頭標明「trunk 帶進的內容、不是本 PR 寫的」；只有 authored 檔的 finding 走正常分級。降級理由寫進「校準套用」／備註（never-drop 不變）。
+4. **重要性上限（最後一關）** — 如果 finding 的 Step 4 結論是 CONFIRMED 或 PARTIAL（不分 CC 或外部來源），或是沒被 4.3a 判 OUT_OF_SCOPE 的 consensus finding（它跳過 4.1／4.2 的真實性驗證，由兩軸同條 flag 視為成立），就在定最終建議前讀 `~/.claude/references/final-gate-materiality.md` 判重要性；INCONCLUSIVE、REFUTED、OUT_OF_SCOPE 不套用，M5（風格與措辭）不用在本步。判為「成立但不重要」的 finding 最終建議最高 Nice to Have，只降不升；與上面幾項及作者校準並存時取最低的那一級。備註寫「重要性：<條目編號>＋一句理由」（M2 另附保護機制位置或前提組合），照列不刪。必報項與質疑整體方向的意見不可判不重要（標準的 G1–G4），寫不出依據就照原分級。多目標模式下，同一根因的每個來源都套同一個判定，並在 Step 4.8 送 `reconcile` 前套用（見該步）。
 
 **Author calibration (Step 2.2)**: if a calibration file was loaded for this PR's author, apply its entries HERE when assigning each finding's 最終建議 — downgrade or reword only, per Step 2.2 constraints. List every applied adjustment in a「校準套用」line under this section (finding # + calibration entry cited); if the file was loaded but nothing matched, write「校準檔已載入、本輪無套用」; if no calibration file exists for this author, write「無作者校準檔（<author-slug>.md 不存在）、本輪無套用」. The line is mandatory in all three states — it lets a report audit tell "ran, no file" from "step skipped".
 
@@ -1923,7 +1968,7 @@ Weighted by verification verdict, but **all findings from selected cells are sti
 - 沒完成：列為未完成的主題、標為未審的整合面、沒回來的席位。
 - 底線：已完成 | 底線未完成：<原因>。語言 reviewer 停審、沒回來、方法組沒載入都寫底線未完成；只做註解清掃時寫「只做註解清掃，沒有程式碼正確性與品質審查」，不宣稱底線已滿足。
 - C4：C4 部分由主 session 從 spec-compliance-reviewer 既有的 `contract_accounting`／`spec_file_accounting` 整理（以 reducer `human_projection.clause_accounting` 為準），同樣歸入上面四類；不改 C4 的輸出契約，reviewer 不另寫範圍段。
-- 推薦但未選：列出 `status: not-selected` 且 `recommendation: recommended` 的外部額度席，並寫補跑方式（再叫用 `/pr-review` 並在指令點名席位）；它們不算未完成。
+- 推薦但未選：列出 `status: not-selected` 且 `recommendation: recommended` 的席位，並寫補跑方式（再叫用 `/pr-review` 並在指令點名席位）；它們不算未完成。
 - 派出後才到的回覆：寫明哪個回覆晚於派出、影響了哪些尚未派出的席位；已派出的席位照常完成，結果照常進報告。
 - 外部額度：Step 4.2 的驗證仍用 Codex 額度；不得把「外部額度席沒選」寫成外部成本為零。
 ````

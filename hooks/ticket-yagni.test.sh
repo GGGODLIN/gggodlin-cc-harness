@@ -258,6 +258,44 @@ RO8="$T/runner-out8"; mkdir -p "$RO8"
 python3 "$REAL_RUNNER" --session $SESSION --run $RUN --ticket 09 --agent t --worktree "$CLEAN" --base "$CLEAN_BASE" --cwd "$CLEAN" --out "$RO8" --ticket-file "$CLEAN/.scratch/feat/issues/09-wire.md" > "$T/rn8.out" 2>&1; RC=$?
 check "RN8 empty diff -> skip.json, exit 0, no error.json, no relay call (firing branch, not stub)" "[ \$RC -eq 0 ] && [ -f '$RO8/skip.json' ] && grep -q 'empty-diff' '$RO8/skip.json' && [ ! -e '$RO8/error.json' ] && [ ! -e '$RO8/packet.md' ]"
 check "RN5 relay key never written into outputs" "! grep -rq 'Authorization' '$RO2' '$RO3' 2>/dev/null"
+TRUNC_REPO="$T/trunc-repo"; mkdir -p "$TRUNC_REPO/.scratch/feat/issues"
+git -C "$TRUNC_REPO" init -q; git -C "$TRUNC_REPO" config user.email t@t; git -C "$TRUNC_REPO" config user.name t
+printf '# 09 wire\n\nWire config.\n' > "$TRUNC_REPO/.scratch/feat/issues/09-wire.md"
+printf 'def untouched_existing():\n  return 1\n\ndef target_fn():\n  return 2\n' > "$TRUNC_REPO/a_first.py"
+printf 'seed\n' > "$TRUNC_REPO/m_big.txt"
+printf 'def cut_off_existing():\n  return 3\n' > "$TRUNC_REPO/z_last.py"
+git -C "$TRUNC_REPO" add -A; git -C "$TRUNC_REPO" commit -qm base
+TRUNC_BASE=$(git -C "$TRUNC_REPO" rev-parse HEAD)
+printf 'def untouched_existing():\n  return 1\n\ndef target_fn():\n  return 22\n\ndef newly_added_fn():\n  return 99\n' > "$TRUNC_REPO/a_first.py"
+python3 -c "from pathlib import Path; Path('$TRUNC_REPO/m_big.txt').write_text(('y' * 80 + '\n') * 4600)"
+printf 'def cut_off_existing():\n  return 3\n\ndef cut_off_new_fn():\n  return 4\n' > "$TRUNC_REPO/z_last.py"
+cat > "$T/fake-trunc.json" <<'EOF'
+{"model":"gpt-6.1-sol","choices":[{"message":{"content":"{\"verdicts\":[{\"item\":\"FILE:a_first.py\",\"verdict\":\"keep\",\"basis\":\"a\",\"ticket_quote\":\"Wire\",\"reason\":\"ok\"},{\"item\":\"newly_added_fn\",\"verdict\":\"keep\",\"basis\":\"a\",\"ticket_quote\":\"Wire\",\"reason\":\"ok\"}],\"missing_information\":[],\"summary\":\"s\"}"},"finish_reason":"stop"}],"usage":{"completion_tokens":10}}
+EOF
+RO9="$T/runner-out9"; mkdir -p "$RO9"
+TICKET_YAGNI_FAKE_RESPONSE="$T/fake-trunc.json" python3 "$REAL_RUNNER" --session $SESSION --run $RUN --ticket 09 --agent t --worktree "$TRUNC_REPO" --base "$TRUNC_BASE" --cwd "$TRUNC_REPO" --out "$RO9" --ticket-file "$TRUNC_REPO/.scratch/feat/issues/09-wire.md" > "$T/rn9.out" 2>&1; RC=$?
+check "RN9 diff-aligned items: untouched existing symbols and truncated files excluded from prompt items, but truncated files stay in coverage.missing" "[ \$RC -eq 0 ] && grep -q -- '- FILE:a_first.py' '$RO9/packet.md' && grep -q -- '- newly_added_fn' '$RO9/packet.md' && ! grep -q -- '- untouched_existing' '$RO9/packet.md' && ! grep -q -- '- FILE:z_last.py' '$RO9/packet.md' && ! grep -q -- '- cut_off_new_fn' '$RO9/packet.md' && grep -q '\"FILE:z_last.py\"' '$RO9/verdict.json' && grep -q '\"FILE:m_big.txt\"' '$RO9/verdict.json'"
+check "RN10 repo without minimal spec marks (b) not applicable and forbids missing_information" "grep -q '本功能未另立最簡版 spec；(b) 不適用，僅依 (a) 票原文與適用本票的本批開工與測試決策及 (c) 判定，不因此列 missing_information' '$RO9/packet.md'"
+printf 'untracked review note\n' > "$CLEAN/.scratch/feat/2026-11-02-yagni-review.md"
+RO11="$T/runner-out11"; mkdir -p "$RO11"
+python3 "$REAL_RUNNER" --session $SESSION --run $RUN --ticket 09 --agent t --worktree "$CLEAN" --base "$CLEAN_BASE" --cwd "$CLEAN" --out "$RO11" --ticket-file "$CLEAN/.scratch/feat/issues/09-wire.md" > "$T/rn11.out" 2>&1; RC=$?
+check "RN11 untracked .scratch/ review files are excluded from collect_diff (empty code diff still skips)" "[ \$RC -eq 0 ] && [ -f '$RO11/skip.json' ] && [ ! -e '$RO11/packet.md' ]"
+cat > "$REPO/.scratch/feat/issues/01-first.md" <<'EOF'
+# 01 — First ticket
+
+正文示例：本批開工選擇（不应被掃入：DECOY_BODY_CHOICE）
+
+## Verification Log
+
+- 2026-11-01 本批開工選擇（舊批紀錄：STALE_PREV_CHOICE）
+- 2026-11-02 本批開工選擇（範例選擇紀錄）：狀態與併發核驗＝簡單版（有限狀態巡檢），用於 07、09。
+EOF
+RO12="$T/runner-out12"; mkdir -p "$RO12"
+python3 "$REAL_RUNNER" --session $SESSION --run $RUN --ticket 09 --agent t --worktree "$REPO" --base "$BASE" --cwd "$REPO" --out "$RO12" --dry-run --ticket-file "$REPO/.scratch/feat/issues/09-wire.md" > "$T/rn12.out" 2>&1; RC=$?
+check "RN12 packet head includes batch decision and latest Verification Log choice from 01-*.md while excluding .scratch/ and earlier/body lines" "[ \$RC -eq 0 ] && grep -q '## 本批開工與測試決策（屬 (a) 已核准範圍）' '$RO12/packet.md' && grep -q '本票測試義務：required' '$RO12/packet.md' && grep -q '狀態與併發核驗＝簡單版（有限狀態巡檢），用於 07、09。' '$RO12/packet.md' && ! grep -q 'DECOY_BODY_CHOICE' '$RO12/packet.md' && ! grep -q 'STALE_PREV_CHOICE' '$RO12/packet.md' && ! grep -q 'FILE:.scratch/' '$RO12/packet.md'"
+RO13="$T/runner-out13"; mkdir -p "$RO13"
+python3 "$REAL_RUNNER" --session $SESSION --run run-missing-dec --ticket 09 --agent t --worktree "$REPO" --base "$BASE" --cwd "$REPO" --out "$RO13" --dry-run --ticket-file "$REPO/.scratch/feat/issues/09-wire.md" > "$T/rn13.out" 2>&1; RC=$?
+check "RN13 missing decision.json for explicit run does not borrow another run's decision.json" "[ \$RC -eq 0 ] && ! grep -q '本票測試義務：required' '$RO13/packet.md'"
 
 echo
 echo "PASS=$PASS FAIL=$FAIL  (tmp: $T)"

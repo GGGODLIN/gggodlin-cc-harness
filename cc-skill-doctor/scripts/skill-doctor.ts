@@ -79,7 +79,7 @@ const skillOverrides: Record<string, string> = settings.skillOverrides ?? {}
 // (the description is what surfaces for auto-triggering; matching full body over-flags
 // any skill that merely discusses design). Router itself is excluded below.
 const DESIGN_SIGNATURE = /anti-slop|landing.*portfolio|distinctive.*frontend|design.*taste|claude\.ai.*artifact/i
-const DRIFT_EXCLUDE = new Set<string>(['design-router'])
+const DRIFT_EXCLUDE = new Set<string>(['design-router', 'docs'])
 
 function scanRoot(rootPath: string, origin: Origin, pluginIdResolver?: (skillPath: string) => string | undefined): Skill[] {
   if (!existsSync(rootPath)) return []
@@ -89,6 +89,7 @@ function scanRoot(rootPath: string, origin: Origin, pluginIdResolver?: (skillPat
     let entries: string[]
     try { entries = readdirSync(dir) } catch { return }
     for (const e of entries) {
+      if (e.startsWith('.')) continue
       const p = join(dir, e)
       let st
       try { st = statSync(p) } catch { continue }

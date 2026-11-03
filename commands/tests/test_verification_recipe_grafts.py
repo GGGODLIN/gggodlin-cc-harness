@@ -75,11 +75,31 @@ class VerificationRecipeGrafts(unittest.TestCase):
     self.assertIn('不新增固定 mutation 關卡', check)
 
   def test_probe_preserves_authority_and_reuses_evidence(self):
-    body = section(self.reference, '## 安全假設 probe', '## trial 觀察')
+    body = section(self.reference, '## 安全假設 probe', '## 效能宣稱核驗')
     for expected in ('尚未證明', '執行上限', '釘定依賴版本', '真實模組',
                      '不要 mock', '不自行擴權', '不自動授權修 code', '證據沒變就沿用'):
       with self.subTest(expected=expected):
         self.assertIn(expected, body)
+
+  def test_benchmark_visual_state_and_history_sections_exist(self):
+    perf = section(self.reference, '## 效能宣稱核驗', '## 視覺零漂移基準鎖定')
+    for expected in ('計時區間內工作真發生且 0 報錯', '正式環境參數與入口對齊',
+                     'A/B 交錯重跑與瓶頸點名', '單變量控制', '/hillclimb'):
+      with self.subTest(expected=expected):
+        self.assertIn(expected, perf)
+    visual = section(self.reference, '## 視覺零漂移基準鎖定', '## 狀態與併發兩層核驗')
+    for expected in ('換底層技術／重構但要求畫面維持一模一樣', '基準截圖或終端輸出', '零非預期視覺漂移'):
+      with self.subTest(expected=expected):
+        self.assertIn(expected, visual)
+    state = section(self.reference, '## 狀態與併發兩層核驗', '## 程式碼歷史動機追查')
+    for expected in ('簡單版（有限狀態巡檢）', '完整版（數學模型窮舉與反例圖）',
+                     '不重複詢問', '在指定模型、假設與步數界限內成立'):
+      with self.subTest(expected=expected):
+        self.assertIn(expected, state)
+    history = section(self.reference, '## 程式碼歷史動機追查', '## trial 觀察')
+    for expected in ('git blame -L', 'git log -S', '當初為何加入', '目前由誰保證'):
+      with self.subTest(expected=expected):
+        self.assertIn(expected, history)
 
   def test_observation_uses_existing_artifacts_without_empty_rows(self):
     body = section(self.reference, '## trial 觀察')

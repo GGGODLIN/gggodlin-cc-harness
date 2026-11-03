@@ -83,5 +83,53 @@ else
   record_fail 'mid-audit change was hidden by completion cursor'
 fi
 
+root="$TMP/body-vs-desc"
+mkdir -p "$root/state" "$root/s1" "$root/s2"
+cat > "$root/s1/SKILL.md" <<'EOF'
+---
+name: s1
+description: "Original description one"
+---
+# Body v1
+EOF
+cat > "$root/s2/SKILL.md" <<'EOF'
+---
+name: s2
+description: "Original description two"
+---
+# Body v1
+EOF
+touch "$root/state/last_run" "$root/cutoff"
+printf '%s\n%s\n' "$root/s1/SKILL.md" "$root/s2/SKILL.md" > "$root/paths"
+set_mtime "$root/s1/SKILL.md" 80
+set_mtime "$root/s2/SKILL.md" 80
+set_mtime "$root/state/last_run" 90
+set_mtime "$root/cutoff" 100
+PATHS_FILE="$root/paths" SEEN_NEXT="$root/seen.next" SCAN_CUTOFF="$root/cutoff" LAST_RUN_NEXT="$root/last-run.next" LAST_RUN="$root/state/last_run" SEEN_PATHS="$root/state/seen" bash "$TMP/state-commit.sh"
+
+# Body-only edit on s1, description edit on s2 (both before new scan cutoff)
+cat > "$root/s1/SKILL.md" <<'EOF'
+---
+name: s1
+description: "Original description one"
+---
+# Body v2 changed!
+EOF
+cat > "$root/s2/SKILL.md" <<'EOF'
+---
+name: s2
+description: "Updated description two"
+---
+# Body v1
+EOF
+set_mtime "$root/s1/SKILL.md" 120
+set_mtime "$root/s2/SKILL.md" 120
+PATHS_FILE="$root/paths" SEEN_PATHS="$root/state/seen" LAST_RUN="$root/state/last_run" CHANGED_FILE="$root/changed-body-vs-desc" bash "$TMP/selection.sh"
+if ! grep -Fxq "$root/s1/SKILL.md" "$root/changed-body-vs-desc" && grep -Fxq "$root/s2/SKILL.md" "$root/changed-body-vs-desc"; then
+  record_pass 'body-only edit skipped while description edit is selected'
+else
+  record_fail 'body-only vs description edit selection failed'
+fi
+
 printf '%s\n' "---- $pass pass / $fail fail ----"
 exit "$fail"

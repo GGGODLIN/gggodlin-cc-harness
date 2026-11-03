@@ -169,9 +169,17 @@ assert_grep "archive helper 驗搬遷結果" 'archive-verification-failed' "$ARC
 mkdir -p "$FIX/home/.claude/skills/example" "$FIX/home/.claude/friction" "$FIX/home/Desktop/projects/.claude/trials"
 printf '# fixture\n\n## 待折\n\n- a\n- b\n- c\n\n## 已折／已否決\n' > "$FIX/home/.claude/skills/example/friction-log.md"
 printf '# Active Trials\n' > "$FIX/home/Desktop/projects/.claude/trials/active.md"
+QUERY_OUT=$(printf '{"session_id":"%s-query","cwd":"%s/Desktop/projects"}' "$SESSION" "$FIX/home" | HOME="$FIX/home" FRICTION_SCAN_HOME="$FIX/home" TRIAL_REVIEW_QUERY_ONLY=1 bash "$HOOK")
+if printf '%s' "$QUERY_OUT" | grep -q '跑 /trial-review 處理' && [ ! -e "/tmp/trial-review-session-${SESSION}-query" ] && [ ! -d "$FIX/home/.claude/logs/friction-sweep" ]; then
+  printf 'PASS: TRIAL_REVIEW_QUERY_ONLY=1 唯讀預檢不寫入 session marker 與 .notified 水位\n'
+  PASS=$((PASS + 1))
+else
+  printf 'FAIL: TRIAL_REVIEW_QUERY_ONLY=1 唯讀預檢產生了檔案副作用\n'
+  FAIL=$((FAIL + 1))
+fi
 OUTPUT=$(printf '{"session_id":"%s","cwd":"%s/Desktop/projects"}' "$SESSION" "$FIX/home" | HOME="$FIX/home" FRICTION_SCAN_HOME="$FIX/home" bash "$HOOK")
 if printf '%s' "$OUTPUT" | grep -q '跑 /trial-review 處理'; then
-  printf 'PASS: hook 導向 trial-review 消費入口\n'
+  printf 'PASS: hook 導向 trial-review 消費入口（且前次唯讀預檢未吞掉摩擦提醒）\n'
   PASS=$((PASS + 1))
 else
   printf 'FAIL: hook 導向 trial-review 消費入口\n'
@@ -188,6 +196,16 @@ assert_grep "active.md 檔頭要求 entry 環境事實當場驗" '環境事實.*
 assert_grep "command 讀取 active index" 'started.*status.*detail' "$COMMAND"
 assert_grep "command 明報 detail 缺失" 'detail-missing' "$COMMAND"
 assert_grep "active.md 定義固定索引欄位" 'started.*status.*detail' "$ACTIVE"
+assert_grep "argument-hint 支援 --preflight" 'argument-hint:.*--preflight' "$COMMAND"
+assert_grep "Step 0 到期判定探針使用 TRIAL_REVIEW_QUERY_ONLY=1" 'TRIAL_REVIEW_QUERY_ONLY=1 bash ~/Desktop/projects/\.claude/hooks/trial-review\.sh' "$COMMAND"
+assert_not_grep "Step 0 到期判定探針不要求刪除 /tmp/trial-review-session-probe" '用完刪掉 `/tmp/trial-review-session-probe' "$COMMAND"
+assert_grep "Step 0 接線至 Step 0b 全量預跑" '[-]-preflight.*Step 0b' "$COMMAND"
+assert_grep "Step 0b 無鎖全量查證涵蓋三類候選" '無鎖全量查證（涵蓋三類候選）.*failure-mode-taxonomy\.md' "$COMMAND"
+assert_grep "Step 0b 標記 preflight_ready=true" 'preflight_ready=true' "$COMMAND"
+assert_grep "Step 0b 禁止使用整檔 bytes+mtime 避免自鎖失效" '禁止使用整檔 `bytes\+mtime`' "$COMMAND"
+assert_grep "Step 0b 寫入 draft_entry 供換題秒回" 'draft_entry:' "$COMMAND"
+assert_grep "Step 1 認領後僅對 preflight_ready=true 且無未解分歧的 checkpoint 升為 frozen" '僅當同時滿足 `preflight_ready=true`.*原地升為 `evidence_state=frozen`' "$COMMAND"
+assert_grep "Step 1 嚴禁把未標 preflight_ready=true 的 handoff checkpoint 直接升為 frozen" '未標 `preflight_ready=true`.*嚴禁直接升為 `frozen`' "$COMMAND"
 
 mkdir -p "$FIX/home/Desktop/projects/.claude/trials/active"
 printf '%s\n' '# Active Trials' \

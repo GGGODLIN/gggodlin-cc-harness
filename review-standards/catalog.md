@@ -43,6 +43,7 @@
 | design-and-maintainability | 角色：code-reviewer。任何語言；主題：跨模組變更、依賴方向、抽象、事件順序、金額與時間單位 | `review-standards/design-and-maintainability.md` | 選用 |
 | react-and-backend-patterns | 角色：code-reviewer。路徑樣式 `**/*.tsx`、`**/*.jsx`、server 端 `**/*.ts`；主題：React／Next.js、Node.js 後端的驗證、限流、查詢、逾時 | `review-standards/react-and-backend-patterns.md` | 選用 |
 | ai-generated-changes | 角色：code-reviewer。被審改動是 AI 產生的；主題：行為回歸、信任邊界、模型成本 | `review-standards/ai-generated-changes.md` | 選用 |
+| change-integrity | 角色：code-reviewer、typescript-reviewer、python-reviewer。任何語言；主題：刪除或替換舊邏輯時清點舊行為、新舊並存與沒接上的參數欄位設定、成對的面與跨服務契約、PR 宣稱與修 bug 的回歸測試、答案在程式碼之外時先查再以 OPEN_QUESTION 提問；各段觸發條件見該檔 | `review-standards/change-integrity.md` | 必套 |
 | project-conventions | 角色：code-reviewer、typescript-reviewer、python-reviewer。被審 repo 有 `CLAUDE.md` 或 project rules | `review-standards/project-conventions.md` | 選用 |
 | security-owasp-and-attacker-angles | 角色：security-reviewer。任何語言、每次安全審查；主題：OWASP Top 10 類別、攻擊者下手的角度（失敗路徑、隱含信任、parser 不一致、資訊洩漏、自報身分、驗過與被用的不是同一個） | `review-standards/security-owasp-and-attacker-angles.md` | 必套 |
 | security-llm-features | 角色：security-reviewer。diff 含 LLM 呼叫、prompt 組裝、agent 工具、RAG；路徑樣式只當提示：`**/prompts/**`、`**/llm/**`、`**/agents/**`、`**/rag/**`，路徑沒比對到也要看 diff 是否把使用者內容拼進 prompt；主題：prompt injection、模型輸出直通 sink、system prompt 不是安全邊界、過大的 agent 權限、RAG 租戶隔離、無上限的 LLM 呼叫 | `review-standards/security-llm-features.md` | 選用 |

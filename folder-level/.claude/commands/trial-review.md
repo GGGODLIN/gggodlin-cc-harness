@@ -1,6 +1,6 @@
 ---
 description: Use when trial-review hook 提醒到期 trial 或摩擦待折檔案過門檻後，使用者說「來 review」「來處理這些」「review 觀察名單」，或主動點名某個 trial／friction-log 做中期 review。不適用：PR review（bitbucket-pr-review / pr-review）、spec review（review-spec）、code review、hook 本身的健檢盤點。
-argument-hint: [trial 名稱或摩擦檔路徑（可選，不給則從第一個可處理項開始）]
+argument-hint: [--preflight | trial 名稱或摩擦檔路徑（可選，不給則從第一個可處理項開始）]
 ---
 
 <!-- 本檔在契約測試底下：bash ~/Desktop/projects/.claude/hooks/trial-review-friction-consumption.test.sh && bash ~/Desktop/projects/.claude/hooks/friction-review-state.test.sh -->
@@ -18,11 +18,11 @@ argument-hint: [trial 名稱或摩擦檔路徑（可選，不給則從第一個�
 
 並行盤點兩類候選：
 
-1. **Trial 候選**：先讀 `~/Desktop/projects/.claude/trials/active.md` 的 H2＋索引欄位（超過 50KB 時用 grep/sed 分段讀、不要硬 Read），撈 review date ≤ 今天的 H2 entry。到期判定優先直接跑 `bash ~/Desktop/projects/.claude/hooks/trial-review.sh`（stdin 餵 `{"session_id":"probe-<隨機>","cwd":"<家目錄>/Desktop/projects"}`，讀它回傳的 systemMessage，用完刪掉 `/tmp/trial-review-session-probe-<隨機>`）；要自己重算就用 grep 抽日期做字串比較，或把 bash 語法整段包進 `bash -c '…'`——Bash tool 的 shell 是 zsh，`[[ =~ ]]` 不填 `BASH_REMATCH`，把 hook 的 bash 寫法原樣搬進來會讓日期擷取變空字串、被 `|| continue` 靜默吃掉並回報 0 個到期（2026-09-10 實例：6 筆全被吃掉、當輪整批漏處理）。新格式固定讀 `started`、`status`、`detail`；`detail` 指向 `trials/active/<slug>-<started>.md`，盤點時只讀身分與開場 metadata 檔頭，真正處理該項才讀長段；先核對前兩行 `detail-key` 與 `detail-title`：指針必須和 H2 的 slug／started／`[run-N]` 對上，名稱必須逐字相同。索引欄位齊全但 detail 檔不存在或身分不符時列 `detail-missing`／`detail-mismatch` 並停止該項，不得靜默略過。hook 提醒裡的 `detail-mismatch` 只是要你核對的提示，不是核對結果：前兩行通過上面的核對、差別只在 hook 的檔名正規化（例如把 `1.5s` 轉成 `1-5s`）時，照常列入可處理，並在證據副檔記一句差異；2026-10-08 曾把標籤當結論而漏審 claim-detect-two-layer-1.5s。尚未遷移的舊格式仍依 H2 日期列入。時間鎖格式與期限只讀 active.md 檔頭「多 session review 時間鎖」。
+1. **Trial 候選**：先讀 `~/Desktop/projects/.claude/trials/active.md` 的 H2＋索引欄位（超過 50KB 時用 grep/sed 分段讀、不要硬 Read），撈 review date ≤ 今天的 H2 entry。到期判定優先直接跑 `TRIAL_REVIEW_QUERY_ONLY=1 bash ~/Desktop/projects/.claude/hooks/trial-review.sh`（stdin 餵 `{"session_id":"probe-<隨機>","cwd":"<家目錄>/Desktop/projects"}`，讀它回傳的 systemMessage；`TRIAL_REVIEW_QUERY_ONLY=1` 為唯讀預檢，不會建立 `/tmp/trial-review-session-*` 暫存檔、也不必執行 `rm` 刪除）；要自己重算就用 grep 抽日期做字串比較，或把 bash 語法整段包進 `bash -c '…'`——Bash tool 的 shell 是 zsh，`[[ =~ ]]` 不填 `BASH_REMATCH`，把 hook 的 bash 寫法原樣搬進來會讓日期擷取變空字串、被 `|| continue` 靜默吃掉並回報 0 個到期（2026-09-10 實例：6 筆全被吃掉、當輪整批漏處理）。新格式固定讀 `started`、`status`、`detail`；`detail` 指向 `trials/active/<slug>-<started>.md`，盤點時只讀身分與開場 metadata 檔頭，真正處理該項才讀長段；先核對前兩行 `detail-key` 與 `detail-title`：指針必須和 H2 的 slug／started／`[run-N]` 對上，名稱必須逐字相同。索引欄位齊全但 detail 檔不存在或身分不符時列 `detail-missing`／`detail-mismatch` 並停止該項，不得靜默略過。hook 提醒裡的 `detail-mismatch` 只是要你核對的提示，不是核對結果：前兩行通過上面的核對、差別只在 hook 的檔名正規化（例如把 `1.5s` 轉成 `1-5s`）時，照常列入可處理，並在證據副檔記一句差異；2026-10-08 曾把標籤當結論而漏審 claim-detect-two-layer-1.5s。尚未遷移的舊格式仍依 H2 日期列入。時間鎖格式與期限只讀 active.md 檔頭「多 session review 時間鎖」。
 2. **摩擦候選**：照 `trial-review.sh` 同一口徑，掃 `~/.claude/skills/*/friction-log.md`、`~/.claude/friction/*.md`（排除 `PROTOCOL.md`）及 hook 明列的公司側檔案；只數第一個 `## 待折` 段中以 `- ` 開頭、且不含 `[pending_implementation ` 的行，單一檔案達門檻才列入。另列所有 `[pending_implementation ` 項目作落地證據追蹤，不把它們重新送進拍板。時間鎖格式與期限只讀 `PROTOCOL.md`。
 3. **失敗模式提案候選**：讀 `~/.claude/references/failure-mode-taxonomy.md`「案例登記」區沒有 `[reviewed ` 尾碼的登記行；「一筆登記行」的判定只有一條：以 `YYYY-MM-DD | ` 開頭（正則 `^[0-9]{4}-[0-9]{2}-[0-9]{2} \| `，與 `scripts/failure-mode-daily.py` 的 `ROW_RE` 同一條，格式說明行不算）。有任一行就列成一項候選、整批一起處理；每日 channel 的 failure-mode 輸出只是提醒，不是候選的唯一來源，沒看到當日通知也照樣讀登記區。不設門檻、不取時間鎖（代價與去重規則見 Step 1）；`Acceptance-miss` 條目原樣列出、當場決定，不套預設分流。
 
-`$ARGUMENTS` 有指定 trial 名、摩擦檔路徑或機制名，或對話中已選好題目 → 只盤點指定項，通過身分與鎖檢查後先接下方「強模型通知」，未觸發才直接接 Step 1 認領，不重問選題；明確點名的摩擦檔不受門檻限制。沒有指定時，先列 trial、再列摩擦候選，先對第一個可處理項檢查「強模型通知」；未觸發就直接認領清單第一個可處理項並接 Step 1，不停下讓使用者選題。一般題沿用當前 session 模型，不例行詢問選模型。
+`$ARGUMENTS` 有指定 trial 名、摩擦檔路徑或機制名，或對話中已選好題目 → 只盤點指定項，通過身分與鎖檢查後先接下方「強模型通知」，未觸發才直接接 Step 1 認領，不重問選題；明確點名的摩擦檔不受門檻限制。沒有指定時，先列 trial、再列摩擦候選，先對第一個可處理項檢查「強模型通知」；未觸發就直接認領清單第一個可處理項並接 Step 1，不停下讓使用者選題。若 `$ARGUMENTS` 為 `--preflight`（清晨全量預跑模式），盤點完成後先接下方「Step 0b：全量預跑取證（`--preflight`）」，把本輪所有可處理項的研究與三行入口草稿預先寫入本輪證據副檔後，再對第一個可處理項檢查「強模型通知」、認領第一個可處理項並接 Step 1。一般題沿用當前 session 模型，不例行詢問選模型。
 
 Trial 清單讀已核對身分的 detail 檔頭 `review-start`、`review-start-reason`、`review-start-gap`，格式與顯示規則見 active.md 檔頭「開場建議」。清單直接顯示已存建議，不現場分類、不讀原始 session。缺資料與模型建議分開；不替摩擦候選分模型級別。一般起手不是能力保證；強模型建議接下方通知，不改查證、鎖與拍板要求，也不自動切模型。
 
@@ -52,11 +52,24 @@ Trial 清單讀已核對身分的 detail 檔頭 `review-start`、`review-start-r
 
 Trial 與摩擦各自分成三組並列給使用者：本 session 可處理、其他 session 的有效時間鎖（顯示名稱／檔案與到期時間）、marker 格式損壞。有效時間鎖不進入研究；已到期 marker 留在可處理組，等真正輪到該項時接手。Step 0 一次只認領一項，不預先認領整批；無參數時盤點完成，先檢查本項「強模型通知」，未觸發或使用者已回覆繼續才認領第一個可處理項、接 Step 1。指定題目可處理時同樣先檢查再接 Step 1。沒有可處理項時停下回報。
 
-**完成判準**：trial 的可處理數 + 有效時間鎖跳過數 + marker 損壞數，對上 hook 的到期 trial 數；失敗模式候選的行數對上 `sed -n '/^## 案例登記/,$p' ~/.claude/references/failure-mode-taxonomy.md | grep -E '^[0-9]{4}-[0-9]{2}-[0-9]{2} \| ' | grep -vc '\[reviewed '`；摩擦分開核對：(a) 過門檻檔案三組合計對上 hook 的「摩擦待折」檔案數，(b) `[pending_implementation]` 項目數對上 hook 的「已拍板待落地」數。使用者只點名一項或 hook 與現況有時間差時，明寫差異原因。這裡的「hook 的到期 trial 數」指 hook 實際輸出的那個數，不是照它邏輯自己重算的數；自算結果為 0 時再用一次獨立方法對帳（例如 `grep -c '^## .*(<今天日期>' active.md`），兩者不一致就停下查原因，不直接採信 0——「掃出 0 個」與「真的沒到期」外觀相同，拿自算數字對自算數字永遠會過。
+**完成判準**：trial 的可處理數 + 有效時間鎖跳過數 + marker 損壞數，對上 hook 的到期 trial 數；失敗模式候選的行數對上 `sed -n '/^## 案例登記/,$p' ~/.claude/references/failure-mode-taxonomy.md | grep -E '^[0-9]{4}-[0-9]{2}-[0-9]{2} \| ' | grep -vc '\[reviewed '`；摩擦分開核對：(a) 過門檻檔案三組合計對上 hook 的「摩擦待折」檔案數，(b) `[pending_implementation]` 項目數對上 hook 的「已拍板待落地」數。使用者只點名一項或 hook 與現況有時間差時，明寫差異原因。這裡的「hook 的到期 trial 數」指 hook 實際輸出的那個數，不是照它邏輯自己重算的數；自算結果為 0 時再用一次獨立方法對帳（例如 `grep -c '^## .*(<今天日期>' active.md`），兩者不一致就停下查原因，不直接採信 0——「掃出 0 個」與「真的沒到期」外觀相同，拿自算數字對自算數字永遠會過。`$ARGUMENTS` 含 `--preflight` 時完成後接 Step 0b，否則接 Step 1。
+
+## Step 0b: 全量預跑取證（僅 `--preflight` 觸發）
+
+當且僅當 `$ARGUMENTS` 含 `--preflight` 時執行本步驟，先把當天所有可處理項目的查證工作一次做完存進本輪證據副檔，讓後續 Step 1 逐題決策在換題時直接讀檔秒回：
+
+1. **無鎖全量查證（涵蓋三類候選）**：對 Step 0「本 session 可處理」清單中的每一個到期 trial、達門檻摩擦檔，以及 `failure-mode-taxonomy.md` 未標 `[reviewed ...]` 的失敗模式登記行批次（若當前主 session 未命中最強模型，跳過 `review-start=strong` 且有非空理由的項目），在**不寫入 `active.md`／`friction-log.md` 時間鎖、也不寫入 `[reviewed ...]` 尾碼**的前提下，逐項（或平行派唯讀 subagent）完成 Step 1 的四件套／摩擦四件套查證與「呈現前 preflight」四項檢查；失敗模式批次則預先讀完未標 `[reviewed ...]` 的登記行、對照探針表完成分類與 `Failure-miss`／`Acceptance-miss` 提案草稿。預跑階段不預取時間鎖，避免鎖死整批項目或留下孤兒鎖。
+2. **寫入本輪證據副檔 `checkpoint`（標記 `preflight_ready=true`）**：把每一題通過「呈現前 preflight」的查證結果寫入本輪證據副檔 `~/Desktop/projects/.claude/trials/review-evidence/<YYYY-MM-DD>-<session 前 8 碼>.md` 對應 H2（trial 為 `## trial-<slug>-<started>`，摩擦為 `## friction-<檔名或 owner slug>`，失敗模式批次為 `## failure-mode-batch`），固定包含：
+   - `evidence_state=checkpoint`、`preflight_ready=true`、`checkpoint_owner=<session id>`、`checkpointed_at=<UTC ISO-8601>`
+   - `source_identity:`（列出該題依賴的來源：對於 `active.md` 與 `friction-log.md`，固定記錄**「排除 `<!-- [reviewing ...]` 與 `<!-- [friction-review-lock:v1 ...]` 時間鎖註解行後的目標段落條目原文（或行數＋首尾條目文字）」**，禁止使用整檔 `bytes+mtime`，以免 Step 1.0 自己認領加鎖時讓來源身分自爆失效；對於 git 追蹤的代碼庫或設定檔，固定記錄 `git rev-parse HEAD` 搭配 `git status --porcelain -- <目標路徑>` 之工作樹狀態；對於失敗模式批次，記錄未標 `[reviewed ...]` 的原始登記行清單）
+   - `verified_facts:` 與固定證據行（receipt 五欄、`causal mode`、`earliest failed handoff`／摩擦 `history` 與 `provenance`／失敗模式批次的逐行對照）
+   - `draft_entry:`（預先寫好已通過「呈現前 preflight」四項檢查且符合 Step 1 allowlist 的 `現在：`、`影響：`、`決策：` 三行入口、證據要點與拍板表草稿）
+   - `unresolved_decision: none (ready_for_user_verdict)` 與 `resume_from: Step 1 認領並輸出拍板主報告`
+3. **完成判準**：Step 0 可處理清單中的每一個預跑目標（含 trial、摩擦檔與失敗模式批次）都在本輪證據副檔有對應 H2 且 `evidence_state=checkpoint`、`preflight_ready=true`、`source_identity` 與 `draft_entry` 非空，且 `active.md`、各 `friction-log.md` 與 `failure-mode-taxonomy.md` 在本步結束時零新增時間鎖或 `[reviewed ...]` 尾碼。完成後接 Step 1，從第一個可處理項開始認領（進入 Step 1 後仍嚴格維持逐題一題一題請使用者 a/b/c 拍板）。
 
 ## Step 1: 逐項 review 迴圈
 
-固定逐題處理：一題是一個 trial、一個摩擦檔，或一批失敗模式登記行，每題完整走完 Step 1–4。Trial 與摩擦照 Step 0 的候選順序接本段第 0 點認領；失敗模式批次跳過第 0 點。
+固定逐題處理：一題是一個 trial、一個摩擦檔，或一批失敗模式登記行，每題完整走完 Step 1–4。Trial 與摩擦照 Step 0 的候選順序接本段第 0 點認領；失敗模式批次跳過第 0 點（若當日證據副檔已有 `## failure-mode-batch` 且 `preflight_ready=true`，重讀未標 `[reviewed ...]` 的登記行確認與 `source_identity` 一致後，直接將該 H2 升為 `evidence_state=frozen` 並輸出拍板表；已被其他 session 標記 `[reviewed ...]` 的行則剔除後再呈現）。
 
 失敗模式候選走簡化路：不做四件套、不取時間鎖；不取鎖的代價是兩個 session 可能同時處理同一批，所以每行寫尾碼前重讀該行，已有 `[reviewed ` 尾碼就跳過不覆寫、不改問句，並在總結標「N 行已被別的 session 處理」。逐行讀「條件 → 症狀」與 Fn，對照探針表該類現有問句，提案只准兩種：改探針表某一類的問句、把 F7 累積的形狀升格為新類別；「不改探針、證據不足、同案重複」是合法處置，也是預設答案——兩筆登記可能是同一案，登記筆數不是事故率。`Failure-miss` 行給使用者 a/b/c（改問句／升格／不改＋理由）；`Acceptance-miss` 行是「票有列、實作沒做」的執行紀律問題，不套探針三選一，當場由使用者決定處置（例如查該驗收項有沒有紅測試、交 mutation-testing、記成摩擦、或不動），處置寫自由文字。拍板後在該行行尾加 `[reviewed YYYY-MM-DD <處置>]`，`Failure-miss` 的處置是「改問句」「升格」「不改」之一加一句理由。消費結果只改探針表，不動 to-tickets／implement／pr-review 的流程檔；問句改了就是改了，兩個接點下次讀到的就是新問句。同一回合只認領、研究與處理一題，不預先認領或研究第二題。每則開頭先標「這則要你做的事：N 件」（結案回報通常是 0 件）。
 
@@ -66,7 +79,10 @@ Trial 與摩擦各自分成三組並列給使用者：本 session 可處理、�
 
 兩類都遵守相同競爭規則：沒有 marker 才插入；其他 session 的有效 marker 直接跳過；已到期 marker精確替換成自己的新 marker。寫後重新讀取，必須恰好一個合法 marker 且 `session=$CLAUDE_CODE_SESSION_ID` 才開始研究；Edit 衝突、格式損壞或多 marker 都停止該項，不盲目重試。每次認領的 marker 固定到期，review 過程不刷新。
 
-Trial entry 若有 `review-handoff`，完成認領後接 Step 0「續接 handoff」：先驗指針、checkpoint 身分與 `source_identity`，再決定只續未解分歧或局部刷新；這一步在任何新研究之前，不能先掃原始資料再回頭讀 handoff。完成條件是 checkpoint 已被接受續用、局部刷新，或以 `handoff-invalid` 釋放自己的 marker 後停止三者之一。
+Trial entry 若有 `review-handoff`，完成認領後接 Step 0「續接 handoff」：先驗指針、checkpoint 身分與 `source_identity`，再決定只續未解分歧或局部刷新；這一步在任何新研究之前，不能先掃原始資料再回頭讀 handoff。若本項在本輪證據副檔 `~/Desktop/projects/.claude/trials/review-evidence/<YYYY-MM-DD>-<session 前 8 碼>.md`（或當日既有 `trials/review-evidence/<YYYY-MM-DD>-*.md`）已有對應 H2 且 `evidence_state=checkpoint`，完成認領並取得時間鎖後、在任何新研究之前，先區分該 `checkpoint` 的類型：
+- **僅當同時滿足 `preflight_ready=true`、無實質未解研究分歧（`unresolved_decision: none (ready_for_user_verdict)`）、且 `draft_entry` 與固定證據行齊全時**，才進入預跑快轉路徑：先在**剝除剛寫入的時間鎖註解行**後逐條重驗該 H2 的 `source_identity`，若來源身分全部相同且通過主報告 freeze gate 與「呈現前 preflight」四項檢查 → 直接沿用 `verified_facts`、固定證據行與 `draft_entry`，把同一 H2 的 `evidence_state=checkpoint` 原地升為 `evidence_state=frozen` 後直接輸出聊天拍板主報告，不重跑搜尋；若部分來源變動 → 只重查受影響的 facts、重新通過「呈現前 preflight」四項檢查後更新同一 H2 為 `frozen`。
+- **若該 `checkpoint` 未標 `preflight_ready=true` 或帶有實質 `unresolved_decision`（例如研究中斷等待強模型處理的 handoff checkpoint）**，嚴禁直接升為 `frozen` 出題，必須依 Step 0「續接 handoff」沿 `resume_from` 繼續完成未解分歧與呈現前檢查。
+完成條件是 checkpoint 已被接受續用、局部刷新，或以 `handoff-invalid` 釋放自己的 marker 後停止三者之一。
 
 每一項完成研究後先過主報告 freeze gate：所有本項背景 agent／task 都已完成、失敗或取消；只要仍有 pending 項目就不輸出聊天主報告。通過後在證據副檔寫 `evidence_state=frozen`，再進內部證據 preflight。
 

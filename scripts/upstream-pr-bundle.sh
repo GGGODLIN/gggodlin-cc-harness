@@ -7,7 +7,7 @@ set -euo pipefail
 #
 # --since <bundle already reviewed> writes a DELTA bundle instead: what changed after that review
 # (title, body, new commits, the diff between the two heads), so a wording fix is not a full
-# re-review (trial upstream-pr-delta-review, 2026-10-21). It falls back to a full bundle when the
+# re-review. It falls back to a full bundle when the
 # new head does not descend from the reviewed one, because a rewritten history can change content
 # the earlier review saw, and a delta would hide that.
 usage() {

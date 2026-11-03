@@ -170,6 +170,12 @@ def find_missing(src):
     spans, _end = parsed
     spans = [(a, b) for a, b in spans if masked[a:b].strip()]
     line = src.count('\n', 0, i) + 1
+    line_start = src.rfind('\n', 0, i) + 1
+    line_end = src.find('\n', i)
+    raw_line = src[line_start:len(src) if line_end == -1 else line_end]
+    if 'workflow-routing-gate-ignore' in raw_line:
+      i = j + 1
+      continue
     if len(spans) == 1:
       missing.append(line)
     elif len(spans) >= 2:

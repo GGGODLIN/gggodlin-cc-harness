@@ -61,13 +61,21 @@ check "DONE verdict" "Self closeout：<DONE 或 BLOCKED>"
 check "已推欄" "已推："
 check "保留欄" "保留："
 check "未收欄" "未收："
-check "保留非零不寫乾淨" "仍有 N 檔保留／未收"
+check "非 fresh 空狀態不寫乾淨" "除非 fresh \`git status\` 為空"
 check "收尾前先回看記憶" "0. **記憶回看**"
 check "記憶回看只看上次 self-closeout 之後" "上一次 self-closeout 回報之後"
 check "記憶回看先找既有檔再新建" "主題相同就併進去，沒有才新建"
 check "記憶回看接回第 1 步" "完成後接第 1 步"
 check "回報有記憶欄" "記憶：新增 N、併入 M"
-check "記憶欄不跳過" "「記憶」整份回報一行，不跳過"
+check "記憶欄不跳過" "「記憶」不論哪種格式都要寫"
+check "第 2 步只讀摘要" "closeout-provenance.py --repo <repo> --plan"
+check "共用 checkpoint 用白名單檔 add" "add --pathspec-from-file=<shared.pathspec_file>"
+check "共用 checkpoint 只看差異核對" "diff --cached --name-only | diff - <shared.pathspec_file>"
+check "正常回報一行" "沒有異常時整份回報只有一行"
+check "未收只給數字" "未收只寫數字、不列路徑"
+check "外來暫存是異常" "\`staged_foreign\` 非空，該 repo 的提交被擋下"
+check "停在非 trunk 是異常" "personal repo 的 \`branch\` 不是 trunk"
+check "自己的檔沒收進來是異常" "本 session 的檔沒進 commit"
 
 if [[ -x "$SCRIPT" ]] && python3 "$SCRIPT" --help >/dev/null 2>&1; then
   PASS=$((PASS + 1)); printf '  ok   provenance script 可執行\n'
@@ -119,6 +127,52 @@ sys.exit(0 if not rows["memory/MEMORY.md"]["shared"] else 1)
 else
   FAIL=$((FAIL + 1)); printf '  FAIL 非共用 repo 的 memory/ 不算 shared\n'
 fi
+
+# 行為測試：--plan 只印摘要，共用白名單落檔、未收只給數字
+PLAN_DIR="$FIXTURE.plan"
+PLAN=$(CLOSEOUT_SHARED_REPOS="$FIXTURE" python3 "$SCRIPT" --repo "$FIXTURE" --session contract-test-no-such-session --plan "$PLAN_DIR" 2>/dev/null || echo '{}')
+if printf '%s' "$PLAN" | python3 -c '
+import json,sys
+p=json.load(sys.stdin)
+ok = p["shared"]["count"] == 1 and open(p["shared"]["pathspec_file"]).read() == "memory/MEMORY.md\n"
+ok = ok and p["held_staged_differs"] == ["plain.txt"] and p["held_vendor_managed"] == 1
+ok = ok and p["has_origin"] is False and p["has_upstream"] is False
+ok = ok and p["unclaimed"] == 0 and "dirty" not in p and json.load(open(p["detail"]))["dirty"]
+sys.exit(0 if ok else 1)
+'; then
+  PASS=$((PASS + 1)); printf '  ok   --plan 摘要分欄、共用白名單落檔與 has_origin/has_upstream\n'
+else
+  FAIL=$((FAIL + 1)); printf '  FAIL --plan 摘要分欄、共用白名單落檔與 has_origin/has_upstream\n'
+fi
+
+# 行為測試：codex_touched 略過全程 read-only 沙箱 rollout，但保留非 read-only 或含寫檔工具之 rollout
+CODEX_TMP="$FIXTURE.codex"
+mkdir -p "$CODEX_TMP"
+printf 'x\n' > "$FIXTURE/ro-target.txt"
+printf 'y\n' > "$FIXTURE/rw-target.txt"
+RO_PATH=$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$FIXTURE/ro-target.txt")
+RW_PATH=$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$FIXTURE/rw-target.txt")
+cat > "$CODEX_TMP/rollout-ro.jsonl" <<EOF
+{"type":"turn_context","payload":{"sandbox_policy":{"type":"read-only"}}}
+{"type":"response_item","payload":{"type":"function_call","name":"exec","arguments":"cat $RO_PATH"}}
+EOF
+cat > "$CODEX_TMP/rollout-rw.jsonl" <<EOF
+{"type":"turn_context","payload":{"sandbox_policy":{"type":"workspace-write"}}}
+{"type":"response_item","payload":{"type":"function_call","name":"exec","arguments":"cat $RW_PATH"}}
+EOF
+JSON_CODEX=$(CLOSEOUT_CODEX_SESSIONS="$CODEX_TMP" CLOSEOUT_SHARED_REPOS="$ROOT" python3 "$SCRIPT" --repo "$FIXTURE" --json 2>/dev/null || echo '{}')
+if printf '%s' "$JSON_CODEX" | python3 -c '
+import json,sys
+r=json.load(sys.stdin); rows={d["path"]:d for d in r.get("dirty",[])}
+ok = rows["ro-target.txt"]["codex_touched"] is False and rows["rw-target.txt"]["codex_touched"] is True
+sys.exit(0 if ok else 1)
+'; then
+  PASS=$((PASS + 1)); printf '  ok   codex_touched 排除純 read-only rollout 並保留非 read-only rollout\n'
+else
+  FAIL=$((FAIL + 1)); printf '  FAIL codex_touched 排除純 read-only rollout 並保留非 read-only rollout\n'
+fi
+rm -rf "$CODEX_TMP"
+rm -rf "$PLAN_DIR"
 rm -rf "$FIXTURE"
 
 printf '\n%s PASS / %s FAIL\n' "$PASS" "$FAIL"

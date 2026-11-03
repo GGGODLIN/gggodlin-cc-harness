@@ -16,7 +16,7 @@ const productionIdentity = {
   versionOutput: 'plannotator 0.27.8',
 }
 const shaPattern = /^[a-f0-9]{40}$/
-const productionArchifyPinnedSha = '1c2b42d660e4a7571813fb43839c79e3e9ca7720'
+const productionArchifyPinnedSha = 'a4065941f12be7967436261d9934784e381d423c'
 const gitEnvironment = Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.startsWith('GIT_')))
 gitEnvironment.PATH = '/usr/bin:/bin'
 

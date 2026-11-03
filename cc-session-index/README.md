@@ -4,6 +4,10 @@ English | [繁體中文](/README.zh-TW.md)
 
 Index your local **Claude Code**, **Codex**, and **Pi** `.jsonl` session transcripts into SQLite FTS5 (`tokenize='trigram'`), and stream normalized events across all three tools from a single standard-library Python script.
 
+https://github.com/user-attachments/assets/66ce4fa8-bc2b-47f8-8938-64a539314320
+
+The conversation in the video is made up. The 0.05 s is the same search run on the author's real index (2026-10-20, including Python startup).
+
 Once a transcript folder grows past a few tens of gigabytes, `grep -r` across `.jsonl` files takes too long for an agent to run mid-turn. Most session-memory tools either use SQLite's default `unicode61` tokenizer, which cannot match Chinese, Japanese, or Korean substrings, or pin an English-only embedding model.
 
 On the author's machine (`44 GB` across `53,016` `.jsonl` files, `1.50M` indexed rows, `3.5 GB` SQLite file, measured 2026-10-19), a full build takes `371.5s` and incremental runs take `0.6s–6.0s`.

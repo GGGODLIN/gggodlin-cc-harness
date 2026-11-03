@@ -257,7 +257,11 @@ def events_cc(path, records=None, include_input=False):
     if not isinstance(msg, dict):
       continue
     is_meta = bool(obj.get("isMeta") or msg.get("isMeta"))
-    base = {"vendor": "cc", "session": obj.get("sessionId") or session, "path": path, "ts": as_text(obj.get("timestamp", "")), "cwd": as_text(obj.get("cwd", "")), "role": as_text(msg.get("role", obj.get("type"))), "model": as_text(msg.get("model", ""))}
+    origin = obj.get("origin") if isinstance(obj.get("origin"), dict) else {}
+    raw_role = as_text(msg.get("role", obj.get("type")))
+    if obj.get("isCompactSummary") or origin.get("kind") == "task-notification":
+      raw_role = "system"
+    base = {"vendor": "cc", "session": obj.get("sessionId") or session, "path": path, "ts": as_text(obj.get("timestamp", "")), "cwd": as_text(obj.get("cwd", "")), "role": raw_role, "model": as_text(msg.get("model", ""))}
     for kind, text, extra in cc_blocks(msg.get("content")):
       if kind == "text" and (is_meta or not text.strip()):
         continue

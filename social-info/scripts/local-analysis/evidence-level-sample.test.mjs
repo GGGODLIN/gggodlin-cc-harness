@@ -1828,6 +1828,30 @@ test('finalizer rejects a batch transcript with a JSON parse error', () => {
   }))
 })
 
+test('collectEligible streams multi-megabyte JSONL files across chunk and multibyte UTF-8 boundaries', () => {
+  const fixture = makeFixture()
+  const file = path.join(fixture.project, 'chunked.jsonl')
+  const noiseLine = JSON.stringify({
+    type: 'user',
+    timestamp: '2026-08-14T00:30:00.000Z',
+    message: { content: [{ type: 'tool_result', content: '圖'.repeat(400_000) }] },
+  })
+  const eligibleRow = assistant({
+    text: `繁體中文段落驗證 ${repeat('證', 210)}`,
+    timestamp: '2026-08-14T01:00:00.000Z',
+    sessionId: 'streamed-session',
+  })
+  fs.writeFileSync(file, `${noiseLine}\n${noiseLine}\n${JSON.stringify(eligibleRow)}\n`)
+
+  const sampled = run(fixture)
+  const samples = samplesFor(fixture)
+  assert.equal(sampled.eligible, 1)
+  assert.equal(samples.length, 1)
+  assert.equal(samples[0].session, 'streamed-session')
+  assert.equal(samples[0].row_index, 2)
+  assert.equal(samples[0].answer.startsWith('繁體中文段落驗證 '), true)
+})
+
 test('fresh sample attempts stay out of the manifest and reject prior-attempt batch transcripts', () => {
   const { fixture, sampled, manifest } = makeTwentySampleFixture()
   assert.match(sampled.attempt_nonce, /^[a-f0-9]{64}$/)

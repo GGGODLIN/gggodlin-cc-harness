@@ -10,7 +10,18 @@
     "grill-with-docs",
     "strategic-compact",
     "zoom-out",
-    "design-taste-frontend"
+    "design-taste-frontend",
+    "gws-calendar",
+    "gws-docs",
+    "gws-drive",
+    "gws-gmail",
+    "gws-sheets",
+    "gws-sheets-append",
+    "gws-sheets-read",
+    "html-to-image",
+    "icon-set-generator",
+    "tailwind-design-system",
+    "web-design-guidelines"
   ],
   "entries": [
     {
@@ -19,9 +30,9 @@
       "sourceUrl": "https://github.com/vercel-labs/agent-skills.git",
       "skillPath": "skills/composition-patterns/SKILL.md",
       "sourceTreeHash": "7a651a19b1658c4cd320a5e984c1be4b99d97c2c",
-      "runtimeTreeHash": "e608233b55a2e1b50cdae992e01534d4030da1cf",
-      "provenanceCommit": "999eadb6942d98085402732860b0b04d09df1b73",
-      "provenanceReason": "Source full-tree lock hash is reconciled against the installer runtime projection."
+      "runtimeTreeHash": "2d7ac0075de81ba590972b53d35f33770e4be661",
+      "provenanceCommit": "6ec269328bc400712ee225a173a14b6b29128df7",
+      "provenanceReason": "Retain installed runtime and reconcile local upstream/upstream-path registration plus final upstream-pinned metadata; remove needs-reconciliation only. SKILL content baseline evidence: https://github.com/vercel-labs/agent-skills/blob/757ccb42a20478be6b7284088978070358b52d5e/skills/composition-patterns/SKILL.md. This is a reconciliation point, not a unique installation SHA or adoption of latest upstream content."
     },
     {
       "skill": "vercel-react-best-practices",
@@ -29,9 +40,9 @@
       "sourceUrl": "https://github.com/vercel-labs/agent-skills.git",
       "skillPath": "skills/react-best-practices/SKILL.md",
       "sourceTreeHash": "079b06a135401704ea94ab74c7c9d86c92ba259f",
-      "runtimeTreeHash": "b81d276102f6533ac1da82f58332499a8c9ab04e",
-      "provenanceCommit": "999eadb6942d98085402732860b0b04d09df1b73",
-      "provenanceReason": "Source full-tree lock hash is reconciled against the installer runtime projection."
+      "runtimeTreeHash": "e18548431315a9c98bf55b257ecc5c4ef309886a",
+      "provenanceCommit": "6ec269328bc400712ee225a173a14b6b29128df7",
+      "provenanceReason": "Retain installed runtime and reconcile local upstream/upstream-path registration plus final upstream-pinned metadata; remove needs-reconciliation only. SKILL content baseline evidence: https://github.com/vercel-labs/agent-skills/blob/757ccb42a20478be6b7284088978070358b52d5e/skills/react-best-practices/SKILL.md. This is a reconciliation point, not a unique installation SHA or adoption of latest upstream content."
     },
     {
       "skill": "vercel-react-native-skills",
@@ -39,9 +50,9 @@
       "sourceUrl": "https://github.com/vercel-labs/agent-skills.git",
       "skillPath": "skills/react-native-skills/SKILL.md",
       "sourceTreeHash": "f67a7156afdb6070594715ca0b4f12810ae32a1e",
-      "runtimeTreeHash": "56294538496ae126537d9e8b21bf980842b8336e",
-      "provenanceCommit": "999eadb6942d98085402732860b0b04d09df1b73",
-      "provenanceReason": "Source full-tree lock hash is reconciled against the installer runtime projection."
+      "runtimeTreeHash": "eac9e6a7d468e186497d2a53087458167798f2b6",
+      "provenanceCommit": "6ec269328bc400712ee225a173a14b6b29128df7",
+      "provenanceReason": "Retain installed runtime and reconcile local upstream/upstream-path registration plus final upstream-pinned metadata; remove needs-reconciliation only. SKILL content baseline evidence: https://github.com/vercel-labs/agent-skills/blob/999eadb6942d98085402732860b0b04d09df1b73/skills/react-native-skills/SKILL.md. This is a reconciliation point, not a unique installation SHA or adoption of latest upstream content."
     },
     {
       "skill": "caveman",
@@ -109,9 +120,119 @@
       "sourceUrl": "https://github.com/leonxlnx/taste-skill.git",
       "skillPath": "skills/taste-skill/SKILL.md",
       "sourceTreeHash": "826d9d12328f2d8b2c00ad5c28e02612d2484faf",
-      "runtimeTreeHash": "a6d128e53b4ec0238baee751dde33bf707adb5ec",
-      "provenanceCommit": "3c7017d636c3a4aad378433ea6d0cfa6c921da4a",
-      "provenanceReason": "Installed tree matches upstream 3c7017d; current npx skills add defaults to v2 experimental, so retain this v1 snapshot."
+      "runtimeTreeHash": "dc536c4c1d638110d88eb415ace69ce532a21d3b",
+      "provenanceCommit": "12af471f627f866411b4bd785b19646d3672784c",
+      "provenanceReason": "Retain installed runtime and reconcile local upstream/upstream-path registration plus final upstream-pinned metadata; remove needs-reconciliation only. SKILL content baseline evidence: https://github.com/Leonxlnx/taste-skill/blob/3c7017d636c3a4aad378433ea6d0cfa6c921da4a/skills/taste-skill/SKILL.md. This is a reconciliation point, not a unique installation SHA or adoption of latest upstream content."
+    },
+    {
+      "skill": "gws-calendar",
+      "source": "googleworkspace/cli",
+      "sourceUrl": "https://github.com/googleworkspace/cli.git",
+      "skillPath": "skills/gws-calendar/SKILL.md",
+      "sourceTreeHash": "62a27859dbdf798c1f7288d04750e743283a6b4f",
+      "runtimeTreeHash": "6f2dfc7ae041969a724cd6b842ed3843180f0760",
+      "provenanceCommit": "a3768d0e82ad83cca2da97724e46bea4ff0e6dbd",
+      "provenanceReason": "Retain installed runtime and reconcile local upstream/upstream-path registration plus final upstream-pinned metadata; remove needs-reconciliation only. SKILL content baseline evidence: https://github.com/googleworkspace/cli/blob/a3768d0e82ad83cca2da97724e46bea4ff0e6dbd/skills/gws-calendar/SKILL.md. This is a reconciliation point, not a unique installation SHA or adoption of latest upstream content."
+    },
+    {
+      "skill": "gws-docs",
+      "source": "googleworkspace/cli",
+      "sourceUrl": "https://github.com/googleworkspace/cli.git",
+      "skillPath": "skills/gws-docs/SKILL.md",
+      "sourceTreeHash": "455f7468d4a2e3b0b352fbd7ad0937354427af82",
+      "runtimeTreeHash": "fefa0ffa199c57960bff2763639abada9c5c1b65",
+      "provenanceCommit": "a3768d0e82ad83cca2da97724e46bea4ff0e6dbd",
+      "provenanceReason": "Retain installed runtime and reconcile local upstream/upstream-path registration plus final upstream-pinned metadata; remove needs-reconciliation only. SKILL content baseline evidence: https://github.com/googleworkspace/cli/blob/a3768d0e82ad83cca2da97724e46bea4ff0e6dbd/skills/gws-docs/SKILL.md. This is a reconciliation point, not a unique installation SHA or adoption of latest upstream content."
+    },
+    {
+      "skill": "gws-drive",
+      "source": "googleworkspace/cli",
+      "sourceUrl": "https://github.com/googleworkspace/cli.git",
+      "skillPath": "skills/gws-drive/SKILL.md",
+      "sourceTreeHash": "46b7e75840ff26db80b6b74238e423dfa4b75c11",
+      "runtimeTreeHash": "9281fe12888f9cb3ce6e3fe0b990c9f29284302e",
+      "provenanceCommit": "a3768d0e82ad83cca2da97724e46bea4ff0e6dbd",
+      "provenanceReason": "Retain installed runtime and reconcile local upstream/upstream-path registration plus final upstream-pinned metadata; remove needs-reconciliation only. SKILL content baseline evidence: https://github.com/googleworkspace/cli/blob/a3768d0e82ad83cca2da97724e46bea4ff0e6dbd/skills/gws-drive/SKILL.md. This is a reconciliation point, not a unique installation SHA or adoption of latest upstream content."
+    },
+    {
+      "skill": "gws-gmail",
+      "source": "googleworkspace/cli",
+      "sourceUrl": "https://github.com/googleworkspace/cli.git",
+      "skillPath": "skills/gws-gmail/SKILL.md",
+      "sourceTreeHash": "95c83c1280def63651f99025fa707bc0e4781a79",
+      "runtimeTreeHash": "bf6f6b59f5396a16a8ec28bfd86b4234fb6ddaa2",
+      "provenanceCommit": "a3768d0e82ad83cca2da97724e46bea4ff0e6dbd",
+      "provenanceReason": "Retain installed runtime and reconcile local upstream/upstream-path registration plus final upstream-pinned metadata; remove needs-reconciliation only. SKILL content baseline evidence: https://github.com/googleworkspace/cli/blob/a3768d0e82ad83cca2da97724e46bea4ff0e6dbd/skills/gws-gmail/SKILL.md. This is a reconciliation point, not a unique installation SHA or adoption of latest upstream content."
+    },
+    {
+      "skill": "gws-sheets",
+      "source": "googleworkspace/cli",
+      "sourceUrl": "https://github.com/googleworkspace/cli.git",
+      "skillPath": "skills/gws-sheets/SKILL.md",
+      "sourceTreeHash": "50758ea65d12833e48361aa541c0acaff0d96f67",
+      "runtimeTreeHash": "e7e89dc2b051ebeb8d5a08d034394ee9bcb76ad3",
+      "provenanceCommit": "a3768d0e82ad83cca2da97724e46bea4ff0e6dbd",
+      "provenanceReason": "Retain installed runtime and reconcile local upstream/upstream-path registration plus final upstream-pinned metadata; remove needs-reconciliation only. SKILL content baseline evidence: https://github.com/googleworkspace/cli/blob/a3768d0e82ad83cca2da97724e46bea4ff0e6dbd/skills/gws-sheets/SKILL.md. This is a reconciliation point, not a unique installation SHA or adoption of latest upstream content."
+    },
+    {
+      "skill": "gws-sheets-append",
+      "source": "googleworkspace/cli",
+      "sourceUrl": "https://github.com/googleworkspace/cli.git",
+      "skillPath": "skills/gws-sheets-append/SKILL.md",
+      "sourceTreeHash": "943def878600c64ad8eaede62762d3f9523e127a",
+      "runtimeTreeHash": "ccb41e4949463ebbf978ab6a476188489ec68a37",
+      "provenanceCommit": "a3768d0e82ad83cca2da97724e46bea4ff0e6dbd",
+      "provenanceReason": "Retain installed runtime and reconcile local upstream/upstream-path registration plus final upstream-pinned metadata; remove needs-reconciliation only. SKILL content baseline evidence: https://github.com/googleworkspace/cli/blob/a3768d0e82ad83cca2da97724e46bea4ff0e6dbd/skills/gws-sheets-append/SKILL.md. This is a reconciliation point, not a unique installation SHA or adoption of latest upstream content."
+    },
+    {
+      "skill": "gws-sheets-read",
+      "source": "googleworkspace/cli",
+      "sourceUrl": "https://github.com/googleworkspace/cli.git",
+      "skillPath": "skills/gws-sheets-read/SKILL.md",
+      "sourceTreeHash": "e7073d8b029f7b1a7659795f6fe13a5f86f78f6d",
+      "runtimeTreeHash": "d5f63ddd25852c805f8574c4e06c4944a5200304",
+      "provenanceCommit": "a3768d0e82ad83cca2da97724e46bea4ff0e6dbd",
+      "provenanceReason": "Retain installed runtime and reconcile local upstream/upstream-path registration plus final upstream-pinned metadata; remove needs-reconciliation only. SKILL content baseline evidence: https://github.com/googleworkspace/cli/blob/a3768d0e82ad83cca2da97724e46bea4ff0e6dbd/skills/gws-sheets-read/SKILL.md. This is a reconciliation point, not a unique installation SHA or adoption of latest upstream content."
+    },
+    {
+      "skill": "html-to-image",
+      "source": "html2png/skills",
+      "sourceUrl": "https://github.com/html2png/skills.git",
+      "skillPath": "html-to-image/SKILL.md",
+      "sourceTreeHash": "cb1de922b672abaab76b58c75c882750067590ea",
+      "runtimeTreeHash": "27047ad74bc3f235cad7f6d7d5bc9a1a95720ac9",
+      "provenanceCommit": "7df27b4fb2ca2258c917c4f410b5b7fae78d4d84",
+      "provenanceReason": "Retain installed runtime and reconcile local upstream/upstream-path registration plus final upstream-pinned metadata; remove needs-reconciliation only. SKILL content baseline evidence: https://github.com/html2png/skills/blob/7df27b4fb2ca2258c917c4f410b5b7fae78d4d84/html-to-image/SKILL.md. This is a reconciliation point, not a unique installation SHA or adoption of latest upstream content."
+    },
+    {
+      "skill": "icon-set-generator",
+      "source": "jezweb/claude-skills",
+      "sourceUrl": "https://github.com/jezweb/claude-skills.git",
+      "skillPath": "plugins/design-assets/skills/icon-set-generator/SKILL.md",
+      "sourceTreeHash": "9a415197b9008f650baca26dffae29c990a8a2ab",
+      "runtimeTreeHash": "6dc34380fece672838248c21b964fc0e3124ea74",
+      "provenanceCommit": "1260fa7439b36b18dbf16648ccc7fb44783f6c23",
+      "provenanceReason": "Retain installed runtime and reconcile local upstream/upstream-path registration plus final upstream-pinned metadata; remove needs-reconciliation only. SKILL content baseline evidence: https://github.com/jezweb/claude-skills/blob/e84244872710ce1a91ec20f4df56f443bd780c04/plugins/design-assets/skills/icon-set-generator/SKILL.md. This is a reconciliation point, not a unique installation SHA or adoption of latest upstream content."
+    },
+    {
+      "skill": "tailwind-design-system",
+      "source": "wshobson/agents",
+      "sourceUrl": "https://github.com/wshobson/agents.git",
+      "skillPath": "plugins/frontend-mobile-development/skills/tailwind-design-system/SKILL.md",
+      "sourceTreeHash": "a8532caa4b6284a92c686bc9346c274e6e66aaa5",
+      "runtimeTreeHash": "b4ce3c1831da6cf720e9c59f77fd570b940acdd5",
+      "provenanceCommit": "584a79703c9e0a7106a7224115cd8aac8253ff0a",
+      "provenanceReason": "Retain installed runtime and reconcile local upstream/upstream-path registration plus final upstream-pinned metadata; remove needs-reconciliation only. SKILL content baseline evidence: https://github.com/wshobson/agents/blob/584a79703c9e0a7106a7224115cd8aac8253ff0a/plugins/frontend-mobile-development/skills/tailwind-design-system/SKILL.md. This is a reconciliation point, not a unique installation SHA or adoption of latest upstream content."
+    },
+    {
+      "skill": "web-design-guidelines",
+      "source": "vercel-labs/agent-skills",
+      "sourceUrl": "https://github.com/vercel-labs/agent-skills.git",
+      "skillPath": "skills/web-design-guidelines/SKILL.md",
+      "sourceTreeHash": "3116f3e62dbd02b44a598b1aa690d2a8938e8f89",
+      "runtimeTreeHash": "84ed5c4a21d07675263fea7820a1d881077e9d23",
+      "provenanceCommit": "757ccb42a20478be6b7284088978070358b52d5e",
+      "provenanceReason": "Retain installed runtime and reconcile local upstream/upstream-path registration plus final upstream-pinned metadata; remove needs-reconciliation only. SKILL content baseline evidence: https://github.com/vercel-labs/agent-skills/blob/757ccb42a20478be6b7284088978070358b52d5e/skills/web-design-guidelines/SKILL.md. This is a reconciliation point, not a unique installation SHA or adoption of latest upstream content."
     }
   ]
 }

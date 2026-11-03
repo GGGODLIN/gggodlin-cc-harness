@@ -22,6 +22,7 @@ CALLERS = {
   "auto-choice": "skills/auto-choice/SKILL.md",
   "bitbucket-pr-mutation": "skills/bitbucket-pr-mutation/SKILL.md",
   "check-my-stack": "skills/check-my-stack/SKILL.md",
+  "deep-check": "skills/deep-check/SKILL.md",
   "e2e-explore-then-batch": "skills/e2e-explore-then-batch/SKILL.md",
   "explain-diff": "skills/explain-diff/SKILL.md",
   "github-repo-research": "skills/github-repo-research/SKILL.md",
@@ -159,6 +160,18 @@ class DownstreamDifferencesSurvive(unittest.TestCase):
   def test_research_before_answer_narrows_unsupported_claims(self):
     text = read(CALLERS["research-before-answer"])
     self.assertIn("把不實或佐證不足的主張從 draft 刪除或收窄", text)
+
+  def test_mutation_testing_requires_landing_excerpt_and_test_diff(self):
+    text = read(CALLERS["mutation-testing"])
+    self.assertIn("A 類新增測試 diff 原文", text)
+    self.assertIn("B/C 類理由落點原文", text)
+    self.assertIn("未貼出落點原文", text)
+    self.assertIn("未貼出測試 diff 原文", text)
+
+  def test_check_my_stack_requires_real_auditor_completion_before_presenting(self):
+    text = read(CALLERS["check-my-stack"])
+    self.assertIn("必須先取得該 `skill-verify-auditor` 的真實完成結果", text)
+    self.assertIn("嚴禁在等待背景 auditor 期間先把未審報告貼給使用者當預覽", text)
 
 
 class TemplateAndGateStayWired(unittest.TestCase):

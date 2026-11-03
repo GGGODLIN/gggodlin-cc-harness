@@ -89,7 +89,8 @@ class HerdrWatcherIdentityTest(unittest.TestCase):
     self.log = self.root / "watch.log"
     self.brief = self.root / "brief.md"
     self.brief.write_text("A fixture worker brief\n")
-    self.env = {**os.environ, "PATH": f"{self.bin}:{os.environ['PATH']}", "STUB_LOG": str(self.stub_log), "HERDR_ENV": "1", "HERDR_PANE_ID": "w1:p1", "HERDR_WORKSPACE_ID": "w1", "CLAUDE_CODE_SESSION_ID": "main-first"}
+    base_env = {k: v for k, v in os.environ.items() if k not in ("CLAUDE_CONFIG_DIR", "HC_TERMINAL_ID", "HC_TERMINAL_SOCKET", "HC_SCOPE")}
+    self.env = {**base_env, "PATH": f"{self.bin}:{os.environ['PATH']}", "STUB_LOG": str(self.stub_log), "HERDR_ENV": "1", "HERDR_PANE_ID": "w1:p1", "HERDR_WORKSPACE_ID": "w1", "CLAUDE_CODE_SESSION_ID": "main-first"}
 
   def start_worker(self):
     return subprocess.run(["bash", str(SCRIPTS / "start-worker.sh"), "demo", str(self.root), str(self.brief), "--no-watch"], env=self.env, capture_output=True, text=True, timeout=10)
@@ -246,6 +247,60 @@ class HerdrWatcherIdentityTest(unittest.TestCase):
     self.assertEqual(result.returncode, 0, result.stderr)
     self.assertIn("異常", self.main_prompts()[0])
     self.assertNotIn("stopped, status=done", self.main_prompts()[0])
+
+  def install_hc(self):
+    hc_stub = '''#!/usr/bin/env python3
+import json, os, sys
+args = sys.argv[1:]
+with open(os.environ["STUB_LOG"], "a") as log:
+  log.write(json.dumps({"bin": "hc", "args": args}) + "\\n")
+if args[:1] == ["wait"]:
+  if os.environ.get("HC_WAIT_FAIL"):
+    sys.exit(1)
+  print(json.dumps({"terminal": args[1], "ended": True, "reason": os.environ.get("HC_WAIT_REASON", "status"), "status": {"state": os.environ.get("HC_WAIT_STATE", "done")}}))
+elif args[:1] == ["get"]:
+  state = "finished" if os.environ.get("HC_PARENT_DEAD") else "live"
+  print(json.dumps({"address": args[1], "state": state}))
+elif args[:1] == ["send"]:
+  if os.environ.get("HC_SEND_FAIL"):
+    sys.exit(1)
+  print(json.dumps({"turn": 1}))
+else:
+  sys.exit(2)
+'''
+    hc = self.bin / "fake-hc"
+    hc.write_text(hc_stub)
+    hc.chmod(0o755)
+    return hc
+
+  def watch_hc(self, **extra):
+    hc = self.install_hc()
+    env = {**self.env, "HC_BIN": str(hc), **extra}
+    return subprocess.run(["bash", str(SCRIPTS / "agent-watch.sh"), "herdr-core", "demo", "t3", str(self.log), "worker-uuid", str(self.root), "main-first", "t9"], env=env, capture_output=True, text=True, timeout=10)
+
+  def hc_sends(self):
+    if not self.stub_log.exists():
+      return []
+    rows = [json.loads(line) for line in self.stub_log.read_text().splitlines()]
+    return [row["args"][2] for row in rows if row.get("bin") == "hc" and row["args"][:2] == ["send", "t3"]]
+
+  def test_herdr_core_matching_wait_sends_normal_status_to_live_parent(self):
+    result = self.watch_hc()
+    self.assertEqual(result.returncode, 0, result.stderr)
+    self.assertEqual(len(self.hc_sends()), 1)
+    self.assertIn("stopped, status=done", self.hc_sends()[0])
+
+  def test_herdr_core_failed_wait_warns_live_parent_as_unverified(self):
+    result = self.watch_hc(HC_WAIT_FAIL="1")
+    self.assertEqual(result.returncode, 0, result.stderr)
+    self.assertEqual(len(self.hc_sends()), 1)
+    self.assertIn("未驗證", self.hc_sends()[0])
+
+  def test_herdr_core_dead_parent_is_not_sent_message(self):
+    result = self.watch_hc(HC_PARENT_DEAD="1")
+    self.assertNotEqual(result.returncode, 0)
+    self.assertEqual(self.hc_sends(), [])
+    self.assertIn("未送達", self.log.read_text())
 
 
 if __name__ == "__main__":

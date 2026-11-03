@@ -63,7 +63,7 @@ ALLOWED_FINDING_CHANNELS = frozenset({
     "skill-doctor", "tool-updates", "codex-violation", "rules-size", "ledger-lifecycle", "skill-collision",
     "agnix", "skill-trigger", "skill-changes", "evidence-level", "ccp-free-watch", "path-rot", "free-pool", "codex-cdp",
 })
-PATH_RE = re.compile(r"(~?/[\w./@-]+\.\w{1,6}|[\w-]+\.(?:md|sh|py|js|mjs|json|jsonl|txt|toml))")
+PATH_RE = re.compile(r"(?<![\w./@-])(~?/[\w./@-]+\.\w{1,6}|[\w-]+\.(?:md|sh|py|js|mjs|json|jsonl|txt|toml))")
 WIKILINK_RE = re.compile(r"\[\[([^\]]+)\]\]")
 SOURCE_KEY_RE = re.compile(r"^[a-z0-9][a-z0-9:._-]{2,127}$")
 
@@ -225,6 +225,8 @@ def apply_findings(rows, findings, date):
         source_key = f.get("source_key")
         if m:
             row = by_title.get(m)
+            if row is None and source_key is not None:
+                row = by_source_key.get(source_key)
             if row is None:
                 unmatched.append(f)
                 continue

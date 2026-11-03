@@ -74,3 +74,7 @@ MiMo flash 對「要求輸出含大括號的 JSON」穩定回 502，追到上游
 **Gemini 經 litellm 進 CC 會壞在第二輪**。litellm 1.89.3 的 `/v1/messages` 轉換丟掉 Gemini 的 thought_signature，CC 第二輪帶 tool 結果時 Google 回 400「Function call is missing a thought_signature」；`openai/` provider 還會把 `/v1/messages` 轉去打不存在的 `/responses`。原生 `gemini/` provider 一樣丟簽章，且把 `reasoning_effort: high` 換成 `thinkingBudget: 4096`。Magpie 的 google preset 把簽章編進 tool_use id 帶回去，usage.jsonl 記 `effort: high`。RED 沒能重現這條（當時 litellm 沒在跑，runner 直接選 Magpie），所以只記在這裡、沒寫成 traps 規則。
 
 **入鏈關卡把 mimo26 現場重跑當成必要步驟**。現場對照的規則出處是外部審查建議，不是原需求；原需求一直是「跟 mimo26 的凍結基準比」。改成 v1 只跑受測腿、對凍結基準比，比較器的追加確認也改成只看受測腿（local-llm-gateway ce8a0d5）。
+
+## Context 窗口同步
+
+**實測窗口需寫回 gateway，否則長對話可能被默默跳過**。多模型 group 在送出前會依登記窗口估算請求長度，若 catalog 預設值低於實測可用上限，估計長度超過登記值的成員會被移到最後備援而不報錯。因此在 LIVE 階段量測後，需用 `magpie model context` 寫入實測值並從 `/v1/models` 讀回確認。

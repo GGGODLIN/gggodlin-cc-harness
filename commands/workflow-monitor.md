@@ -2,6 +2,8 @@
 description: Watch, pause, and resume any background Workflow so a long run survives a quota / service squeeze without re-spending tokens on already-completed agents. Vendor-aware — guards CC's 5h+7d OAuth quota or relay's service stability, selected from CC_VENDOR. GLM is retired and has no adapter. Use when launching a long workflow, when one is about to blow its limit, or to continue a suspended one. Do not use for workflow debugging or errors (squeeze survival only), nor for short workflows that finish within minutes.
 ---
 
+<!-- 本檔在契約測試底下：bash ~/.claude/commands/tests/glm-workflow-monitor-retired.test.sh -->
+
 # /workflow-monitor — watch · pause · resume any background Workflow
 
 `$ARGUMENTS`:
@@ -72,7 +74,7 @@ bash ~/.claude/scripts/workflow-monitor-vendor.sh resolve "${SESSION_ID}"
 
 A non-zero exit means the vendor has no adapter: stop, tell the user, do not arm anything. Do **not** try to `eval` the `resolve` output — dcg blocks `eval` on dynamically generated source (`heredoc.posix:eval-dynamic`), which is why `proc` exists as its own subcommand. Read the two `WM_*_CMD` lines and paste them; the only value that becomes a shell variable is the watcher filename, which is pure ASCII.
 
-The state namespace is shared across vendors (one command, one namespace), so cleanup snippets always filter by `SESSION_ID`, never by vendor. If you can't resolve SESSION_ID (e.g. the command was invoked stand-alone with no launch result in context), fall back to the legacy single-session paths `~/.claude/workflow-monitor-state.json` / `workflow-monitor-args.json`. Other sessions on this box may still have their own — never `pkill -f` watch processes; always `kill <pid>` a recorded PID or `pgrep -af <WATCH_PROC> | grep $SESSION_ID` to filter.
+The state namespace is shared across vendors (one command, one namespace), so cleanup snippets always filter by `SESSION_ID`, never by vendor. If you can't resolve SESSION_ID (e.g. the command was invoked stand-alone with no launch result in context), fall back to the legacy single-session paths `~/.claude/workflow-monitor-state.json` / `workflow-monitor-args.json`. Other sessions on this box may still have their own — never `pkill -f` watch processes; always `kill <pid>` a recorded PID or `pgrep -lf "${WATCH_PROC}.*${SESSION_ID}"` (without a `| grep` pipe, which in Claude Code's `snapshot-bash` spawns a `grep` function subshell whose command line self-matches `pgrep`).
 
 ---
 
@@ -114,7 +116,7 @@ Two bridges this command stands on:
 2. **Avoid duplicates (session-scoped):** if a watch is already running **for this session**, do nothing more. Other sessions' watches are unrelated — never global-match.
 
    ```bash
-   pgrep -lf "${WATCH_PROC}" | grep -F "${SESSION_ID}" >/dev/null && echo "watch already running for this session — skip" && exit 0 || true
+   pgrep -lf "${WATCH_PROC}.*${SESSION_ID}" >/dev/null && echo "watch already running for this session — skip" && exit 0 || true
    ```
 
 3. Record what we're guarding (per-session state file, `phase=watching`):
@@ -165,13 +167,13 @@ Two bridges this command stands on:
      # session-scoped kill with VERIFICATION: TERM → wait → re-check → KILL escalation → loud fail
      # NEVER `pkill -f` (cross-session). NEVER `awk '{print $1}'` (CC harness rewrites `$1` to task id).
      # NEVER trust kill silently — 2026-06-19 verified: "watch cleaned" reported but watcher survived 1+ hour.
-     pids=$(pgrep -lf "${WATCH_PROC}" | grep -F "${SESSION_ID}" | cut -d' ' -f1 | grep -E '^[0-9]+$')
+     pids=$(pgrep -lf "${WATCH_PROC}.*${SESSION_ID}" | cut -d' ' -f1 | grep -E '^[0-9]+$')
      if [ -n "$pids" ]; then
        kill $pids 2>/dev/null; sleep 0.5
-       still=$(pgrep -lf "${WATCH_PROC}" | grep -F "${SESSION_ID}" | cut -d' ' -f1 | grep -E '^[0-9]+$')
+       still=$(pgrep -lf "${WATCH_PROC}.*${SESSION_ID}" | cut -d' ' -f1 | grep -E '^[0-9]+$')
        [ -n "$still" ] && kill -9 $still 2>/dev/null && sleep 0.3
      fi
-     if pgrep -lf "${WATCH_PROC}" | grep -F "${SESSION_ID}" >/dev/null; then
+     if pgrep -lf "${WATCH_PROC}.*${SESSION_ID}" >/dev/null; then
        echo "❌ watch for $SESSION_ID STILL ALIVE after kill+kill-9 — keeping $STATE_FILE for retry/diagnosis"
        ps aux | grep -F "${WATCH_PROC}" | grep -F "${SESSION_ID}" | grep -v grep
      else
@@ -221,13 +223,13 @@ Two bridges this command stands on:
    ```bash
    # FALLBACK ONLY (no watchTaskId / TaskStop errored) — this path is known to fail silently.
    # session-scoped kill WITH VERIFICATION (avoid silent-kill failure — see the lessons file)
-   pids=$(pgrep -lf "${WATCH_PROC}" | grep -F "${SESSION_ID}" | cut -d' ' -f1 | grep -E '^[0-9]+$')
+   pids=$(pgrep -lf "${WATCH_PROC}.*${SESSION_ID}" | cut -d' ' -f1 | grep -E '^[0-9]+$')
    if [ -n "$pids" ]; then
      kill $pids 2>/dev/null; sleep 0.5
-     still=$(pgrep -lf "${WATCH_PROC}" | grep -F "${SESSION_ID}" | cut -d' ' -f1 | grep -E '^[0-9]+$')
+     still=$(pgrep -lf "${WATCH_PROC}.*${SESSION_ID}" | cut -d' ' -f1 | grep -E '^[0-9]+$')
      [ -n "$still" ] && kill -9 $still 2>/dev/null && sleep 0.3
    fi
-   pgrep -lf "${WATCH_PROC}" | grep -F "${SESSION_ID}" >/dev/null && \
+   pgrep -lf "${WATCH_PROC}.*${SESSION_ID}" >/dev/null && \
      echo "⚠️ lingering watch for $SESSION_ID — investigate before flipping to suspended"
    # dcg 的 redirect-truncate-root-home 規則會擋 shell `>` 寫 home 路徑，改 python 寫檔（2026-07-11）
    python3 -c 'import sys; open(sys.argv[1],"w").write(sys.stdin.read())' "$STATE_FILE" <<EOF
@@ -279,10 +281,10 @@ Two bridges this command stands on:
    ```bash
    # FALLBACK ONLY (no watchTaskId / TaskStop errored) — this path is known to fail silently.
    # session-scoped kill WITH VERIFICATION (see the lessons file for the silent-kill failure mode)
-   pids=$(pgrep -lf "${WATCH_PROC}" | grep -F "${SESSION_ID}" | cut -d' ' -f1 | grep -E '^[0-9]+$')
+   pids=$(pgrep -lf "${WATCH_PROC}.*${SESSION_ID}" | cut -d' ' -f1 | grep -E '^[0-9]+$')
    if [ -n "$pids" ]; then
      kill $pids 2>/dev/null; sleep 0.5
-     still=$(pgrep -lf "${WATCH_PROC}" | grep -F "${SESSION_ID}" | cut -d' ' -f1 | grep -E '^[0-9]+$')
+     still=$(pgrep -lf "${WATCH_PROC}.*${SESSION_ID}" | cut -d' ' -f1 | grep -E '^[0-9]+$')
      [ -n "$still" ] && kill -9 $still 2>/dev/null && sleep 0.3
    fi
    ```

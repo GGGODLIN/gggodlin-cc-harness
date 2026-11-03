@@ -1239,7 +1239,9 @@ def consume():
 
   transcript, _ = resolve_transcript(session)
   supplied_transcript = Path(os.path.abspath(os.path.expanduser(transcript_value)))
-  if transcript != supplied_transcript:
+  # 多帳號 config dir 的 projects 是指向 ~/.claude/projects 的 symlink，payload 會帶 alias 路徑；
+  # 比實際檔案才不會把同一份 transcript 判成別的 session。指向別的檔案的 symlink 仍然不相等。
+  if os.path.realpath(transcript) != os.path.realpath(supplied_transcript):
     deny("permit-context-mismatch")
   current = now_utc()
   root = runtime_dir()

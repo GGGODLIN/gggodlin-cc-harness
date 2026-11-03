@@ -29,8 +29,8 @@ command **路徑無關**：任何 spec / plan / PRD 都能審，不綁定特定 
 | Tier | 機制                                          | 什麼時候選                                    |
 | ---- | --------------------------------------------- | --------------------------------------------- |
 | 1    | 唱反調自審（in-context，不派 subagent）       | 改 < 2 檔 / 已經很懂這塊                      |
-| 2    | 單一 architecture-critic（fresh-context）     | 跨 3+ 檔 / 新模組 / 架構沒把握                |
-| 3    | 多 lens Opus／Fable role 雙跑 + synthesize（原生或 distinct vendor mapping） | 動核心架構 / 碰生產資料 / 跨既有 domain model |
+| 2    | 雙席平行：單一 architecture-critic + 獨立新人理解席（Comprehension，fresh-context） | 跨 3+ 檔 / 新模組 / 架構沒把握                |
+| 3    | 多 lens Opus／Fable role 雙跑 + 獨立新人理解席（Comprehension）+ synthesize（原生或 distinct vendor mapping） | 動核心架構 / 碰生產資料 / 跨既有 domain model |
 | 4    | 外部跨模型暗門（codex-rescue）                | 賭很大的關鍵決策才手動升                      |
 | yagni | 需求定價軸（獨立跑，不與 T1–T4 疊加）        | spec 是模型代寫、要審「值不值得」而非「對不對」 |
 
@@ -46,7 +46,7 @@ command **路徑無關**：任何 spec / plan / PRD 都能審，不綁定特定 
    - **引證表**：spec 裡任何一句「現在的 code / 現在的平台是這樣」，附 `檔案:行號` 或工具查詢結果；附不出來就改寫成「未驗證的假設」。同一輪漏掉的另一條（某 flag 的語義）reviewer 手上有 Read/Grep、翻一下實作就會發現，但沒人翻——critic 預設拿條文對照自己的知識，不會主動去查。
 
    兩份附錄不另派 agent，寫進既有 lens 的 output schema。Done when：每份 review 產出都帶這兩張表，且引證表裡沒有「聲稱是事實但無出處」的條目。
-4. **席位驗收先於 surface 或 mutation**：dispatch 前按 Tier 寫下預期輸出 shape；Tier 2 要有 severity-ranked findings，YAGNI 要完整逐條表與反方下限。回傳不符就帶 mismatch 做 focused retry，最多一次；第二次仍不符就標該席 invalid，不把 raw report 上呈或拿來改檔。routed seat 兩次 60 秒仍無 final 時停止該席，保留其他完成席並把結果明標單席，不讓整輪卡住。security finding 觸發 mutation 前先查 known credential exception；目前 Context7 free key 的 feedback 明訂不觸發跨檔止血。Done when：每席都有 valid／invalid／stalled 狀態，invalid 與 stalled 都沒有被當成 finding source。
+4. **席位驗收先於 surface 或 mutation**：dispatch 前按 Tier 寫下預期輸出 shape；Tier 2／Tier 3 的架構席要有 severity-ranked findings，獨立「新人理解席（Comprehension）」開頭必有兩段白話重述（`這份規格提議做什麼` 與 `依本文件，現有系統如何運作`），YAGNI 要完整逐條表與反方下限。回傳不符就帶 mismatch 做 focused retry，最多一次；第二次仍不符就標該席 invalid，不把 raw report 上呈或拿來改檔。routed seat 兩次 60 秒仍無 final 時停止該席，保留其他完成席並把結果明標單席，不讓整輪卡住。security finding 觸發 mutation 前先查 known credential exception。Done when：每席都有 valid／invalid／stalled 狀態，invalid 與 stalled 都沒有被當成 finding source。
 5. **驗證設計完整性（條件式）**：spec 把 `eval`、`benchmark`、`A/B test`、`judge`、`scorer`、`holdout`、with-skill／without-skill 對照或多 agent 互驗當成成功證據時，標準 Tier 1–4 額外跑本項；一般 API、schema 或純功能 spec 不跑。逐項對帳：① 記答案代替推理；② 錯誤對照組；③ 同源互相認證；④ 評分規則與答案同構；⑤ 設計者兼裁判；⑥ 訓練與驗證共用來源；⑦ 題目框架洩漏；⑧ 受測者知道想要的結果。隱藏輸出答案仍不夠，資料挑選或收集配方洩漏也算 FAIL。
    - 每類固定記 `PASS／FAIL／N-A + spec 引證`。任何 FAIL 都先把乾淨測試要求寫回 spec：凍結題目與成功門檻、隔離 fresh runs、隱藏 arm 標籤、拆開 designer 與 judge、分離訓練與 holdout 來源；寫回後重跑本表，不把「之後會補測試」當通過。
    - `review-spec` 只修 spec 與 review artifact，不直接建立 ticket；後續 `to-tickets` 依既有規則把驗證項分類成 Gate／Confirmation／Contract，Gate 必須成為獨立阻擋 ticket。
@@ -91,14 +91,17 @@ command **路徑無關**：任何 spec / plan / PRD 都能審，不綁定特定 
 
 自己能答的先答完、一次列完，只把真要使用者裁的問題留下來問。不要軟化、不要自己先幫忙辯護。完成後接「標準 Tier 1–4 共用收斂」，共用收斂完成才照下方「呈現紀律」surface。
 
-## Tier 2 — 單一 architecture-critic（fresh-context）
+## Tier 2 — 雙席平行：單一 architecture-critic + 獨立新人理解席（fresh-context）
 
-`Agent` tool → `subagent_type: architecture-critic`、`model: opus`，prompt 前置 framing（architecture-critic 出身 code-modernization，要關掉它的 migration lens）：
+在同一則訊息平行派出 **2 隻獨立零記憶 subagent**（兩隻皆 `subagent_type: architecture-critic`、`model: opus`，職責嚴格分離，避免同一視窗內重述與批評互相錨定）：
+
+1. **席位 A — 架構批判席（architecture-proposal lens）**，prompt 前置 framing（關掉 migration lens）：
 
 ```
 這是一份 SPEC / design 文件的 review，不是 code migration。
 套用你的 architecture-proposal lens：service/module 邊界是否對應真實 domain seam、
-滿足需求的最簡設計、被忽略的 NFR（latency/throughput/consistency）、單點失效 end-to-end trace。
+滿足需求的最簡設計、被忽略的 NFR（latency/throughput/consistency）、單點失效 end-to-end trace，
+以及以「下一個改碼的 agent 只看它打開的單一檔案與最近範例」為前提，檢查規格是否造成同一狀態多處寫入（split ownership）或需人工同步的雙份清單。
 忽略 transformed-code / COBOL / JOBOL 那半段 lens。
 Default stance: skeptical。找 over-engineering、漏掉的需求、更簡單的替代。
 
@@ -110,7 +113,29 @@ Spec:
 [spec 全文]
 ```
 
-收到 raw report 後先過守則 4 的席位驗收。valid report 完成後接「標準 Tier 1–4 共用收斂」，共用收斂完成才照下面「呈現紀律」surface。等效於對 spec 做單 critic 一發 adversarial review，這裡自己控派工以便接 Tier 3。
+2. **席位 B — 獨立新人理解席（Comprehension Goldfish，Paraphrase First）**，扮演剛加入專案、沒有任何歷史背景的新工程師：
+
+```
+你是剛加入這個專案的新工程師（Comprehension Reviewer），完全沒有任何先前的對話脈絡或未寫出的團隊默契。
+你的任務不是挑架構好壞或找簡化機會（那是另一隻 critic 的活），而是測試這份 SPEC 是否自給自足、沒有理解斷裂：
+
+1. Paraphrase First（先重述再審，必填）：
+   在列任何 finding 之前，你必須先用自己的話在以下兩個標題下各寫 2–5 句白話重述：
+   - ### 1. 這份規格提議做什麼（What this proposes）
+   - ### 2. 依本文件，現有系統如何運作（How the existing system works, per this document）
+   如果你因為某段寫得太含糊或前後接不上而無法重述，直接將該段列為 Blocker（只列未定義名詞抓不到「名詞都有定義但段落邏輯接不上」的文件，重述測試才抓得到）。
+2. Comprehension Gaps（理解斷裂與隱含假設）：
+   - 挑出未定義也未附連結的專案專屬名詞、自創代號或內部組件（通用軟體工程術語不挑）
+   - 挑出假設讀者早就知道、卻沒寫出來的前置條件或隱含副作用
+   - 挑出含糊帶過的機制描述（例如只寫「系統會自動處理」卻沒寫怎麼處理）
+
+輸出：先輸出上方兩段白話重述，再列出 findings ranked Blocker / High / Medium / Nit（每條：what / spec 哪段 / 造成什麼理解斷裂 / 需補寫什麼說明）。
+
+Spec:
+[spec 全文]
+```
+
+收到兩席 raw report 後先過守則 4 的席位驗收。valid report 完成後接「標準 Tier 1–4 共用收斂」，共用收斂完成才照下面「呈現紀律」surface。
 
 ## Tier 3 — 多 lens 平行 + synthesize
 
@@ -144,6 +169,7 @@ Spec:
 - **lens 既有 repo 一致性**：architecture-critic，prompt 要它用 `Read`/`Grep` 讀 `CONTEXT.md` / `docs/adr/` / 既有 glossary，檢查 spec 有沒有跟既有 domain model、已決策、術語衝突
 - **lens 相容／演進（契約軸）**：architecture-critic，prompt 要它用 `Read`/`Grep` 對照既有 code 與 spec，回答三問：(a) 這份 spec 動到哪些**已上線**的介面契約（API shape / DB schema / 事件格式 / config 格式），逐項列出改前改後 (b) 每個消費端的遷移路徑是什麼——誰在用、舊格式何時停止支援、沒跟上的消費端會怎麼壞 (c) 哪些變更需要 expand/contract 分段（先加新、雙寫過渡、再砍舊）而非一次切換。**不找 over-engineering、不找 edge case**（那是另兩支的活），只盯「上線後會不會把既有消費端弄壞」
 - **lens 意圖對齊**：**不純 fresh-context**（守則 1）。Main 在 in-context 做，或蒸餾「使用者真正要什麼」brief 連同 spec 餵給一個 critic
+- **獨立新人理解席（Comprehension，固定隨 T3 平行派出 1 席 Opus）**：與上方選定的 architecture lenses 同一輪額外平行派出 1 隻 `subagent_type: architecture-critic`、`model: opus`（讀取同一份 `snapshot_path`，不佔用也不消耗 `review-spec-dual-permit.py` 的 4-lens Fable permit），套用 Tier 2「席位 B — 獨立新人理解席（Paraphrase First）」的同一份 prompt，專門產出兩段白話重述與理解斷裂 findings。
 
 所有選定席位完成且 resolved model 驗收通過後 synthesize：先按模型與 lens 做聯集去重，再按 severity 排；每條保留 `兩者皆有`／`僅 Opus`／`僅 Fable`／`互相衝突` 與 lens 來源，並做 **polarity contested 標註**（只有兩個對立席位都被選定時才適用；main 在 in-context 做、不另派 subagent）：
 
@@ -246,12 +272,13 @@ root 為「無單一承重問題」時，`第一個驗證` 按每個獨立 root 
 
 **DO**：
 
-- 呈現前先把每條 finding 分類、first-match 優先序：**題目誤讀**（critic 誤解 spec 某段 → 先補 spec 該段說明、該條重審，不直接丟棄也不照單全收）→ **actionable** → **trade-off**（兩個合理標準對撞、留使用者裁）→ **noise**。判 noise 時反問一句「在餵給 critic 的材料裡補什麼 context 能防這個 false flag？」——答得出來就補，下輪不再誤報
-- **橡皮圖章訊號（靠紀錄算出來，不靠記得）**：**派 critic 前**就先讀回同目錄既有 review 檔的 disposition 行——`grep -h '^- disposition:' <spec 同目錄>/*-review.md`——當場數出「前 N 輪各有幾條 substantive finding、其中幾條判 actionable」並印給使用者。**連續 2+ 輪有 substantive findings 而 0 條 actionable** = 這是 validating 不是 doubting，停下，把分類理由攤給使用者檢查或升 Tier，不要繼續蓋章。每次 `/review-spec` 都是新 session、記不得上一輪，所以這個訊號只能從落檔算；沒有 disposition 行就等於這個訊號結構性抓不到。**查無前輪** review 檔或前輪沒有 disposition 行時明寫「查無前輪紀錄」，不要當成乾淨
+- **先驗「獨立新人理解席（Comprehension）」的兩段白話重述（即使該席回傳 0 條 finding 也必驗）**：只要那兩段白話重述與真實意圖或系統現況不符，該**錯誤重述本身即自動構成一條成立的 `題目誤讀（misread）` finding**；嚴禁以「它只是沒看過前面對話／它自己讀錯」為由拒絕修改 spec——零記憶讀者會讀錯，正是 spec 漏寫背景、不夠自給自足的鐵證，必須先補寫 spec 該段說明。
+- 呈現前先把每條 finding 分類、first-match 優先序：**題目誤讀**（先核對「獨立新人理解席 Comprehension」開頭寫出的兩段白話重述是否偏離真實意圖或系統現況；若重述偏離或任何 critic 誤解 spec 某段 → 先補 spec 該段說明、該條重審，不直接丟棄也不照單全收）→ **immaterial**（成立但不重要：只用在 critic 說得對、原本會判 actionable 且不動 scope／行為／風險承擔的條目；如果你覺得這種條目不值得寫進 spec，就在判 actionable 前讀 `~/.claude/references/final-gate-materiality.md`，寫得出條目編號與一句理由才判 immaterial，記理由、不寫進 spec；寫不出就照 actionable。會動 scope 的照常進 trade-off）→ **actionable** → **trade-off**（兩個合理標準對撞、留使用者裁）→ **noise**。判 noise 時反問一句「在餵給 critic 的材料裡補什麼 context 能防這個 false flag？」——答得出來就補，下輪不再誤報
+- **橡皮圖章訊號（靠紀錄算出來，不靠記得）**：**派 critic 前**就先讀回同目錄既有 review 檔的 disposition 行——`grep -h '^- disposition:' <spec 同目錄>/*-review.md`——當場數出「前 N 輪各有幾條 substantive finding、其中幾條判 actionable」並印給使用者；`immaterial` 算 substantive、不算 actionable，連續判不重要的輪次也會觸發本訊號。**連續 2+ 輪有 substantive findings 而 0 條 actionable** = 這是 validating 不是 doubting，停下，把分類理由攤給使用者檢查或升 Tier，不要繼續蓋章。每次 `/review-spec` 都是新 session、記不得上一輪，所以這個訊號只能從落檔算；沒有 disposition 行就等於這個訊號結構性抓不到。**查無前輪** review 檔或前輪沒有 disposition 行時明寫「查無前輪紀錄」，不要當成乾淨
 - 按 severity 排（Blocker → High → Medium → Nit）
 - 每條給 spec 原文核心句 + 1–2 句濃縮抓重點，**結論強度不變**
 - **跨元件／多分支 trade-off 先畫目前流程**：最後一輪拍板若涉及跨 component／service／module／package／process 的呼叫順序，或含 branch／fallback，先在拍板表前用 call tree／pseudocode 畫「目前怎麼走」。本輪推翻舊結論時，緊接 `之前／現在` diff，只標唯一翻案；不改核心決策的 findings 另列「旁支發現」，每條附預設建議。
-- **先 triage 完才開口、只把真衝突留到最後一輪拍板**：題目誤讀→補 spec 該段並重審；actionable 且不動 scope／行為／風險承擔→直接改 spec、在 review 檔逐條記「改了什麼、依據哪條既有決策」；事實更正與既有決策可推導項同樣直接落；noise→記理由。剩下的 trade-off（scope、行為、風險承擔、reviewer polarity 真衝突）彙總成**最後一輪拍板表**：一列一題、每列 a／b／c、推薦放第一、選後效果先講。不逐條停下問 act／ignore——使用者 2026-08-21 原話「能自決盡量自決，只有真正需要我決策的最後再討論」
+- **先 triage 完才開口、只把真衝突留到最後一輪拍板**：題目誤讀→補 spec 該段並重審；actionable 且不動 scope／行為／風險承擔→直接改 spec、在 review 檔逐條記「改了什麼、依據哪條既有決策」；事實更正與既有決策可推導項同樣直接落；immaterial→記條目編號與理由、不改 spec，並在給使用者的回覆列一行「本輪 immaterial N 條：F?（M?）…」，讓使用者能抽查；noise→記理由。剩下的 trade-off（scope、行為、風險承擔、reviewer polarity 真衝突）彙總成**最後一輪拍板表**：一列一題、每列 a／b／c、推薦放第一、選後效果先講。不逐條停下問 act／ignore
 - **架構意圖圖 decision nudge（trial）**：Tier 3／重大架構 spec 若改變 domain／deployment／trust／data-ownership boundary，或 component／service／module／package／process 間的 cross-boundary edge，就在最後一輪拍板表追加「此 spec 適合先看架構意圖圖：a. 生成  b. 跳過」。API／schema／config／retry／lifecycle 只有造成上述 boundary／edge 變化才觸發。
 🔌 接線點：架構圖產生與審批 — 見 WIRING.md
   - 只有 Archify wrapper 成功且 intent artifact 與 wrapper receipt validation 通過，才啟動唯一一支共用 adapter background task：`Bash(run_in_background=true): node ~/.claude/scripts/plannotator-review.mjs intent <wrapper-receipt>`；記錄 `adapterTaskId` 與 wrapper receipt identity，同一 identity 同時只能有一支 live task。
@@ -277,8 +304,9 @@ root 為「無單一承重問題」時，`第一個驗證` 按每個獨立 root 
 - disposition: <ID> | <class> | main=<verdict> | user=<verdict> | <一行理由>
 ```
 
-- `<class>`：`misread`／`actionable`／`tradeoff`／`noise`，取上方 triage 分類的原詞
-- `main=`：Main 這輪的判定，用同一組分類詞（`main=actionable`、`main=noise`…）
+- `<class>`：`misread`／`immaterial`／`actionable`／`tradeoff`／`noise`，取上方 triage 分類的原詞
+- `main=`：Main 這輪的判定，用同一組分類詞（`main=actionable`、`main=immaterial`、`main=noise`…）
+- `<一行理由>`：`immaterial` 的理由以條目編號開頭（例如 `M4：既有單元測試已會變紅`）
 - `user=`：`accepted`／`dismissed`／`deferred`／`n/a`。上呈拍板表的條目照使用者實際回答填；`n/a` 代表 Main 自決、沒上呈
 - 這一行的形狀與 `review-implement` 的 `### Dispositions` 段共用，所以跨兩支機制可以一起 grep
 

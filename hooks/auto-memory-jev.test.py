@@ -604,6 +604,39 @@ class ReminderTests(unittest.TestCase):
                             capture_output=True, text=True, timeout=3)
     self.assertEqual((result.returncode, result.stdout, result.stderr), (0, '', ''))
 
+  def test_large_transcript_reads_tail_and_matches_full_scan(self):
+    # 10-26 前超過 64MB 一律 unsafe_transcript；截圖多的 session 因此整份沒有提醒
+    shot = {'type': 'user', 'uuid': 'shot', 'message': {'content': [
+      {'type': 'tool_result', 'tool_use_id': 't', 'content': [{'type': 'image', 'source': {'data': 'x' * 400}}]}]}}
+    self.entries = [user('First standing preference.', 'human-1'), assistant('Noted one.', 'assistant-1'),
+                    {'type': 'system', 'subtype': 'compact_boundary', 'uuid': 'compact-1'},
+                    user('<unii-view>old copy</unii-view>', 'meta-view')]
+    self.entries += [dict(shot, uuid='shot-a' + str(i)) for i in range(20)]
+    self.entries += [user('Second preference.', 'human-2'),
+                     assistant('', 'assistant-2', [{'type': 'tool_use', 'id': 't', 'name': 'Write',
+                                                    'input': {'file_path': '~/.claude/memory/x.md'}}])]
+    self.entries += [dict(shot, uuid='shot-b' + str(i)) for i in range(20)]
+    self.entries += [user('For future sessions, I prefer concise Traditional Chinese.', 'human-3'),
+                     assistant(self.final, 'assistant-3')]
+    self.flush()
+    size = self.transcript.stat().st_size
+    with open(self.transcript, 'rb') as source:
+      full = hook.scan(source)
+    shape = lambda c: (c['turns'], c['compact'], c['owner'],
+                       [(r['turn'], r['assistant'], r['saved'], sorted(r['tools'])) for r in c['records']])
+    with patch.object(hook, 'TAIL_FROM_BYTES', size - 1), patch.object(hook, 'TAIL_START_BYTES', 300):
+      self.assertEqual(shape(hook.snapshot(str(self.transcript))), shape(full))
+      self.invoke()
+    self.assertEqual(len(self.calls), 1)
+    self.assertEqual((full['turns'], full['compact'], len(full['records'])), (4, 'compact-1', 2))
+    with patch.object(hook, 'TAIL_FROM_BYTES', size), patch.object(hook, 'scan', side_effect=hook.scan) as whole:
+      hook.snapshot(str(self.transcript))
+    self.assertEqual(whole.call_count, 1)
+    fifo = self.home / 'fifo.jsonl'
+    os.mkfifo(fifo)
+    with self.assertRaisesRegex(ValueError, 'unsafe_transcript'):
+      hook.snapshot(str(fifo))
+
 
 if __name__ == '__main__':
   suite = unittest.defaultTestLoader.loadTestsFromTestCase(ReminderTests)

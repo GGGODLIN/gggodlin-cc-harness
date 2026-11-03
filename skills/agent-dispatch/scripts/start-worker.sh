@@ -180,6 +180,9 @@ case "$HARNESS" in
       EFFORT="${EFFORT:-high}"
       START_ARGS=(--model "$MODEL" --effort "$EFFORT")
     fi
+    # Herdr 新分頁不繼承 main 的 CLAUDE_CONFIG_DIR；沒帶過去就落在預設 ~/.claude，
+    # 那份登入失效時 worker 一開就回 Login expired。main 在跑就代表它的設定目錄是登入中的。
+    [ -z "${CLAUDE_CONFIG_DIR:-}" ] || TAB_ENV_ARGS+=(--env "CLAUDE_CONFIG_DIR=$CLAUDE_CONFIG_DIR")
     ;;
   codex)
     [ -n "$MODEL" ] || fail "--harness codex requires --model (the default opus[1m] is meaningless for codex)"
@@ -207,13 +210,22 @@ CWD="$(cd "$CWD" && pwd -P)"
 LOGDIR="${LOGDIR:-$(dirname "$BRIEF")/watch-logs}"
 mkdir -p "$LOGDIR" || fail "could not create log directory: $LOGDIR"
 
+HC_BIN="${HC_BIN:-hc}"
+HERDR_APP_BIN="${HERDR_APP_BIN:-herdr-app}"
+
 HERDR_ANY=0
 if [ -n "${HERDR_PANE_ID:-}" ] || [ -n "${HERDR_WORKSPACE_ID:-}" ]; then
+  [ -n "${HERDR_PANE_ID:-}" ] && [ -n "${HERDR_WORKSPACE_ID:-}" ] || fail "incomplete Herdr parent identity"
   HERDR_ANY=1
 fi
-[ "$HERDR_ANY" -eq 1 ] || fail "no supported parent terminal identity; use Herdr"
-[ -n "${HERDR_PANE_ID:-}" ] && [ -n "${HERDR_WORKSPACE_ID:-}" ] || fail "incomplete Herdr parent identity"
-BACKEND=herdr
+# 若 hc serve 從舊版 herdr 內啟動，子程序會同時帶完整 HERDR_PANE_ID/HERDR_WORKSPACE_ID 與 HC_TERMINAL_ID；內層 HC_TERMINAL_ID 優先。
+if [ -n "${HC_TERMINAL_ID:-}" ]; then
+  BACKEND=herdr-core
+elif [ "$HERDR_ANY" -eq 1 ]; then
+  BACKEND=herdr
+else
+  fail "no supported parent terminal identity; use Herdr"
+fi
 
 check_json_ok() {
   printf '%s' "$1" | python3 -c 'import json,sys; s=sys.stdin.read().strip();
@@ -229,7 +241,17 @@ herdr_parent_is_live() {
   printf '%s' "$result" | python3 -c 'import json,sys; d=json.load(sys.stdin); p=d.get("result",{}).get("pane",{}); ok=p.get("pane_id")==sys.argv[1] and p.get("workspace_id")==sys.argv[2]; raise SystemExit(0 if ok else 1)' "$HERDR_PANE_ID" "$HERDR_WORKSPACE_ID"
 }
 
-herdr_parent_is_live || fail "Herdr parent target is not live: $HERDR_PANE_ID"
+hc_parent_is_live() {
+  local result
+  result=$("$HC_BIN" get "$HC_TERMINAL_ID" 2>&1) || return 1
+  printf '%s' "$result" | python3 -c 'import json,sys; d=json.load(sys.stdin); ok=isinstance(d,dict) and d.get("address")==sys.argv[1] and d.get("state")=="live"; raise SystemExit(0 if ok else 1)' "$HC_TERMINAL_ID" 2>/dev/null
+}
+
+if [ "$BACKEND" = herdr ]; then
+  herdr_parent_is_live || fail "Herdr parent target is not live: $HERDR_PANE_ID"
+else
+  hc_parent_is_live || fail "Herdr-core parent target is not live: $HC_TERMINAL_ID"
+fi
 
 cleanup_herdr_tab() {
   [ -n "${1:-}" ] && herdr tab close "$1" >/dev/null 2>&1 || true
@@ -240,16 +262,35 @@ cleanup_herdr_tab() {
 lookup_session() {
   local agents
   agents=$(herdr agent list 2>&1) || { printf '%s' "$agents"; return 2; }
-  printf '%s' "$agents" | python3 -c 'import json,sys; d=json.load(sys.stdin); name=sys.argv[1]; pane=sys.argv[2]; xs=[x for x in d.get("result",{}).get("agents",[]) if x.get("name")==name and x.get("pane_id")==pane]; r=(xs[0].get("agent_session") or {}).get("value","") if xs else ""; print(r) if r else sys.exit(1)' "$NAME" "$pane"
+  printf '%s' "$agents" | python3 -c '
+import json, sys
+try:
+  d = json.load(sys.stdin)
+except Exception as e:
+  sys.stdout.write(f"invalid herdr agent list JSON: {e}")
+  sys.exit(2)
+name, pane = sys.argv[1], sys.argv[2]
+xs = [x for x in d.get("result", {}).get("agents", []) if x.get("name") == name and x.get("pane_id") == pane]
+r = (xs[0].get("agent_session") or {}).get("value", "") if xs else ""
+print(r) if r else sys.exit(1)
+' "$NAME" "$pane"
 }
 
 # Codex 送出第一則 prompt 後約 2 秒才有 session，所以在送 brief 之後有限次輪詢。
 poll_session() {
-  local i max interval out
+  local i max interval out rc
   max="${START_WORKER_SESSION_POLLS:-30}"
   interval="${START_WORKER_SESSION_POLL_INTERVAL:-1}"
   for ((i = 0; i < max; i++)); do
-    out=$(lookup_session) && { printf '%s' "$out"; return 0; }
+    rc=0
+    out=$(lookup_session) || rc=$?
+    if [ "$rc" -eq 0 ]; then
+      printf '%s' "$out"
+      return 0
+    elif [ "$rc" -eq 2 ]; then
+      printf '%s' "$out"
+      return 2
+    fi
     [ "$i" -lt $((max - 1)) ] && sleep "$interval"
   done
   return 1
@@ -293,6 +334,54 @@ confirm_pane_unset() {
   fail "unset of recipe variables was not confirmed after $max attempts in pane $pane; tab closed"
 }
 
+session_continued_into() {
+  local old_sid="$1" target_sid="$2"
+  python3 -I - "$old_sid" "$target_sid" <<'PY'
+import glob, json, os, sys
+from pathlib import Path
+
+old_sid, target_sid = sys.argv[1], sys.argv[2]
+roots = []
+for base in [os.environ.get("CLAUDE_CONFIG_DIR"), os.path.expanduser("~/.claude")]:
+  if base:
+    p = Path(base) / "projects"
+    if p.is_dir() and p not in roots:
+      roots.append(p)
+for root in roots:
+  for start_file in root.glob(f"*/{old_sid}.jsonl"):
+    proj_dir = start_file.parent
+    cur = old_sid
+    seen = {cur}
+    for _ in range(10):
+      cur_file = proj_dir / f"{cur}.jsonl"
+      if not cur_file.is_file():
+        break
+      nxt = None
+      try:
+        with cur_file.open(encoding="utf-8", errors="replace") as fh:
+          for line in fh:
+            if '"continued-in"' not in line:
+              continue
+            try:
+              obj = json.loads(line)
+            except ValueError:
+              continue
+            if obj.get("type") == "continued-in" and obj.get("sessionId") == cur:
+              cand = obj.get("continuedInSessionId")
+              if isinstance(cand, str) and cand:
+                nxt = cand
+      except OSError:
+        break
+      if not nxt or nxt in seen:
+        break
+      if nxt == target_sid and (proj_dir / f"{target_sid}.jsonl").is_file():
+        sys.exit(0)
+      seen.add(nxt)
+      cur = nxt
+sys.exit(1)
+PY
+}
+
 start_herdr() {
   local main main_identity main_session ws created created_info pane tab started agents session prompt log first_error
   main="$HERDR_PANE_ID"
@@ -300,7 +389,11 @@ start_herdr() {
   main_identity=$(herdr agent get "$main" 2>&1) || fail "Herdr main identity unavailable: $main_identity"
   main_session=$(printf '%s' "$main_identity" | python3 -c 'import json,sys; d=json.load(sys.stdin); a=d.get("result",{}).get("agent",{}); s=a.get("agent_session",{}).get("value",""); print(s) if a.get("pane_id")==sys.argv[1] and s else sys.exit(1)' "$main") || fail "Herdr main session unavailable: $main_identity"
   if [ -n "${CLAUDE_CODE_SESSION_ID:-}" ] && [ "$main_session" != "$CLAUDE_CODE_SESSION_ID" ]; then
-    fail "Herdr main pane belongs to another session"
+    if session_continued_into "$main_session" "$CLAUDE_CODE_SESSION_ID"; then
+      main_session="$CLAUDE_CODE_SESSION_ID"
+    else
+      fail "Herdr main pane belongs to another session"
+    fi
   fi
   tab=""
   [ "$HARNESS" != pi ] || prepare_pi_worktree
@@ -351,4 +444,113 @@ start_herdr() {
   python3 -c 'import json,sys; print(json.dumps({"backend":sys.argv[1],"parent_backend":sys.argv[1],"worker_backend":sys.argv[1],"name":sys.argv[2],"worker_id":sys.argv[3],"parent_id":sys.argv[4],"parent_session_id":sys.argv[9],"pane_id":sys.argv[3],"tab_id":sys.argv[5],"session_id":sys.argv[6],"log":sys.argv[7],"cwd":sys.argv[8],"harness":sys.argv[10],"recipe":json.loads(sys.argv[13]) if sys.argv[13] else {"model":sys.argv[11],"effort":sys.argv[12]}}))' "$BACKEND" "$NAME" "$pane" "$main" "$tab" "$session" "$log" "$CWD" "$main_session" "$HARNESS" "$MODEL" "$EFFORT" "$RECIPE"
 }
 
-start_herdr
+cleanup_hc_worker() {
+  local pane="${1:-}" tab="${2:-}"
+  if [ -n "$tab" ] && [ "$tab" != "$pane" ]; then
+    "$HERDR_APP_BIN" do tab.close --id "$tab" --confirmed true >/dev/null 2>&1 || true
+  fi
+  if [ -n "$pane" ]; then
+    "$HC_BIN" kill "$pane" >/dev/null 2>&1 || true
+    "$HC_BIN" rm "$pane" >/dev/null 2>&1 || true
+  fi
+}
+
+build_hc_env_cmd() {
+  python3 -c '
+import shlex, sys
+unsets = []
+exports = []
+i = 1
+while i < len(sys.argv):
+  tag = sys.argv[i]
+  if tag == "-u":
+    unsets.append(sys.argv[i + 1])
+    i += 2
+  elif tag == "--env":
+    k, v = sys.argv[i + 1].split("=", 1)
+    exports.append(f"{k}={shlex.quote(v)}")
+    i += 2
+  else:
+    i += 1
+parts = []
+if unsets:
+  parts.append("unset " + " ".join(unsets))
+if exports:
+  parts.append("export " + " ".join(exports))
+print("; ".join(parts))
+' "$@"
+}
+
+start_herdr_core() {
+  local main main_session space app_status created created_info pane tab cc_uuid env_args env_cmd launch_cmd out prompt log session u e
+  main="$HC_TERMINAL_ID"
+  main_session="${CLAUDE_CODE_SESSION_ID:-hc:$HC_TERMINAL_ID}"
+  [ "$HARNESS" != pi ] || prepare_pi_worktree
+  session=""
+  if [ "$HARNESS" = claude ]; then
+    cc_uuid=$(python3 -c 'import uuid; print(uuid.uuid4())') || fail "could not generate a claude session id"
+    START_ARGS+=(--session-id "$cc_uuid")
+    session="$cc_uuid"
+  elif [ "$HARNESS" = pi ]; then
+    session="$PI_UUID"
+  fi
+  pane=""
+  tab=""
+  space=""
+  if app_status=$("$HERDR_APP_BIN" status 2>/dev/null); then
+    space=$(printf '%s' "$app_status" | python3 -c 'import json,sys; d=json.load(sys.stdin); s=d.get("space") if isinstance(d,dict) else ""; print(s if isinstance(s,str) and s else "")' 2>/dev/null) || space=""
+  fi
+  if [ -n "$space" ]; then
+    if created=$("$HERDR_APP_BIN" do tab.new --space "$space" --name "$LABEL" --folder "$CWD" 2>/dev/null); then
+      created_info=$(printf '%s' "$created" | python3 -c 'import json,sys; d=json.load(sys.stdin); t=d.get("terminal",""); b=d.get("tab",""); print(t + "\t" + b) if isinstance(d,dict) and t and b and not d.get("error") else sys.exit(1)' 2>/dev/null) || created_info=""
+      if [ -n "$created_info" ]; then
+        IFS=$'\t' read -r pane tab <<< "$created_info"
+        "$HC_BIN" label "$pane" "name=$NAME" >/dev/null 2>&1 || true
+      fi
+    fi
+  fi
+  if [ -z "$pane" ]; then
+    created=$("$HC_BIN" run --bg --name "$NAME" --cwd "$CWD" 2>&1) || fail "$created"
+    pane=$(printf '%s' "$created" | python3 -c 'import json,re,sys; s=sys.stdin.read().strip()
+try:
+  d=json.loads(s); a=d.get("address","") if isinstance(d,dict) else ""
+except Exception:
+  m=re.search(r"(?:still running as |^)(t[0-9a-zA-Z_-]+)", s); a=m.group(1) if m else ""
+print(a) if a else sys.exit(1)' 2>/dev/null) || fail "invalid hc run response: $created"
+    tab="$pane"
+  fi
+  env_args=()
+  for u in ${UNSET_NAMES[@]+"${UNSET_NAMES[@]}"}; do
+    env_args+=(-u "$u")
+  done
+  for e in ${TAB_ENV_ARGS[@]+"${TAB_ENV_ARGS[@]}"}; do
+    env_args+=("$e")
+  done
+  if [ "${#env_args[@]}" -gt 0 ]; then
+    env_cmd=$(build_hc_env_cmd "${env_args[@]}")
+    if [ -n "$env_cmd" ]; then
+      out=$("$HC_BIN" send "$pane" "$env_cmd" 2>&1) || { cleanup_hc_worker "$pane" "$tab"; fail "hc send env failed: $out"; }
+    fi
+  fi
+  launch_cmd=$(python3 -c 'import shlex,sys; print(" ".join(shlex.quote(a) for a in sys.argv[1:]))' "$KIND" ${START_ARGS[@]+"${START_ARGS[@]}"})
+  out=$("$HC_BIN" send "$pane" "$launch_cmd" 2>&1) || { cleanup_hc_worker "$pane" "$tab"; fail "hc send launch failed: $out"; }
+  out=$("$HC_BIN" wait "$pane" 2>&1) || { cleanup_hc_worker "$pane" "$tab"; fail "hc wait ready failed: $out"; }
+  prompt="[main] Read $BRIEF and follow it. Ask your questions in plain text and stop; do not assume answers."
+  out=$("$HC_BIN" send "$pane" "$prompt" 2>&1) || { cleanup_hc_worker "$pane" "$tab"; fail "prompt failed: $out"; }
+  if [ "$HARNESS" = codex ]; then
+    session=$("$HC_BIN" get "$pane" 2>/dev/null | python3 -c 'import json,sys; d=json.load(sys.stdin); s=(d.get("session_id") or (d.get("labels") or {}).get("session_id") or "") if isinstance(d,dict) else ""; print(s)' 2>/dev/null) || session=""
+    [ -n "$session" ] || session="hc-$pane"
+  fi
+  log="$LOGDIR/$NAME.log"
+  if [ "$WATCH" -eq 1 ]; then
+    nohup bash "$HERE/agent-watch.sh" herdr-core "$NAME" "$HC_TERMINAL_ID" "$log" "$session" "$CWD" "$main_session" "$pane" >/dev/null 2>&1 &
+    disown
+  fi
+  python3 -c 'import json,sys; print(json.dumps({"backend":sys.argv[1],"parent_backend":sys.argv[1],"worker_backend":sys.argv[1],"name":sys.argv[2],"worker_id":sys.argv[3],"parent_id":sys.argv[4],"parent_session_id":sys.argv[9],"pane_id":sys.argv[3],"tab_id":sys.argv[5],"session_id":sys.argv[6],"log":sys.argv[7],"cwd":sys.argv[8],"harness":sys.argv[10],"recipe":json.loads(sys.argv[13]) if sys.argv[13] else {"model":sys.argv[11],"effort":sys.argv[12]}}))' "$BACKEND" "$NAME" "$pane" "$main" "$tab" "$session" "$log" "$CWD" "$main_session" "$HARNESS" "$MODEL" "$EFFORT" "$RECIPE"
+}
+
+if [ "$BACKEND" = herdr ]; then
+  start_herdr
+else
+  start_herdr_core
+fi

@@ -173,8 +173,8 @@ It is a reference, not a product. You can install single pieces, but nothing gua
 - [`model-routing.env`](model-routing.env)
 - [`openspec/`](openspec/) — 3 個檔案；內含 `specs/`
 - [`output-styles/`](output-styles/) — 1 個檔案；內含 `Explanatory.md`
-- [`references/`](references/) — 16 個檔案；內含 `claim-evidence-examples.md`、`dispatch-and-verify-examples.md`、`effort-controls.md`、`failure-mode-taxonomy.md`、`harness-model-sensitivity.md`、`ledger-lifecycle.md`、`perspective-sub-scout.md`、`perspective-sub-scout.md.LICENSE`…（共 16 項）
-- [`review-standards/`](review-standards/) — 34 個檔案；內含 `ai-generated-changes.md`、`architecture-proposal-lens.md`、`architecture-transformed-code-lens.md`、`catalog.md`、`code-review-quality.md`、`code-review-security.md`、`design-and-maintainability.md`、`finding-discipline.md`…（共 34 項）
+- [`references/`](references/) — 17 個檔案；內含 `claim-evidence-examples.md`、`dispatch-and-verify-examples.md`、`effort-controls.md`、`failure-mode-taxonomy.md`、`final-gate-materiality.md`、`harness-model-sensitivity.md`、`ledger-lifecycle.md`、`perspective-sub-scout.md`…（共 17 項）
+- [`review-standards/`](review-standards/) — 35 個檔案；內含 `ai-generated-changes.md`、`architecture-proposal-lens.md`、`architecture-transformed-code-lens.md`、`catalog.md`、`change-integrity.md`、`code-review-quality.md`、`code-review-security.md`、`design-and-maintainability.md`…（共 35 項）
 - [`rules/`](rules/) — 14 個檔案；內含 `common/`、`typescript/`
 - [`scripts/`](scripts/) — 100 個檔案；內含 `advisor-extract-context.py`、`agent-contract-command/`、`agent-contract-validator.definition.test.sh`、`agent-contract-validator.diagnostics.test.sh`、`agent-contract-validator.frontmatter.test.sh`、`agent-contract-validator.mcp-tools.test.sh`、`agent-contract-validator.mjs`、`agent-contract-validator.name.test.sh`…（共 86 項）
 - [`settings.json`](settings.json)

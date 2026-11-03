@@ -3,7 +3,7 @@ name: tdd
 description: "Use when the current implement batch explicitly selected tdd and has required tests, or the user explicitly asks for test-first / red-green / 先寫測試 outside a batch selected regression-closeout. Do not use for regression-closeout batches, including their late regression tests; use their selected recipe and standalone test-quality references instead. Do not use for test-suite auditing (mutation-testing) or trivial code / prose with approved test waivers."
 upstream: mattpocock/skills
 upstream-path: skills/engineering/tdd/SKILL.md
-upstream-pinned: 4588b32ecab9ecc9fc8cc6b6c5e7d675b6004b0d
+upstream-pinned: 5beb35b040e3de97e54fa9e386d7e42d15c295c2
 ---
 
 <!-- 本檔在契約測試底下：node ~/.claude/skills/implement/scripts/tests/testing-mode-contract.test.mjs -->
@@ -36,6 +36,9 @@ Ask (only when no seams are on record): "What's the public interface, and which 
 
 - **Implementation-coupled** — mocks internal collaborators, tests private methods, or verifies through a side channel (querying the database instead of using the interface). The tell: the test breaks when you refactor but behavior hasn't changed.
 - **Tautological** — the assertion recomputes the expected value the way the code does (`expect(add(a, b)).toBe(a + b)`, a snapshot derived by hand the same way, a constant asserted equal to itself), so it passes by construction and can never disagree with the code. Expected values must come from an independent source of truth — a known-good literal, a worked example, the spec.
+- **Secret-echoing assertions** — testing environment isolation or redaction against real environment secrets or with container assertions (`assertNotIn(secret, full_output)`) that dump the full output on red failure. Always use synthetic fake values and boolean assertions with short messages (`assertFalse(fake_secret in full_output, "...")`); see [tests.md](tests.md).
+- **Vacuous negative or invariance assertions** — asserting that a string/call is absent (`not.toContain`, `not.toHaveBeenCalledWith`, `assertIsNone(regex.search(x))`, `! grep`) or that a collection was not mutated, when the fixture never seeded the target row, never passed the input into the SUT, or used an overly narrow matcher (such as a bare path `/api/v1/foo` when real calls include `?query=...`), so the assertion passes forever regardless of code bugs. Every negative or invariance assertion must pre-seed the state under guard and pair with a positive control using the exact same matcher or helper to prove the assertion can fail; see [tests.md](tests.md).
+- **Swallowed mid-script failures in shell checks** — chaining multiple test or check commands with `;`, or piping a test runner into `tail`/`head`/`cat` without `set -euo pipefail`, so a failing assertion mid-script is overwritten by the final command's `exit 0`. Always enable `set -euo pipefail` (or accumulate a `FAIL` counter) in shell test runners; see [tests.md](tests.md).
 - **Speculative horizontal slicing** — writing tests for behavior nobody has agreed on yet (a whole feature's suite up front, or cases the ticket does not list) before any implementation. Bulk speculative tests verify _imagined_ behavior: you test the _shape_ of things rather than user-facing behavior, the tests go insensitive to real changes, and you commit to test structure before understanding the implementation. The risk is the amount of unconfirmed design commitment in the batch, not batching itself: the ticket's agreed acceptance list was confirmed at to-spec／to-tickets, so writing exactly those cases together is the **acceptance batch** described below, not this anti-pattern. Cases discovered during implementation are tracer bullets — add them one at a time, each with its own red.
 
 ## Rules of the loop

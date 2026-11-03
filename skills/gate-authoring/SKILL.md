@@ -18,9 +18,9 @@ description: Use when 使用者要「寫 / 改 / 加一個 hook」「設計 gate
 - **防漂移**（誠實但健忘的 agent 順手改了不該改的）→ 攔到常見入口就夠，不必窮盡語法
 - **防主動規避**（agent 刻意繞）→ 只有 agent 結構上做不到的事才算數（需要人在場的憑證、事前外部 permit）；字串比對一律不算
 
-字串比對型 gate（掃 Bash command、掃 prompt、掃檔名）另外明寫一句「不承諾完整語意，只認常見入口，認不出來就 fail closed」，並在腳本檔頭留下同一句。同一句旁再寫一條不承諾：字串比對型 gate 會攔到「談論該指令的文字」而不只「執行該指令」——heredoc 內文、測試 payload、文件段落含該指令字樣都會中；deny 訊息要指出替代路徑（內容改走 Write／Edit 落檔再執行），不然使用者只看到被擋、不知道怎麼過（2026-08-22 實例：往 friction-log append 含提交指令字樣的 heredoc 被 agent-contract-gate 自己攔下，改走 Edit 才寫得進去）。沒寫這句的下場是把 gate 當 parser 養：heredoc、跳脫字元、控制結構、worktree cwd scope 一輪一輪修，每輪都覺得再補一次就完整了。
+字串比對型 gate（掃 Bash command、掃 prompt、掃檔名）另外明寫一句「不承諾完整語意，只認常見入口，認不出來就 fail closed」，並在腳本檔頭留下同一句。同一句旁再寫一條不承諾：字串比對型 gate 會攔到「談論該指令的文字」而不只「執行該指令」——heredoc 內文、測試 payload、文件段落含該指令字樣都會中；deny 訊息要指出替代路徑（內容改走 Write／Edit 落檔再執行），不然使用者只看到被擋、不知道怎麼過。沒寫這句的下場是把 gate 當 parser 養：heredoc、跳脫字元、控制結構、worktree cwd scope 一輪一輪修，每輪都覺得再補一次就完整了。
 
-用 permit（事前核可）放行的 gate，threat model 多寫兩句不承諾：**核可是同意執行，不是證明指令真的在驗它標題說的事**；**核可不遞移到指令呼叫的 script／fixture／依賴**——指令文字沒變、被呼叫的檔換了，舊核可照放，要防就把被呼叫檔的 hash 也綁進 permit（2026-08-25 自 Leonxlnx/unlazy SECURITY.md 吸收）。
+用 permit（事前核可）放行的 gate，threat model 多寫兩句不承諾：**核可是同意執行，不是證明指令真的在驗它標題說的事**；**核可不遞移到指令呼叫的 script／fixture／依賴**——指令文字沒變、被呼叫的檔換了，舊核可仍可能放行；這是核可範圍的限制，不追加內容 hash 或沒有既有消費端的替代驗證。如果要調整自家 permit 綁定，就在設計前讀 `~/.claude/openspec/specs/harness-trust-binding/spec.md`，沿用身分欄位與已有的原文比對。
 
 threat model 寫在文件最後當免責聲明沒有用——它的作用是在動工前把規則的細度框住，事後才寫等於整輪都在無界線的狀態下寫規則。
 
@@ -69,7 +69,7 @@ threat model 寫在文件最後當免責聲明沒有用——它的作用是在�
 
 按 hook 性質挑用的三件＋一條寫法：**正反配對**（同一件同時驗「該重置的重置了」與「不該重置的沒重置」，單向 fixture 抓不到 metadata 假進度）；回合邊界 gate 寫 matcher 前，先枚舉真實 transcript 的 `origin／turnOrigin／promptSource` 欄位；fixture 要成對證明 human／sdk 該 reset，而 task-notification／peer／tool result／meta 不該 reset，未知 origin 依 gate 型別 fail closed。**read-only 宣稱反證**（宣稱唯讀的 command 斷言它印出來了**且**沒動到目標）；**控制字元／雙向文字注入**（會把外部文字塞進 block 訊息的 hook，餵含終端控制碼與 bidi override 的輸入）；**反向斷言**——修掉一個 gate bug 後加一條「斷言舊寫法不再出現」的檢查並註明哪一版踩過，把「踩過的坑」從散文變成會紅的測試。
 
-**fixture 之外再做一次真實環境 known-bad 實測**：安全型 gate 上線前，在使用者真實機器、真實 repo 上跑一個「應該 DENY」的情境並親眼看到 DENY。fixture 自訂 config root／repo，永遠測不到由環境變數決定的 root 與 scope——`CLAUDE_CONFIG_DIR` 指向 symlink farm、worktree、多 config dir 都會讓套件全綠而實際失效（2026-08-22 實例：33/33 綠，掛上後 8 個應 DENY 情境全 ALLOW，因 `canonical_dir` 停在 `~/.claude-max` 外層、repo 被判外來、locked-surface 檢查靜默跳過）。綠燈只證明邏輯自洽，不證明它在這台機器上有作用。
+**fixture 之外再做一次真實環境 known-bad 實測**：安全型 gate 上線前，在使用者真實機器、真實 repo 上跑一個「應該 DENY」的情境並親眼看到 DENY。fixture 自訂 config root／repo，永遠測不到由環境變數決定的 root 與 scope——`CLAUDE_CONFIG_DIR` 指向 symlink farm、worktree、多 config dir 都會讓套件全綠而實際失效。綠燈只證明邏輯自洽，不證明它在這台機器上有作用。
 
 fixture 內含 epoch／Unix timestamp 時，不要裸寫手算常數：優先從含完整時間與時區的 ISO-8601 字串由測試語言轉換；若必須保留數字常數，常數旁保留等價 ISO-8601，並驗兩者一致。macOS shell 不要只用 `date -j -f "%Y-%m-%d"` 轉換，因為它會繼承執行當下的時分秒，讓測資隨執行時間漂移。
 
@@ -81,7 +81,7 @@ fixture 內含 epoch／Unix timestamp 時，不要裸寫手算常數：優先從
 - 滿足字面格式、不滿足意圖（塞 token 過 gate 但內容空洞）
 - 走 gate 沒覆蓋的旁路（另一個 tool / 另一層級的同功能路徑）
 - 讓數字自報而非由 validator 重算（判分數學必須確定性重算、不信 LLM 自報）
-- **授權由受檢對象自己證明**——從待執行的 prompt 反解析出授權欄位再自我重算、commit message 自帶核准字樣、輸入裡的固定 marker 當放行憑證。這類形狀都是自洽的：被檢查的東西同時是核准來源，agent 只要照抄格式就過。授權必須來自事前建立、gate 外部保管、綁定當次內容（session、內容 hash、單次消耗）的 permit；輸入裡的 marker 只能是那張 permit 的參照，不是 permit 本身。三項綁定缺一就是跨 session 授權外洩，而漏掉的那項在單 session 測試裡不會現形——2026-08-22 實例：permit 只綁 index tree＋到期＋單次消耗，使用者為 A session 簽的 permit 在 19 秒後被併發的 B session 領走放行（audit log issue 08:13:05 → allow 08:13:24），A 的四個檔被掃進 B 的提交。簽發時記下 session id、gate 從 hook payload 的 session_id 比對、不符即拒，fixture 配一件「另一個 session 拿同一張 permit」。permit 放行的是**指令**時，綁定再加一軸執行環境——resolved cwd、shell、PATH、platform——同一條指令換目錄跑或 PATH 指到另一個 binary 就是另一件事，環境變即失效（2026-08-25 自 Leonxlnx/unlazy gate-check 吸收；本機 dcg allow-once 綁指令全文＋單次消耗、未綁環境軸，新寫 permit 型 gate 時補上）
+- **授權由受檢對象自己證明**——從待執行的 prompt 反解析出授權欄位再自我重算、commit message 自帶核准字樣、輸入裡的固定 marker 當放行憑證。這類形狀都是自洽的：被檢查的東西同時是核准來源，agent 只要照抄格式就過。授權必須來自事前建立、gate 外部保管、依現有契約綁定當次 session、permit 身分、期限與單次消耗狀態的 permit；輸入裡的 marker 只能是那張 permit 的參照，不是 permit 本身。身分或消耗檢查缺漏會使核可遭到誤用；需要確認內容相等時沿用已有的原文比對，不增加內容 hash 或替代欄位。跨 session 授權外洩不一定在單 session 測試裡現形（若 permit 未綁定 session id，併發 session 可能領走同一張 permit）。簽發時記下 session id、gate 從 hook payload 的 session_id 比對、不符即拒，fixture 配一件「另一個 session 拿同一張 permit」。permit 放行的是**指令**時，綁定再加一軸執行環境——resolved cwd、shell、PATH、platform——同一條指令換目錄跑或 PATH 指到另一個 binary 就是另一件事，環境變即失效（2026-08-25 自 Leonxlnx/unlazy gate-check 吸收）
 - **判定用的 helper 掛掉時整支 gate 放行**——import 失敗、檔案不存在、逾時、非 0 退出、吐出非法 JSON，任一格寫成靜默 return 就等於「想繞過只要弄壞 helper」
 
 每個「判不出來」的分支都要選邊倒，方向由 gate 的型別決定、不是逐格憑感覺：
@@ -103,7 +103,7 @@ fixture 內含 epoch／Unix timestamp 時，不要裸寫手算常數：優先從
 
 gate 或驗收項若靠跑指令判 PASS：成功條件必須是 **exit 0 且輸出含一個只有全過才會印的專用 token** 兩者同時成立——非零退出但錯誤訊息碰巧含 token 不算過；token 不能是 `ok`／`done`／`passed` 這種失敗輸出也會出現的字。指令本身是 `echo ok`／`true`／`exit 0` 這類固定輸出＝不可能失敗的 oracle，寫的時候就要抓掉。
 
-「已通過」的記錄要標它綁的輸入（指令、被驗檔案 hash、環境）；綁的輸入變了，記錄自動降級成「待重驗」而不是繼續顯示綠——CLAUDE.md「上一輪是綠的 ≠ 現在是綠的」在 gate 設計上的落點。（兩段 2026-08-25 自 Leonxlnx/unlazy gates.md／hardening-tests 吸收）
+「已通過」的記錄沿用既有消費端使用的路徑、指令與完成時間，不記內容 hash，也不為替代 hash 新增欄位。只有輸入意義、目標版本、實際結果或相關依賴的內容、設定、解析結果改變，才重驗受影響的項目；若直接核對結果仍正確，不因記錄缺失或過期重做。
 
 ### 7. Hook 輸出擺位（順手做對）
 

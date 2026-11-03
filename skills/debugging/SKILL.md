@@ -3,7 +3,7 @@ name: debugging
 description: Use when encountering any bug, test failure, or unexpected behavior, before proposing fixes. Do not use for planning a feature before its spec is settled or reviewing an existing spec (review-spec).
 upstream: mattpocock/skills
 upstream-path: skills/engineering/diagnosing-bugs/SKILL.md
-upstream-pinned: 4588b32ecab9ecc9fc8cc6b6c5e7d675b6004b0d
+upstream-pinned: 5beb35b040e3de97e54fa9e386d7e42d15c295c2
 ---
 
 <!-- 本檔在契約測試底下：bash ~/.claude/skills/debugging/scripts/tests/presentation-shape.test.sh -->
@@ -29,6 +29,8 @@ Use for any technical issue:
 - Integration issues
 
 ## The Four Phases
+
+進入本流程時先把適用標準階段（Phase 1 → Phase 4）建進待辦清單；如果某階段因條件不適用（如無參考範例可比對）而跳過，不從清單刪除，保留該項並標註 `skip: <原因>`（不得拿 `skip` 免除 Phase 4 的必跑測試）。如果問題轉為對單一量化指標做多輪持續迭代調優，就在進入多輪實驗前轉入 `Skill(hillclimb)`。
 
 ### Phase 1: Root Cause Investigation
 
@@ -103,6 +105,11 @@ Before proposing a fix:
    - Feedback loop 綁 env var 讓憑證留在環境不進輸出——上面 `[ -n "${IDENTITY:-}" ] && echo SET || echo UNSET` 的「印存在性不印值」就是標準形（`${VAR:-UNSET}` 有值時會印出值，不算；上游 superpowers `bb92a777` 同一修法）。
    - 帶 auth header 的 captured artifact 只引用有訊號的行。
    - 遮完不足以診斷 → 明說並問使用者，不要印出 secret。
+
+   **Large Diagnostic Artifacts and Live Runtime Probes**（單一程序與多元件系統皆適用，不限多元件條件）：
+   - **大型剖析或追蹤檔禁止直讀主對話**：如果遇到大型 `.cpuprofile`、`.heapsnapshot`、trace 或巨型 JSON log，就在讀取前改派 subagent 或用腳本轉成 SQLite／結構化查詢，只把最耗時路徑（hotspots）、殘留鏈（retainers）與對應原碼 `file:line` 帶回主 session。
+   - **活體探針針對原故障實例且必帶識別欄**：如果重啟或重整會洗掉故障現場，就在原故障實例上注入觀測（不另開乾淨隔離設定檔冒充原現場）；任何自加探針每筆輸出必帶唯一實體 ID 與牆鐘時間，避免跨邊界對不齊。
+   - 如果除錯過程涉及效能量測或速度提升宣稱，就在執行量測或回報數字前讀 `~/.claude/references/verification-recipes-and-probes.md` 的「效能宣稱核驗」。
 
 5. **Trace Data Flow**
 
@@ -195,7 +202,8 @@ Before proposing a fix:
 1. **Create Failing Test Case**
    - Simplest possible reproduction
    - Automated test if possible
-   - One-off test script if no framework
+   - One-off test script if no framework (enable `set -euo pipefail` or a `FAIL` counter; never chain checks with bare `;` or pipe test runners into `tail`/`head`/`cat` without `pipefail`, which swallows mid-script failures)
+   - For negative or invariance assertions ("output must not contain X" / "state Y must not change"), pre-seed the guarded state and pair a positive control using the same matcher to prove the assertion can actually fail (use synthetic canary strings for secret redaction tests)
    - MUST have before fixing
    - Use the `tdd` skill for writing proper failing tests
 
@@ -223,6 +231,7 @@ Before proposing a fix:
    - Each fix reveals new shared state/coupling/problem in different place
    - Fixes require "massive refactoring" to implement
    - Each fix creates new symptoms elsewhere
+   - 同一個繞路修補（workaround）跨無關檔案反覆出現，或為勉強通過而反覆加入違反原資料所有權假設的轉型（cast／`any`）與同步鎖（單次合法邊界轉型或既有共享資源鎖不在此限）
 
    **STOP and question fundamentals:**
    - Is this pattern fundamentally sound?

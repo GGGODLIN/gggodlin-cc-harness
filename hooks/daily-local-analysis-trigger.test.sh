@@ -115,6 +115,11 @@ check "等待兩條工作再排檔" 1 "$(printf '%s' "$C" | grep -cF 'recap Bash
 check "workflow 回傳 external channel" 1 "$([ "$(printf '%s' "$C" | grep -cF 'external_channels')" -ge 1 ] && echo 1 || echo 0)"
 check "recap 失敗進 failed" 1 "$(printf '%s' "$C" | grep -cF '把 recap 加進 failed')"
 
+echo "== recap 候選由 main 查證入帳 =="
+for kw in 'recap 只交候選' 'main 核對後才追加' '失敗或缺證據的候選不入帳' '同 quote＋同 session' '同 phrase 或同 suggested_term' 'scan_marker' '不得重寫歷史'; do
+  check "recap 交接含「${kw}」" 1 "$([ "$(printf '%s' "$C" | grep -cF -- "$kw")" -ge 1 ] && echo 1 || echo 0)"
+done
+
 echo "== main 報告落檔交接 =="
 for kw in 'pending_reports' 'report_markdown' 'deferred_writeback' '先用 Write 落檔' '不能把舊檔存在當成本輪成功' '成功後才加入 ran／channels' '只限原 source 已授權'; do
   check "主寫入含「${kw}」" 1 "$([ "$(printf '%s' "$C" | grep -cF -- "$kw")" -ge 1 ] && echo 1 || echo 0)"

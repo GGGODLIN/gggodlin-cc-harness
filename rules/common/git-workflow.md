@@ -2,12 +2,11 @@
 
 - Branch 命名：`feat/`, `fix/`, `docs/`, `refactor/`
 - Commit 前確認沒有 lint 錯誤
-- **Commit 一律自動、不問**（含公司 repo）：完成一段工作就 commit；一個 commit 一個邏輯單元，不累積巨大 WIP，不使用籠統的 `chore: sync`；一個 Bash 只放一條 git 指令（不串兩個 `git -C`、不用 `$(…)` 或 heredoc 組 commit message），否則 commit gate 會擋、白費一次呼叫
+- **Commit 一律自動、不問**（含公司 repo）：完成一段工作就 commit；一個 commit 一個邏輯單元，不累積巨大 WIP，不使用籠統的 `chore: sync`；含 `git commit` 的 Bash 只放一條 git 指令（不串兩個 `git -C`、不用 `$(…)` 或 heredoc 組 commit message，唯讀查詢如 `git status`／`log`／`diff` 不在此限）。commit gate 一律擋指到多個 `cd`／`git -C` 目標的串接；在 `~/.claude` 或含 `.claude/{agents,skills,commands,workflows}` 的 repo，工作區有這類檔案未提交時，`add` 與 `commit` 同一次呼叫也會擋；其餘串接 gate 不擋，分開是為了先驗 index
 - 多個 session 共用同一 repo 時，commit 前先用 `git diff --cached --name-only` 確認 index 只含本 session 的檔案；可用 pathspec 時以 `git commit -- <files>` 限定，若 gate 不允許 pathspec，就先單獨 `git add`、驗 index，再用普通 commit
 - **個人單人 repo 預設 direct-to-main**：完成驗證後，直接讓本任務 commits 進入並 push `main`；不要因 branch、worktree 或 `gh pr create` 已獲授權，就把 feature branch＋PR 當成預設交付路徑。只有使用者明確要求、repo 是多人協作，或 repo 明訂必須經 PR review 時才走 PR。
 - **任務收尾跑 `/self-closeout`**：本 session 的任務驗證完成、準備回報結案時，先 invoke `/self-closeout` 收自己改過的檔（範圍是本 session 寫過的每個 repo，不是 cwd）；它只 commit 證明得了是自己的變更，其餘留給使用者手打的 `/git-closeout` 全機收。不對其他 session 發 SendMessage。
 - **Native pre-push inclusion**：feature session 仍自行執行 `/self-closeout`；native `pre-push` 只做 push 前 `main` inclusion 檢查，push 後仍要用 `/self-closeout` 的第 4 步核對發布範圍；全機 reconciliation 由使用者手打 `/git-closeout`。`--no-verify` 不在保證範圍；force push 仍須既有 human confirm。
-- client hook 不提供 remote force race 或 final-read race 的原子保證；remote API、被刪除或修改的 hook 也不在 native gate 保證範圍。
 - 安裝後另設 worktree-specific core.hooksPath 會繞過，/git-closeout 要查；命令列 -c core.hooksPath 也會繞過。
 - **Branch／worktree 只負責隔離**：如果實作或 review 需要非 `main` branch，收尾仍從最新 `origin/main` 的 clean checkout 套入本任務 commits並直接 push `main`。shared checkout 有其他 session 的未提交改動時不得碰它；改用 clean worktree。無法安全 fast-forward 時停止並回報，不得自行降級成開 PR。
 - **多 GitHub 帳號路由**：gh 同時登入 `example-work-account`（active、工作）、`example-owner`（個人）、`example-old-account`（舊）。**不要跑 `gh auth switch`**，它改全域 active、會影響其他 session。個人 repo（remote 是 `example-owner/*`）的 git push／pull 走 SSH remote（`git@github.com:example-owner/…`，本機 SSH key 已綁 example-owner）；新 clone 或新 `gh repo create` 的個人 repo 一律用 SSH URL。個人 repo 的 gh API 操作（`gh pr create`／`gh repo view` 等）用 `GH_TOKEN=$(gh auth token -u example-owner) gh …` 逐條指定，不切帳號。工作 repo 維持 https 走 gh active 帳號。push 遇 `Repository not found` 先看 remote 是 https 還是 SSH，不要先猜帳號

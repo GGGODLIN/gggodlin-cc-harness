@@ -2,6 +2,17 @@
 
 公開版 harness 的變更紀錄。每一節對應一次發布；「Unreleased」是已整備、尚未推上公開 repo 的候選。只記對讀者有意義的變動，不逐檔列 diff。
 
+## 2026-11-03
+
+### 新增
+- `references/final-gate-materiality.md`、`review-standards/change-integrity.md`：最後一關重要性標準（M1–M6 可判成立但不重要之條目與 G1–G4 防線，接入 `/pr-review`、`/advisor`、`/review-spec` 與 `receiving-code-review` 的最終裁決階段）與變更完整性審查標準（舊行為清點、新舊並存、成對契約與 `OPEN_QUESTION` 規範）。
+
+### 變更
+- `commands/pr-review.md`、`scripts/pr-review-gemini-web.py`：Gemini Pro 審查軸新增先走 Argon 相容端點（headless 唯讀 agent）、失敗才退回 `agy` 的雙階路由，並支援多目標整組材料與 `--merged` 範圍審查模式。
+- `commands/self-closeout.md`、`scripts/closeout-provenance.py`：補齊記憶回看第 0 步、`--plan` 同步預檢與分段獨立 git 呼叫規範。
+- `skills/`（`auto-choice`、`grill-me`、`wayfinder`、`sepia`、`to-questionnaire` 等）：完成上游對賬與 `upstream-pinned` 推進，低頻工具改設 `disable-model-invocation: true` 減少常駐清單 token。
+- `settings.json` 與匯出過濾：同步精簡 `settings.json` 預設匯出範圍與去識別化規則。
+
 ## 2026-10-19
 
 ### 新增

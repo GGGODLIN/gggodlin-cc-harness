@@ -170,7 +170,7 @@ VERDICT: VIOLATIONS: <R 編號逗號列表>
 判 NEEDS_HUMAN_REVIEW 之前先掃一次 R1–R5：只要還有任何一條寫著 FAIL，這輪就是 VIOLATIONS；一個 EVIDENCE-UNAVAILABLE 都沒有時，NEEDS_HUMAN_REVIEW 不可能成立。「這條 FAIL 我不確定算不算數」是不確定、不是證據取不到——判 FAIL、寫 VIOLATIONS，把保留意見放進該條證據句。
 ```
 
-Verify 結果處理：退役／缺口盤點路徑的 self-verify 狀態只寫進證據副檔；下列「訊息末尾」只套用其他路徑。
+Verify 結果處理：退役／缺口盤點路徑的 self-verify 狀態只寫進證據副檔；下列「訊息末尾」只套用其他路徑。**必須先取得該 `skill-verify-auditor` 的真實完成結果（前景同步呼叫的 tool result，或背景呼叫由系統送達的完成通知），或確認 agent 失敗走下方 `SKIPPED` 分支後，才可向使用者輸出 Step 8 正式報告正文（Step 7 審前寫入唯讀快照檔供 auditor 讀取不在此限）；嚴禁在等待背景 auditor 期間先把未審報告貼給使用者當預覽，或自行在回覆文字中捏造完成通知／預填 `COMPLIANT`。**
 
 **本回合這個 skill 只有一次 auditor 額度**：不論結果如何都不得重派，也不得用 SendMessage 續問同一個 auditor。末尾那行的狀態只能是下列四個之一（`NEEDS_HUMAN_REVIEW` 是 auditor 的 verdict 值、不是收尾狀態，它走下面第二條）：
 

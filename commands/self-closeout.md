@@ -40,9 +40,9 @@ argument-hint: 不帶參數；範圍由 closeout-provenance.py --self-repos 決�
 
 2. **每個 repo 分四欄：共用 checkpoint、本 session 成果、保留、未收**
    ```bash
-   python3 ~/.claude/scripts/closeout-provenance.py --repo <repo> --json
+   python3 ~/.claude/scripts/closeout-provenance.py --repo <repo> --plan <scratchpad>/closeout
    ```
-   每個 dirty path 依序套下面的規則，命中第一條就停：
+   必須以前景同步執行（禁止設 `run_in_background: true`），等當次 `--plan` 成功跑完並讀回該 repo 的完整輸出後，才准進入第 3 步。不要改跑 `--json` 或表格模式：完整報告常上百 KB，大多是別的 session 的檔，讀進 context 只為了把它們判成未收。`--plan` 已在腳本裡套完下面除「context 保留條件」與「Bash 認領」以外的規則，只印要動手的路徑與計數：`shared.pathspec_file`（共用 checkpoint 白名單檔）、`self_owned`、`self_bash_only`、`held_staged_differs`、`held_vendor_managed`、`staged_foreign`、`unclaimed`（未收數）、`branch`、`has_origin`、`has_upstream`、`detail`（完整報告檔，回報異常時才給連結）。規則如下，命中第一條就停：
    - `vendor_managed: true`（`skills/.trash/`、`skills/synced/` 這類同步機制搬進來的東西）→ 保留，不收。
    - 本輪 context 裡有明確保留條件（使用者說先不 commit、檔案在等另一個 session 的 audited commit、ignore.jsonl 以 `"ref": "*"` 交給其他工具）→ 保留，寫出條件。
    - `staged_differs: true`（同一個檔同時有 staged 與不同的工作樹內容）→ 保留。整包 add 會把暫存的那一版蓋掉，那一版可能是 HEAD 和工作樹都沒有的內容。
@@ -56,12 +56,19 @@ argument-hint: 不帶參數；範圍由 closeout-provenance.py --self-repos 決�
    **完成判準**：每個 dirty path 恰好落在四欄之一。
 
 3. **先 add、核對 index，再 commit**
-   每顆 commit 分開執行下列指令；讀回暫存區後，只有暫存區路徑與本顆白名單完全相等時才 commit：
+   每顆 commit 分開執行下列指令；讀回暫存區後，只有暫存區路徑與本顆白名單完全相等時才 commit。本 session 成果的白名單通常只有幾個檔，直接寫路徑：
    ```bash
    git -C <repo> add -- <白名單每個路徑>
    git -C <repo> diff --cached --name-only
    git -C <repo> commit -m "<訊息>"
    git -C <repo> show --stat --format= HEAD
+   ```
+   共用 checkpoint 可能有上百個檔，改用 `--plan` 給的白名單檔，核對時只看差異（沒有輸出＝完全相等）；context 保留條件命中的路徑先從該檔刪掉：
+   ```bash
+   git -C <repo> add --pathspec-from-file=<shared.pathspec_file>
+   git -C <repo> diff --cached --name-only | diff - <shared.pathspec_file>
+   git -C <repo> commit -m "chore(closeout): checkpoint shared ledgers"
+   git -C <repo> show --name-only --format= HEAD | diff - <shared.pathspec_file>
    ```
    如果核對時出現白名單外路徑，停止該 repo 的提交並列為保留，不取消別人的暫存。普通 commit 會提交整個 index，所以不能省略這一步；不使用 `--only` 或 pathspec 提交，避免與 gate 的暫存區檢查衝突。這次核對不保證其他 session 在核對後不會改 index，提交後仍要比對檔案清單。
 
@@ -70,12 +77,17 @@ argument-hint: 不帶參數；範圍由 closeout-provenance.py --self-repos 決�
    **完成判準**：提交前 index 路徑、提交後 `git show --stat --format=` 檔案清單都與該顆白名單完全相等；不符時保留差異並回報，不自行改寫已產生的 commit。
 
 4. **push（personal 且在 trunk 上時）**
+   先核對第 2 步 `--plan` 輸出的 `has_origin` 與 `has_upstream`：如果 `has_origin: false`（repo 沒有 `origin`）或 `has_upstream: false`（目前 trunk 沒有有效 upstream），直接跳過下方全部 git 指令（不跑 `git fetch origin` 或 `git push`），報告寫「無 origin，已本機保存」（或「無 remote，已本機保存」）。確認 `has_origin: true` 且 `has_upstream: true` 時，比照第 3 步「一個 Bash call 只放一條 git 指令」，將下列三步拆成三個獨立的 Bash tool call 依序執行並逐步確認結果（禁止用 `&&` 串接在同一個 Bash 呼叫）：
    ```bash
    git -C <repo> fetch origin
+   ```
+   ```bash
    git -C <repo> log --format='%h %s' origin/<trunk>..<trunk>
+   ```
+   ```bash
    git -C <repo> push
    ```
-   repo 沒有 `origin` 或 trunk 沒有 upstream 時跳過 push，報告寫「無 remote，已本機保存」。列出的 commit 不必全是本次剛產生的：個人 repo 的 trunk 上任何 commit 都是使用者自己透過某個 session 產生，照常 push，報告點名「含 N 顆非本 session 的 commit：<hash>…」；main 的 pre-push inclusion gate 照常守。push 被拒（remote 有新 commit）就 `git -C <repo> merge origin/<trunk>` 再 push 一次，不 rebase、不 force；merge 衝突就停、標 BLOCKED。push 與收 dirty 分開判：某個檔這輪保留，不影響已 commit 的成果推出去。
+   列出的 commit 不必全是本次剛產生的：個人 repo 的 trunk 上任何 commit 都是使用者自己透過某個 session 產生，讀回 `git log` 對帳確認後照常 push，報告點名「含 N 顆非本 session 的 commit：<hash>…」；main 的 pre-push inclusion gate 照常守。push 被拒（remote 有新 commit）就單獨跑 `git -C <repo> merge origin/<trunk>` 確認成功後再單獨 `git -C <repo> push` 一次，不 rebase、不 force；merge 衝突就停、標 BLOCKED。push 與收 dirty 分開判：某個檔這輪保留，不影響已 commit 的成果推出去。
 
    work scope：不 push、不開 PR、不在 `stage`／`main`／`master` 產生 commit；commit 停在當前 feature branch，等使用者決定。在 trunk 上有自己的改動時，先開 `feat/<描述>` branch 再 commit。
 
@@ -85,16 +97,26 @@ argument-hint: 不帶參數；範圍由 closeout-provenance.py --self-repos 決�
    本 session 用 EnterWorktree 或 `git worktree add` 開的 worktree，commit 已整合進 trunk 且乾淨時才移除；別人的 worktree 不碰。
 
 6. **回報**
+   為維持正常收尾回報精簡，沒有異常時整份回報只有一行，多個 repo 用「；」接在同一行：
+   ```text
+   Self closeout：DONE｜記憶：新增 N、併入 M／0（<一句理由>）｜<repo 名> 收 N 檔＋checkpoint M 檔，已推／本機保存／留在 <branch>｜未收 K
+   ```
+   未收只寫數字、不列路徑：那些是別的 session 的檔，交給 `/git-closeout`。下列任一成立就是異常，該 repo 改用下方完整段落，其餘 repo 照舊擠在一行：
+   - BLOCKED：merge 衝突，或提交前後的檔案清單與白名單不符。
+   - `staged_foreign` 非空，該 repo 的提交被擋下。
+   - personal repo 的 `branch` 不是 trunk。
+   - 本 session 的檔沒進 commit：`self_owned` 或 `self_bash_only` 的路徑最後落在保留或未收（使用者本輪明說先不 commit 的除外），或本 session 碰過的 repo 因 scope 被跳過。
    ```text
    Self closeout：<DONE 或 BLOCKED>
-   記憶：新增 N、併入 M（<檔名>…）／0（<一句理由，例如本段只有進度回報>）
+   記憶：新增 N、併入 M（<檔名>…）／0（<一句理由>）
    repo：<path>（scope：personal／work）
+   異常：<命中哪一條、需要使用者做什麼>
    已收：<N 檔，commit <hash>…>；共用 checkpoint：<N 檔，commit <hash>> 或 0
    已推：origin/<trunk>（含 N 顆非本 session 的 commit：<hash>…）／無 remote，已本機保存／work scope 留在 <branch> 等你
-   保留：<path（原因：等 audited commit／使用者指定先不 commit／同檔暫存與工作樹不同版／vendor 產物／交給其他工具）>…或 0
-   未收：<path（原因：無寫入者／co_written／codex_touched）>…或 0
+   保留：<path（原因：等 audited commit／使用者指定先不 commit／同檔暫存與工作樹不同版／交給其他工具）>…或 0
+   未收：<數字>（明細見 <detail 檔連結>）
    ```
-   「記憶」整份回報一行，不跳過；其餘每個 repo 一段。保留或未收非零時不寫「乾淨」，寫「本輪已收完，仍有 N 檔保留／未收」；只有 fresh `git status` 為空才寫乾淨。
+   「記憶」不論哪種格式都要寫，不跳過。兩種格式都不寫「乾淨」，除非 fresh `git status` 為空。
 
 ## 邊界
 

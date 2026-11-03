@@ -192,15 +192,15 @@ class PrReviewC4DispatchContractTest(unittest.TestCase):
     for marker in (
       "只對 `REVIEW_SELECTION` 中 `status=selected` 的席位派工",
       "未選定或 cancelled 的席位不得派工",
-      "不把 preset 當成使用者選擇",
-      "Claude 側席位依 Step 2.98 的推薦與適用條件自動選入，不需要使用者逐席點名",
+      "不把推薦、preset 或語言判定當成使用者選擇",
+      "所有席位都只在叫用指令或列出矩陣後的回覆明確選了才派",
     ):
       with self.subTest(marker=marker):
         self.assertIn(marker, dispatch)
     self.assertNotIn("preset 一律含對抗", dispatch)
 
 
-class PrReviewAutoSelectionContractTest(unittest.TestCase):
+class PrReviewSelectionContractTest(unittest.TestCase):
   @classmethod
   def setUpClass(cls):
     cls.command = COMMAND_PATH.read_text()
@@ -217,44 +217,49 @@ class PrReviewAutoSelectionContractTest(unittest.TestCase):
     end = cls.command.index(end_marker, start)
     return cls.command[start:end]
 
-  def test_claude_side_seats_are_selected_from_the_recommendation_without_waiting(self):
+  def test_matrix_is_a_stop_point_for_every_seat_including_claude_side(self):
     for marker in (
-      "矩陣照常列出，作為揭露，不是等回覆的停點",
-      "Claude 側席位",
-      "照推薦與適用條件直接轉成 `selected`，不等回覆",
-      "語言 reviewer",
-      "符合 `ANGLE_ELIGIBILITY` 觸發條件的 security-reviewer",
-      "`gate=ELIGIBLE` 且 evidence requirements 通過的 spec-compliance-reviewer",
+      "矩陣是派工前的停點",
+      "等使用者本輪明確選定才派，Claude 側席位也一樣",
+      "`/pr-review` 例外",
+      "review-implement 與 `/review-spec` 不受影響",
+      "列完就結束這一輪等回覆，任何席位都還不派",
+      "未回覆不等於接受推薦",
     ):
       with self.subTest(marker=marker):
         self.assertIn(marker, self.matrix)
-    self.assertNotIn("推薦只在 user 說「照推薦」時轉成 `selected`。未回覆不等於接受推薦。", self.matrix)
+    self.assertNotIn("不是等回覆的停點", self.matrix)
+    self.assertNotIn("Claude 側席位自動選入", self.matrix)
 
-  def test_extra_quota_seats_run_only_on_explicit_selection_and_are_disclosed_otherwise(self):
+  def test_selection_phrases_have_fixed_meanings_and_unselected_seats_are_disclosed(self):
     for marker in (
-      "**外部額度席**（Codex 中性、Codex 對抗、Gemini Flash、Gemini Pro、web GPT Pro 與任何 Fable 席）",
-      "只在叫用指令或派工前的回覆明確選了才轉成 `selected`",
-      "沒選的外部額度席保持 `status: not-selected` 與 `recommendation: recommended`，報告標「推薦但未選」",
+      "叫用指令本身或列出矩陣之後的回覆明確選了，cell 才轉成 `selected`",
+      "「照推薦」（採用所有標 `recommended` 的 cell）",
+      "「加 Codex 中性」（所有 `recommended` cell 再加上 Codex 中性）",
+      "「只用 Codex 中性」（只有這一席）",
+      "「把 Flash 換成 Pro」（推薦組裡的 Flash 換成 Pro，其餘推薦照選）",
+      "催促或交代背景（例如「趕時間」）也不是",
+      "叫用指令已經明確點名席位或說「照推薦」時，照點名轉成 `selected`，不必再停下問",
+      "報告標「推薦但未選」",
       "不新增欄位",
       "之後要補跑，再叫用 `/pr-review` 並在指令點名席位",
       "Step 2.52／4.7",
     ):
       with self.subTest(marker=marker):
         self.assertIn(marker, self.matrix)
-    self.assertIn("只用 Codex 中性", self.matrix)
 
-  def test_unattended_run_keeps_claude_seats_and_records_skipped_only_when_nothing_dispatches(self):
+  def test_unattended_run_without_saved_selection_dispatches_nothing(self):
     for marker in (
-      "無人值守且沒有保存的選擇時，Claude 側席位照跑、外部額度席不派，也不記 `REVIEW_SELECTION=SKIPPED`",
-      "只有一個席位都派不出才記 `REVIEW_SELECTION=SKIPPED`",
+      "無人值守且沒有保存的選擇時，一個席位都不派，記 `REVIEW_SELECTION=SKIPPED`",
+      "不因為沒人回覆就套用推薦",
     ):
       with self.subTest(marker=marker):
         self.assertIn(marker, self.matrix)
-    self.assertNotIn("沒有就標 `REVIEW_SELECTION=SKIPPED`，不派任何 reviewer", self.matrix)
+    self.assertNotIn("Claude 側席位照跑", self.matrix)
 
-  def test_cancel_or_replace_in_the_invocation_and_late_replies(self):
+  def test_cancel_or_replace_and_late_replies(self):
     for marker in (
-      "叫用時明說取消或替換 Claude 側席位就照辦",
+      "使用者明說取消或替換某個席位就照辦",
       "派出後才到的回覆只影響還沒派出的席位",
       "已派出的席位照常完成，並在報告「這次審查範圍」揭露",
     ):
@@ -264,7 +269,7 @@ class PrReviewAutoSelectionContractTest(unittest.TestCase):
 
   def test_saved_selection_from_before_this_change_is_read_as_is(self):
     for marker in (
-      "改版前已明確保存的 `REVIEW_SELECTION` 照原格式讀取並照用，schema 不變",
+      "已明確保存的 `REVIEW_SELECTION` 照原格式讀取並照用，schema 不變",
       "status: selected | not-selected | cancelled | unavailable | needs-material",
       "recommendation: recommended | optional",
     ):
@@ -276,18 +281,19 @@ class PrReviewAutoSelectionContractTest(unittest.TestCase):
       ["path", "model", "effort", "angle", "status", "recommendation", "reason"],
     )
 
-  def test_dispatch_checklist_and_routing_follow_the_two_layer_authority(self):
+  def test_dispatch_checklist_and_routing_require_explicit_selection(self):
     for marker in (
-      "Claude 側席位依 Step 2.98 的推薦與適用條件自動選入，不需要使用者逐席點名",
-      "外部額度席只在叫用指令或派工前的回覆明確選了才派",
+      "不把推薦、preset 或語言判定當成使用者選擇",
+      "所有席位都只在叫用指令或列出矩陣後的回覆明確選了才派",
     ):
       with self.subTest(marker=marker):
         self.assertIn(marker, self.dispatch)
     self.assertNotIn("含 2.8 baseline", self.dispatch)
     self.assertIn("範圍三欄", self.dispatch)
     self.assertNotIn("not authorization", self.routing)
-    self.assertIn("never select an external-quota seat", self.routing)
-    self.assertIn("automatic Claude-side selection", self.language)
+    self.assertIn("they never select a seat", self.routing)
+    self.assertIn("only when the user selects it in Step 2.98", self.language)
+    self.assertNotIn("automatic Claude-side selection", self.language)
 
   def test_shared_prompt_carries_scope_fields_and_a_catalog_pointer_not_the_checklist(self):
     for marker in (

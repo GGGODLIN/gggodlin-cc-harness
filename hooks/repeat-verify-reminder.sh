@@ -17,7 +17,7 @@ import sys
 import time
 
 STATE_DIR = os.path.join(os.environ.get("TMPDIR", "/tmp"), "cc-repeat-verify")
-MUTATE_TOOLS = {"Edit", "Write", "NotebookEdit"}
+MUTATE_TOOLS = {"Edit", "Write", "NotebookEdit", "Agent"}
 MIN_CMD_LEN = 8
 STALE_SECS = 48 * 3600
 
@@ -51,8 +51,10 @@ GIT_PREFIX = (
 )
 STATUS_RE = re.compile(
   r"(?:"
-  + GIT_PREFIX + r"[ \t]+(?:status|diff|rev-parse|rev-list|log|show|ls-files|ls-remote)"
-  r"|gh[ \t]+(?:run[ \t]+view|pr[ \t]+(?:view|checks|status)|run[ \t]+list)"
+  + GIT_PREFIX + r"[ \t]+(?:status|diff|rev-parse|rev-list|log|show|show-ref|branch|ls-files|ls-remote)"
+  r"|(?:GH_TOKEN=\$\(gh[ \t]+auth[ \t]+token[ \t]+-u[ \t]+[A-Za-z0-9_-]+\)[ \t]+)?gh[ \t]+(?:run[ \t]+view|pr[ \t]+(?:view|checks|status)|run[ \t]+list)"
+  r"|herdr[ \t]+(?:tab|pane|workspace)[ \t]+(?:list|read)"
+  r'''|python3[ \t]+(?:/[^\s;&|`$<>"'\\()]+|~)/\.claude/scripts/closeout-provenance\.py'''
   r''')(?:[ \t]+(?!(?:-[Cc]|--exec|--output)(?:=|[ \t]))[^\s;&|`$<>"'\\()]+)*\Z'''
 )
 PUSH_RE = re.compile(

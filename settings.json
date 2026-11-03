@@ -37,7 +37,7 @@
         ]
       },
       {
-        "matcher": "Bash|Edit|Write|NotebookEdit",
+        "matcher": "Bash|Edit|Write|NotebookEdit|Agent",
         "hooks": [
           {
             "type": "command",
@@ -313,7 +313,6 @@
         ]
       }
     ],
-    "SubagentStart": [],
     "SessionStart": [
       {
         "hooks": [
@@ -519,6 +518,9 @@
           }
         ]
       }
+    ],
+    "Notification": [
+      
     ]
   },
   "outputStyle": "Explanatory",

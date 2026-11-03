@@ -29,6 +29,24 @@ INTERFACE_REQUIREMENT = {
 SEVERITY_TO_SUGGESTION = {
   "CRITICAL": "Must Fix", "HIGH": "Must Fix", "MEDIUM": "Should Fix", "LOW": "參考用",
 }
+# Argon runs through the user's Argon endpoint before falling back to agy, which
+# runs as the fallback CLI path. Hooks, MCP and user settings are dropped because
+# they add unnecessary input tokens to every review and are irrelevant to a read-only reviewer; the
+# reviewed repo's project settings are dropped too, since their allow rules could re-enable writes.
+ARGON_MAGPIE_MODEL = "google/gemini-4-argon:high"
+CCP_ARGON_SCRIPT = (
+  "printf '%s\\n' 'harness: wiring point \"後端標記 CC_VENDOR\" is not provided in this public copy; see WIRING.md' >&2; exit 1 "
+  '&& cd "$1" && shift && ccp-gemini-argon "$@"'
+)
+CCP_ARGON_FLAGS = (
+  "--output-format", "json", "--permission-mode", "dontAsk", "--no-session-persistence",
+  "--settings", '{"disableAllHooks": true}', "--strict-mcp-config", "--setting-sources", "local",
+  "--allowedTools", "Read", "Grep", "Glob", "Bash(git diff:*)", "Bash(git show:*)", "Bash(git log:*)",
+)
+FALLBACK_WHEN = (
+  "primary 不可用才跑：Argon 端點不通、非 0 結束、stdout 不是 JSON envelope、"
+  "或 envelope 的 is_error 為 true"
+)
 PROMPT_HEADER = (
   "DO NOT ASK FOR CONFIRMATION. The PR scope below is ALREADY confirmed — begin code review "
   "immediately and produce the JSON output. Any text other than the final JSON array is forbidden."
@@ -110,7 +128,8 @@ def gemini_prompt(channel, spec, model, targets):
     PROMPT_HEADER,
     "",
     "You are reviewing a review set of multiple targets. Every target below is a pinned-version "
-    "review root already added to your workspace via --add-dir. Read the changed files at HEAD in "
+    "review root already available to you (your working directory or added via --add-dir). "
+    "Read the changed files at HEAD in "
     "each root, compare against its own base. Do not merge targets: report every finding against "
     "exactly one target root.",
     "",
@@ -238,6 +257,25 @@ def packet_target(target):
           "changed_files": target["changed_files"]}
 
 
+def ccp_argon_execution(prompt, targets):
+  cwd = targets[0]["review_root"]
+  return {
+    "command": "zsh",
+    "role": "primary",
+    "via": "ccp-gemini-argon",
+    "argv": [
+      "-c", CCP_ARGON_SCRIPT, "ccp-gemini-argon", cwd,
+      "-p", prompt, *CCP_ARGON_FLAGS,
+      *(item for target in targets for item in add_dirs(target)),
+    ],
+    "cwd": cwd,
+    "prompt": prompt,
+    "stdin": "/dev/null",
+    "requested_model": ARGON_MAGPIE_MODEL,
+    "reply": "stdout 是 JSON envelope：.result 是模型回覆、.modelUsage 的 key 是實際模型、.is_error 為 true 視同失敗",
+  }
+
+
 def build_executions(channel, spec, model, targets):
   if spec["command"] == "agy":
     prompt = gemini_prompt(channel, spec, model, targets)
@@ -248,13 +286,16 @@ def build_executions(channel, spec, model, targets):
       *(item for target in targets for item in add_dirs(target)),
       "--print-timeout", "10m",
     ]
-    return [{
+    agy = {
       "command": "agy",
       "argv": argv,
       "prompt": prompt,
       "stdin": "/dev/null",
       "requested_model": model,
-    }]
+    }
+    if channel != "gemini-pro":
+      return [agy]
+    return [ccp_argon_execution(prompt, targets), {**agy, "role": "fallback", "run_if": FALLBACK_WHEN}]
   import sys; sys.stderr.write('harness: wiring point "ChatGPT 網頁版席位" is not provided in this public copy; see WIRING.md\n'); sys.exit(1)
 
 
@@ -344,7 +385,7 @@ def materials(payload):
     "packet_path": str(packet_path),
     "executions": executions,
     "targets": [target["target_identity"] for target in packet["targets"]],
-    "dispatch_call_count": len(executions),
+    "dispatch_call_count": sum(1 for item in executions if item.get("role") != "fallback"),
   }
 
 
@@ -425,7 +466,9 @@ def collect(payload):
                    "findings": [], "failed_channels": [{"channel": channel,
                                                         "reason": str(reply.get("reason") or "error")}]})
     return result
-  if normalize_model(reply.get("model")) != normalize_model(packet.get("model")):
+  accepted = {normalize_model(packet.get("model"))} | {
+    normalize_model(item.get("requested_model")) for item in packet.get("executions") or []}
+  if normalize_model(reply.get("model")) not in accepted:
     result.update({"status": "FAILED", "reason": "model-mismatch",
                    "failed_channels": [{"channel": channel, "reason": "model-mismatch"}]})
     return result
