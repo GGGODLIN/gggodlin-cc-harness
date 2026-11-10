@@ -72,7 +72,7 @@ LCU 只改變 browser 入口；不取消同 query 配對、官方來源核對或
 
 **強制範圍（2026-06-01 結案）**：hook 只硬擋兩種 context — **main session** 跟 **`parallel-search` agent**；其他所有 fan-out subagent（deep-research-paced 的 Search / Verify agent 等）一律**豁免**、WebSearch 自由（否則上百個平行小兵被迫各開 chrome 會塞爆真實瀏覽器，實證見 trial review）。
 
-**派 subagent 做配對搜尋 → 用 `parallel-search` agent**：`Agent(subagent_type:'parallel-search')` 或 workflow `agent(prompt, {agentType:'parallel-search'})`。丟一個 query，它用自己的正式 LCU 呼叫讀 Google SERP，再把 SERP + WebSearch 兩段原始結果並列回來、自己關分頁，**不合成留給呼叫者**。如果派工後端無法提供正式 LCU MCP 與 host identity，就沿用可提供這些能力的原生 subagent 路徑；兩者都不可用時停止並回報，不用 Bash shared-client 假造正式接線。
+**派 subagent 做配對搜尋 → 用 `parallel-search` agent**：`Agent(subagent_type:'parallel-search')` 或 workflow `agent(prompt, {agentType:'parallel-search'})`。丟一個 query，它用自己的正式 LCU 呼叫讀 Google SERP，再把 SERP + WebSearch 兩段原始結果並列回來、自己關分頁，**不合成留給呼叫者**。如果目前 session 的工具列表本身沒有 `WebSearch`（例如在第三方 vendor runtime 下），則不派 `parallel-search`（因其內部呼叫 `WebSearch` 一樣不可用），直接由呼叫者走已配置的搜尋 API 搭配正式 LCU；如果派工後端無法提供正式 LCU MCP 與 host identity，就沿用可提供這些能力的原生 subagent 路徑；兩者都不可用時停止並回報，不用 Bash shared-client 假造正式接線。
 
 Hook: `~/.claude/hooks/websearch-parallel-enforce.sh`（agent_type gate：main + `parallel-search` 強制、其餘 subagent 豁免；subagent 走 `agent_id` → 自己 transcript 的 redirect）。覺得不好用 → 移除 `settings.json` PreToolUse `WebSearch` matcher。
 
@@ -160,10 +160,10 @@ Firecrawl 的 fallback、Reddit 與既有日報／workflow 批次來源沿用以
 3. 用 proxy metric 判斷機制／trial 的 target outcome
 4. 用未直接量測的成本、風險、cleanup、延遲等定性理由排除方案
 
-成立 → 呈現答案**前**派 `Agent(subagent_type: skill-verify-auditor)`（sonnet+low、tools 僅 Read）：description 固定含 marker 字串 `skill-verify:research-before-answer`（採用率統計 grep 用，不要改字）；prompt 預設內嵌**準備直接送出的完整 draft**＋上方 R1–R4 規則原文（若 draft 過長改走讀檔模式，caller 須先將草稿存為唯讀快照檔 `chmod 400`，並在 prompt 附上獨立三行標頭 `AUDIT_INPUT_MODE: FILE_SNAPSHOT`、`SNAPSHOT_PATH: <唯一絕對路徑>`、`SNAPSHOT_TOTAL_LINES: <N>`，同時仍須把 R1–R4 rubric 全文內嵌於 prompt，且收件時核對 auditor 回傳的 `READ_RANGE: 1..<N>` 確認完整讀取），要求逐條 R1–R4 單行 PASS/FAIL＋一句證據引述。最後一行只能是 `VERDICT: COMPLIANT` 或 `VERDICT: VIOLATIONS: <R 編號>` 其中一種；逐條結果有任一 FAIL 時，即使最後一行誤寫 COMPLIANT 也按 VIOLATIONS 處理。**本回合這個 skill 只有一次 auditor 額度**：不論結果如何都不得重派，也不得用 SendMessage 續問同一個 auditor。末尾那行的狀態只能是下列四個之一：
+成立 → 呈現答案**前**派 `Agent(subagent_type: skill-verify-auditor)`（sonnet+low、tools 僅 Read）：description 固定含 marker 字串 `skill-verify:research-before-answer`（採用率統計 grep 用，不要改字）；prompt 預設內嵌**準備直接送出的完整 draft**＋上方 R1–R4 規則原文，且當承重證據來自無落檔 CLI 時，必須一併附上可由 `Read` 獨立核對的來源路徑與行號（如當前 session transcript JSONL 絕對路徑＋對應 `tool_result` 行號，或既有證據副檔路徑）及關鍵原始輸出片段，禁止只貼呼叫端自述的工具摘要卻要求 auditor 直接當成已核實紀錄（若 draft 過長改走讀檔模式，caller 須先將草稿存為唯讀快照檔 `chmod 400`，並在 prompt 附上獨立三行標頭 `AUDIT_INPUT_MODE: FILE_SNAPSHOT`、`SNAPSHOT_PATH: <唯一絕對路徑>`、`SNAPSHOT_TOTAL_LINES: <N>`，同時仍須把 R1–R4 rubric 全文內嵌於 prompt，且收件時核對 auditor 回傳的 `READ_RANGE: 1..<N>` 確認完整讀取），要求逐條 R1–R4 單行 PASS/FAIL＋一句證據引述。最後一行只能是 `VERDICT: COMPLIANT` 或 `VERDICT: VIOLATIONS: <R 編號>` 其中一種；逐條結果有任一 FAIL 時，即使最後一行誤寫 COMPLIANT 也按 VIOLATIONS 處理。**本回合這個 skill 只有一次 auditor 額度**：不論結果如何都不得重派，也不得用 SendMessage 續問同一個 auditor。末尾那行的狀態只能是下列四個之一：
 
 - 全 PASS → 「🔎 self-verify: COMPLIANT」
-- 任一 FAIL 且已修正 → 修 draft 後直接交付，標「🔎 self-verify: FIXED_AFTER_AUDIT（R#）」並明寫「未經第二次獨立稽查」
+- 任一 FAIL 且已修正 → 修 draft（若本回合另有含相同錯誤主張的報告副檔亦同步修正）後直接交付，標「🔎 self-verify: FIXED_AFTER_AUDIT（R#）」並明寫「未經第二次獨立稽查」
 - 任一 FAIL 且修不掉 → 停止推薦式結論，**把不實或佐證不足的主張從 draft 刪除或收窄**，只交付已驗證事實、未解決問題與「🔎 self-verify: FAILED（R#）」
 - auditor error / timeout / 空輸出 / 格式錯誤 → 照發、標「🔎 self-verify: SKIPPED (agent error)」
 
@@ -183,10 +183,4 @@ audit 後不得新增或改寫推薦理由，交付文字須等於修正後的 d
 
 ## 踩過的坑（撞新 case 就往下補）
 
-- WebSearch 排名容易漏掉官方文件，需搭配 chrome SERP nav 並行比對才不會漏 → [[feedback_websearch_misses_official_docs]] / [[feedback_parallel_decision_by_structural_failure]]
-- WebFetch 拿到 4xx/5xx 或內容明顯不夠（403 / 亂碼 / 模板）時必須立刻 fallback，不能回「抓不到」就跳過 → [[feedback_webfetch_fallback_must_trigger]]
-- 用瀏覽器抽取 SPA 內容時要按頁面狀態等待再讀，通用抓法會漏（舊瀏覽器工具時期的經驗，原文已退役、公開版不附）
-- 查證做得再全、交付端仍會丟資訊：低信心標記被平述、來源限制被整條省略、無版號成績掛到具體版號（rba-verify 離線抽驗連兩週抓到真 FAIL）→ 2026-08-12 加「交付前 inline 自查」段；抽驗 verdict 見 trials archived.md rba-verify 段
-- 2026-08-25 抽驗抓到三種漏網：decision table 的取捨列沒逐列出處、proxy metric 被外推成 target verdict、未查證的 cleanup／成本理由被拿來排除方案；另有 auditor 回 `R2 FAIL` 卻同時寫 `VERDICT: COMPLIANT`。修法是 claim inventory、metric→target→attribution、替代方案理由納入 R2/R3，以及互斥 verdict＋final draft 重驗。
-- 2026-08-29 同一份 draft、同一條「信心標記」規則，auditor 兩輪各自解讀（第一輪抓 2 處漏 token 倍數、第二輪只抓 token 倍數）：規則只寫判準沒給實例，「宣稱」兩字被當成標記、對象自稱沒列進來源清單。修法＝來源清單補「對象自稱」、附一對只差 ⚠️＋來源註的 ❌／✅ anchor、第一手指令數字明文排除；同稿加 anchor 後 2/2 抓全，壓力場景 4 FAIL／1 PASS／3 N-A 零誤標。機制借自 NeoLabHQ/context-engineering-kit meta-judge（改寫不抄）；trial `cek-anchor-rubric` review 2026-09-05
-- 2026-10-15 skill-up 在 Claude runtime（sonnet-4-6）16 題 5 PASS／10 FAIL／1 ERROR，同題 GPT runtime 11/5：LCU 在 eval 環境失敗後，GPT 轉走 fetch-fallback／gh 抓原頁，Claude 停在 WebSearch 摘要作答、出處堆文末、自填 self-verify: COMPLIANT、刪子 agent 的「找不到」。修法＝R1 把 SERP 降為找 URL、淺題接抓取層、R2 同句出處 anchor、R3 子 agent 限定句原樣保留、未派 auditor 不寫 self-verify 行；GREEN 看 skill-up iteration-12
+如果要修改本 skill 的查證、抓取或自查規則，就在動手前讀 [references/pitfalls-history.md](references/pitfalls-history.md) 核對歷史失效模式與規則演進紀錄。

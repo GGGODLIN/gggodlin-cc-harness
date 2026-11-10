@@ -26,6 +26,9 @@ LOCKFILES = (
 GENERATED_SUFFIXES = (".min.js", ".min.css", ".map", ".generated.ts")
 VENDORED_SEGMENTS = ("dist/", "build/", "vendor/", "node_modules/", "coverage/")
 DOC_SUFFIXES = (".md", ".mdx", ".rst", ".txt", ".adoc")
+# 只影響切塊與容量預算：這些檔仍留在 F、由 non-source chunk 照審；算進預算會切出整塊沒有程式碼的 chunk。
+# 清單與 commands/pr-review.md Step 2.95 的 non-source 定義是同一份，改一邊要同步另一邊。
+DATA_CONFIG_SUFFIXES = (".json", ".yml", ".yaml", ".toml", ".po", ".svg", ".csv")
 FILE_COUNT_THRESHOLD = 15
 DIFF_LINES_THRESHOLD = 800
 REVIEW_SET_CAPACITY_KEY = "review_set"
@@ -187,6 +190,8 @@ def source_files(changed_files):
     if any(segment in lowered for segment in VENDORED_SEGMENTS):
       continue
     if lowered.endswith(DOC_SUFFIXES):
+      continue
+    if lowered.endswith(DATA_CONFIG_SUFFIXES):
       continue
     result.append(path)
   return result

@@ -119,18 +119,7 @@ Two bridges this command stands on:
    pgrep -lf "${WATCH_PROC}.*${SESSION_ID}" >/dev/null && echo "watch already running for this session — skip" && exit 0 || true
    ```
 
-3. Record what we're guarding (per-session state file, `phase=watching`):
-
-   ```bash
-   # dcg 的 redirect-truncate-root-home 規則會擋 shell `>` 寫 home 路徑，改 python 寫檔（2026-07-11）
-   python3 -c 'import sys; open(sys.argv[1],"w").write(sys.stdin.read())' "$STATE_FILE" <<EOF
-   {"phase":"watching","runId":"<runId>","taskId":"<task_id>","watchTaskId":"","vendor":"<WM_VENDOR from Step 0a>","watchProc":"${WATCH_PROC}","scriptPath":"<scriptPath>","sessionDir":"<...workflows dir>","sessionId":"${SESSION_ID}","pauseRule":"<WM_PAUSE_RULE from Step 0a>"}
-   EOF
-   ```
-
-   `watchTaskId` 留空、由 Step 5 回填 — 它是 cleanup 唯一可靠的停止把手，別漏。`vendor` / `watchProc` 讓 pause 與 resume 不必重跑 vendor 偵測就知道要停哪支 watcher。
-
-4. Launch the watch as a **main-session background bash** (this gives the wake bridge). Use the resolver's line verbatim — it already carries this vendor's thresholds, poll interval, DIRECTION polarity and the SESSION_ID tag that makes the watch `pgrep`-filterable:
+3. Launch the watch as a **main-session background bash** (this gives the wake bridge). Use the resolver's line verbatim — it already carries this vendor's thresholds, poll interval, DIRECTION polarity and the SESSION_ID tag that makes the watch `pgrep`-filterable:
 
    ```
    Bash(run_in_background=true): <paste the WM_PAUSE_CMD line printed in Step 0a, verbatim>
@@ -138,19 +127,16 @@ Two bridges this command stands on:
 
    Do not retype the thresholds. They are per-vendor, the relay polarity is inverted, and only the anthropic line carries a 6th arg (7d threshold). `workflow-monitor-vendor.test.sh` pins every one of these launch lines.
 
-5. **Back-fill `watchTaskId` into the state file, immediately.** The Bash tool's return line reads `Command running in background with ID: <id>` — that id is the watch's own background-task handle, and like the workflow's task_id it is **not derivable later**. Write it in now:
+4. **Record what we're guarding and `watchTaskId` into the state file, immediately.** The Bash tool's return line reads `Command running in background with ID: <id>` — that id is the watch's own background-task handle, and like the workflow's task_id it is **not derivable later**. Write the per-session state file (`phase=watching`) with the real `watchTaskId` now (never write an empty `watchTaskId` first without launching the watcher):
 
    ```bash
-   python3 - "$STATE_FILE" <<'PY'
-   import json, sys
-   p = sys.argv[1]
-   d = json.load(open(p))
-   d["watchTaskId"] = "<paste the Bash background ID from the launch result>"
-   open(p, "w").write(json.dumps(d))
-   PY
+   # dcg 的 redirect-truncate-root-home 規則會擋 shell `>` 寫 home 路徑，改 python 寫檔（2026-07-11）
+   python3 -c 'import sys; open(sys.argv[1],"w").write(sys.stdin.read())' "$STATE_FILE" <<EOF
+   {"phase":"watching","runId":"<runId>","taskId":"<task_id>","watchTaskId":"<paste the Bash background ID from the launch result>","vendor":"<WM_VENDOR from Step 0a>","watchProc":"${WATCH_PROC}","scriptPath":"<scriptPath>","sessionDir":"<...workflows dir>","sessionId":"${SESSION_ID}","pauseRule":"<WM_PAUSE_RULE from Step 0a>"}
+   EOF
    ```
 
-   Why this step earns its own number: every cleanup block below stops the watch through `TaskStop({task_id: watchTaskId})`, because that is the **only** method verified to actually work — shell `kill` and even `kill -9` have been observed failing silently against these watchers (2026-08-01). Skip the back-fill and cleanup degrades to the shell path that is known to leave orphans, and the id is unrecoverable once the launch result scrolls away. Done when `jq -r .watchTaskId "$STATE_FILE"` prints a non-empty id. Then continue to Step 6.
+5. **Verify `watchTaskId` is recorded.** Every cleanup block below stops the watch through `TaskStop({task_id: watchTaskId})`, because that is the **only** method verified to actually work — shell `kill` and even `kill -9` have been observed failing silently against these watchers (2026-08-01). Skip recording `watchTaskId` and cleanup degrades to the shell path that is known to leave orphans, and the id is unrecoverable once the launch result scrolls away. Done when `jq -r .watchTaskId "$STATE_FILE"` prints a non-empty id. Then continue to Step 6.
 
 6. Return to waiting. Two possible wake-ups:
    - **limit-watch completes** with a trip line ending `ACTION: invoke /workflow-monitor pause` → immediately invoke `/workflow-monitor pause`.

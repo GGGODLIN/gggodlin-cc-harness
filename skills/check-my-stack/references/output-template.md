@@ -11,9 +11,9 @@ The competitive analysis report is a plain-language answer followed by exactly f
 1. **結論**：一兩句直接回答使用者原問句——值不值得、整包還是只借一部分。
 2. **它是什麼**：白話講它幫人做什麼，並點名在使用者手上對應 Block 1 的哪一項。
 3. **跟你現有的差在哪**：Block 2 的白話摘要——對照那一項多了什麼、少了什麼。
-4. **用了會得到什麼**：Block 3 的白話摘要——哪些情況用得上，以及使用者有沒有這個痛點。
+4. **用了會得到什麼**：Block 3 的白話摘要——哪些情況用得上，以及使用者有沒有這個痛點（附上本機真實事故與本人 commit 的查驗次數；若規則檔沒寫但實戰 0 發，直接明講「規則沒寫這條，但過去實戰 0 次發生」）。
 5. **代價**：會不會動到使用者的設定或流程、要花的錢／token／API key／訂閱、license 與維護風險。
-6. **依結論二選一**：trial → 最小試用步驟（最多三步）與觀察什麼；extract 或拒絕 → 可借走的機制與要接進哪裡（Block 4），沒有就寫「沒有」。
+6. **依結論二選一**：trial → 最小試用步驟（最多三步）與觀察什麼；extract 或拒絕 → 可借走的機制與要接進哪裡（Block 4，限有本人真實事故且既有落點真能攔住的項目），沒有就寫「沒有」。
 
 預設路徑的聊天主報告＝這六項＋六項沒涵蓋到的原問句各一段白話答案＋Verdict 一行＋證據副檔連結；下方 Blocks 1–4 與 Gate Ledger 寫入證據副檔，不貼回聊天。
 
@@ -41,7 +41,7 @@ Quotient column is a conclusion, not a description: `≈0, yours is at least as 
 
 ## Block 3 — Best-frame search result
 
-The tool's own frame plus at most one alternative frame, each anchored to a named Block 1 capability area and carrying its pain-vs-absence answer:
+The tool's own frame plus at most one alternative frame, each anchored to a named Block 1 capability area and carrying its pain-vs-absence answer (marking `Pain` requires verified user incident counts and case IDs from the four local incident stores or author-verified `git log`, never a rule text gap alone):
 
 | Frame | Anchors to (Block 1 area) | Pain or absence? | Assessment |
 |---|---|---|---|
@@ -55,7 +55,7 @@ Only when the hunt ran (draft verdict was rejection/landscape). Otherwise write 
 | Stealable mechanism | Graft point in the user's stack | Reason rejected (if rejected) |
 |---|---|---|
 
-Closed-source tools: note the downgrade to API-level / architecture-concept assessment. Report the hunt honestly whichever way it goes — neither pad it to make the tool look useful, nor wave it off in one line when source was available and unread.
+Every candidate not rejected must cite verified user incident count (>0 with case IDs and author check), proof that the graft point catches those incidents, and an adoption-verified high-frequency graft point (or `/deep-check` for heavy checks). Closed-source tools: note the downgrade to API-level / architecture-concept assessment. Report the hunt honestly whichever way it goes — neither pad it to make the tool look useful, nor wave it off in one line when source was available and unread.
 
 ## Gate Ledger (before the verdict — the audit artifact)
 

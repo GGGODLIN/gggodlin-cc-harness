@@ -55,7 +55,7 @@ Send them the file, or open it for them. They'll click through the walkthroughs 
 
 ### 5. Capture the answer and the prototype
 
-Once the prototype has answered its question, capture the answer, then capture the prototype the way the [SKILL](SKILL.md) describes. The logic-specific mapping: the validated reducer / machine / function set lifts into the real module (the decision, absorbed); the HTML shell rides along to the throwaway branch that keeps the prototype as a primary source — and being one self-contained file, it stays trivially re-runnable there. 如果驗證後的狀態機準備轉入正式規格或實作，且具有具體交錯順序風險與待證不變量，就在進入 `to-spec` 或 `implement` 前讀 `~/.claude/references/verification-recipes-and-probes.md` 的「狀態與併發兩層核驗」；prototype 本身維持一次性產物，不在本流程內建立測試。
+Once the prototype has answered its question, capture the answer, then capture the prototype the way the [SKILL](SKILL.md) describes. The logic-specific mapping: the validated reducer / machine / function set lifts into the real module (the decision, absorbed); the HTML shell rides along to the throwaway branch that keeps the prototype as a primary source — and being one self-contained file, it stays trivially re-runnable there. 如果驗證後的狀態機準備轉入正式規格或實作，且具有具體交錯順序風險與待證不變量，就在進入 `to-spec` 或 `implement` 前讀 `~/.claude/references/verification-recipes-and-probes.md` 的「狀態與併發三版核驗」；prototype 本身維持一次性產物，不在本流程內建立測試。
 
 ## Anti-patterns
 

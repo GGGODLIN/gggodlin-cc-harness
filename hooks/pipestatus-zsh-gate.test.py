@@ -110,6 +110,7 @@ def main():
       'python3 -c \'import json; d={"id": 1}; print(f"{d.get(\\"id\\")}")\'',
       'python3 -I -c \'d={"k": "v"}; print(f"val={d[\\"k\\"]}")\'',
       'cd /tmp && /usr/bin/python3.14 -u -c \'print(f"{\\"a\\"}")\'',
+      'ssh example-host "python3 -c \'import json; d={\"id\": 1}; print(f\"{d.get(\\\"id\\\")}\")\'"',
     ]
     for index, command in enumerate(py_bad_commands):
       for shell in ['/bin/zsh', '/bin/bash']:
@@ -150,6 +151,13 @@ def main():
       'PYTHONPATH=tests /opt/homebrew/bin/python3 -m unittest discover -s tests 2>&1 | tail -20',
       'cd /tmp/relay-kit && npm ci --ignore-scripts 2>&1 | tail -2 && npm run build 2>&1 | tail -3',
       'uv run pytest -q | head -n 30',
+      'cd ~/.claude/workflows && node --test tests/daily-topic-hardening-blockers.test.mjs 2>&1 | tail -15',
+      'yarn -s test:integration pending-jobs --maxWorkers=2 2>&1 | tail -25',
+      'npm run -s typecheck 2>&1 | tail -5',
+      'bash ~/.claude/hooks/fable-gate.test.sh | tail -n 10',
+      'pytest tests/test_capture.py 2>&1 | grep -v SKIP | tail -20',
+      'set +o pipefail; pytest tests/test_capture.py | tail -15',
+      'claude plugin test . 2>&1 | head -n 30',
     ]
     for index, command in enumerate(pipe_bad_commands):
       out = run_hook(command, pipe_audit, '/bin/zsh')
@@ -174,6 +182,49 @@ def main():
     pipe_audit_rows = [json.loads(line) for line in pipe_audit.read_text().splitlines()]
     check(len(pipe_audit_rows) == len(pipe_bad_commands), 'pipe_audit count matches denied test pipe commands')
     check(all(row['reason'] == 'unprotected-test-pipe-tail-head' for row in pipe_audit_rows), 'pipe_audit records test-pipe reason')
+
+    mask_audit = temp_root / 'mask-audit.jsonl'
+    mask_bad_commands = [
+      'set -o pipefail; python3 -m unittest discover -s tests 2>&1 | tail -6; ls -la',
+      'npx prettier --check docs/guide.md; echo "prettier exit=$?"',
+      'pytest tests/test_capture.py; true',
+      'npm test 2>&1; printf "done\\n"',
+      'set -o pipefail; cd ~/.claude && python3 -m pytest -q scripts/test_semble_docs_retirement.py 2>&1 | tail -3; echo "pytest exit=$?"; bash hooks/config-dir-symlink-check.test.sh 2>&1 | tail -2; echo "symlink test exit=$?"',
+      'npx jest tests/api.test.ts > receipt.txt 2>&1; cat receipt.txt',
+    ]
+    for index, command in enumerate(mask_bad_commands):
+      out = run_hook(command, mask_audit, '/bin/zsh')
+      check(bool(out), f'trailing status mask case {index + 1} denies')
+      data = json.loads(out)['hookSpecificOutput']
+      check(data['permissionDecision'] == 'deny', f'trailing status mask case {index + 1} decision is deny')
+      check('退出碼覆蓋為 0' in data['permissionDecisionReason'], f'trailing status mask case {index + 1} explains exit code masking')
+      check('Write/Edit' in data['permissionDecisionReason'], f'trailing status mask case {index + 1} names fallback')
+
+    mask_good_commands = [
+      'set -o pipefail; python3 -m unittest discover -s tests 2>&1 | tail -6 && ls -la',
+      'pytest tests/test_capture.py; rc=$?; ls -la; exit $rc',
+      "bash -lc 'npx tsc --noEmit 2>&1 | tail -20; test ${PIPESTATUS[0]} -eq 0'",
+      'npx prettier --check docs/guide.md',
+      "python3 - <<'PY'\n# heredoc mentioning pytest tests/test_capture.py; ls -la\nprint('ok')\nPY",
+      f'{sys.executable} {HOOK} < /dev/null',
+    ]
+    for index, command in enumerate(mask_good_commands):
+      check(run_hook(command, mask_audit, '/bin/zsh') == '', f'non-masking trailing command case {index + 1} stays silent')
+
+    mask_audit_rows = [json.loads(line) for line in mask_audit.read_text().splitlines()]
+    check(len(mask_audit_rows) == len(mask_bad_commands), 'mask_audit count matches denied trailing-mask commands')
+    check(all(row['reason'] == 'trailing-command-masks-test-exit' for row in mask_audit_rows), 'mask_audit records trailing-mask reason')
+
+    timeout_audit = temp_root / 'timeout-audit.jsonl'
+    os.environ['PIPESTATUS_TIMEOUT_PATH'] = '/nonexistent'
+    try:
+      out_timeout = run_hook('timeout 15 python3 probe.py', timeout_audit, '/bin/bash')
+      check(bool(out_timeout), 'missing gnu timeout denies when timeout not in PATH')
+      timeout_data = json.loads(out_timeout)['hookSpecificOutput']
+      check(timeout_data['permissionDecision'] == 'deny', 'missing gnu timeout decision is deny')
+      check('轉入背景繼續執行' in timeout_data['permissionDecisionReason'], 'missing gnu timeout explains foreground vs process kill difference')
+    finally:
+      os.environ.pop('PIPESTATUS_TIMEOUT_PATH', None)
 
     settings = json.loads(SETTINGS.read_text())
     bash_hooks = [

@@ -5,6 +5,8 @@ description: "Use at the opening of a session when the user brings a topic that 
 
 <!-- 本檔在契約測試底下：bash ~/.claude/commands/tests/memory-audit-contract.test.sh -->
 
+<!-- 本檔在契約測試底下：python3 ~/.claude/commands/tests/test_low_trigger_skill_wiring.py -->
+
 A topic that has not taken shape yet is not a small version of a decided one, and improvising the clarification has four ways of going wrong:
 
 1. **Anchoring** — the first reading of the request gets picked up and drilled, and the rest of the conversation rearranges the furniture in the wrong room.
@@ -19,6 +21,8 @@ The first three are invisible from the inside: an anchored discussion feels focu
 ### 1. De-anchor and intake
 
 The opening sentence usually arrives with a solution already baked in ("I want a hook that…", "let's make a script that…"). Strip the proposed solution, mechanism, and components; keep every observable fact — what the user did by hand, what happened, what annoyed them, counts, dates, names. **Strip theories, keep observations.** Then restate the underlying need in one or two sentences with the solution removed, and show that restatement to the user.
+
+如果開題時目標舞台（黑客松、產品競賽或指定技術棧）已固定，且目的是在該舞台下發想多個具體產品或方案點子（而非問題框架尚未定形），就在本步先詢問使用者是否改走 `/multi-ai-ideate`（平行派出多顆異質 AI 獨立發想並去重合併）；使用者拒絕後才繼續下方框架發散。
 
 A "fact" that cannot be restated as an observation is a theory in disguise — put it back to the user instead of carrying it forward as a given.
 
@@ -132,6 +136,7 @@ The family of adjacent tools splits on one axis: where the answer to the current
 | In the user's head, needing one-at-a-time extraction | 訪談模式 (the interview mode in the always-on rules) |
 | In a third party's head (PM, designer, coworker) | `to-questionnaire` |
 | In a proposal already formed, needing pressure | `grill-me` |
+| In a fixed target stage / hackathon / stack, needing concrete ideas across multiple AI models | `multi-ai-ideate` |
 | In a feature already decided on, needing its design recorded | `to-spec` |
 
 ## Red flags — the protocol is being skipped

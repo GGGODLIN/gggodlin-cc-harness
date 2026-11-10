@@ -2,7 +2,7 @@
 
 **安裝**：把 `hooks/auto-memory-jev.py` 複製到 `~/.claude/hooks/auto-memory-jev.py`，保留執行權限。
 同時把必備隨附檔案複製到 `~/.claude/hooks/`：`hooks/memory_reminder_common.py`（與 `checkpoint-judge.sh` 共用的提醒文字與注入狀態模組，缺少時本 hook 會直接靜默退出）、`hooks/auto-memory-jev-question.json`（判官題目）、`hooks/auto-memory-jev.md`（設計與邊界說明）。
-另外把 `examples/memory/feedback_memory_cluster_maintenance.md` 複製到 `~/.claude/memory/feedback_memory_cluster_maintenance.md`（或保留你自己的版本，需含 `## Tier 1:` 與 `## Tier 3:` 標題供 `memory_reminder_common.py` 抽取兩層索引維護規範）。
+另外把 `examples/memory/feedback_memory_cluster_maintenance.md` 複製到 `~/.claude/memory/feedback_memory_cluster_maintenance.md`（自動入口一律送簡短 checklist 並指路在需要寫入前先讀 `feedback_memory_cluster_maintenance.md` 的 Tier 1；完整 Tier 1 僅由手動 `checkpoint-judge.sh` 注入，需含 `## Tier 1:` 與 `## Tier 3:` 標題供 `memory_reminder_common.py` 抽取兩層索引維護規範）。
 
 **註冊**：在 `~/.claude/settings.json` 的 `hooks` 加入下列項目（與公開版 `settings.json` 相同）：
 - `Stop`：`python3 ~/.claude/hooks/auto-memory-jev.py stop`（**必須**設 `"async": true` 才會在背景執行而不阻塞回合結束；建議搭配 `"timeout": 10`）

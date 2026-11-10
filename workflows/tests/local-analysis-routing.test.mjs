@@ -9,11 +9,13 @@ const compile = () => new AsyncFunction(
   'parallel',
   'agent',
   'Buffer',
+  'workflow',
   source.replace('export const meta =', 'const meta =')
 )
 
 const DAILY_CHANNELS = [
   'memory',
+  'memory-conflict',
   'wiki-candidates',
   'wiki-cross-link',
   'wiki-graduation',
@@ -240,8 +242,19 @@ const runWorkflow = async (inputArgs, resultOverrides = {}, runtime = {}) => {
     return { summary: `${options.label} summary` }
   }
   const parallel = (thunks) => Promise.all(thunks.map((thunk) => thunk()))
-  const result = await compile()(inputArgs, (title) => phases.push(title), (message) => logs.push(message), parallel, agent, undefined)
-  return { result, calls, logs, phases }
+  const workflowCalls = []
+  const workflow = async (name, childArgs) => {
+    workflowCalls.push({ name, args: childArgs })
+    const key = `workflow:${name}`
+    if (Object.prototype.hasOwnProperty.call(resultOverrides, key)) {
+      const override = resultOverrides[key]
+      if (override instanceof Error) throw override
+      return override
+    }
+    return { ok: true, silent: false, summary: `${name} summary`, report_markdown: `# ${name}\n`, deferred_writeback: '' }
+  }
+  const result = await compile()(inputArgs, (title) => phases.push(title), (message) => logs.push(message), parallel, agent, undefined, workflow)
+  return { result, calls, logs, phases, workflowCalls }
 }
 
 let syntaxValid = true
@@ -291,6 +304,8 @@ const spoofedIdentityRun = await runWorkflow(
   }
 )
 const forceRun = await runWorkflow({ date: '2026-07-29', weekday: 3, force_shell: true })
+const memoryConflictFailureRun = await runWorkflow({ date: '2026-07-29', weekday: 3 }, { 'workflow:memory-conflict-check': { ok: false, reason: 'prepare-failed' } })
+const memoryConflictThrowRun = await runWorkflow({ date: '2026-07-29', weekday: 3 }, { 'workflow:memory-conflict-check': new Error('child boom') })
 const evidenceValidFinalizer = {
   date: '2026-07-29',
   ok: true,
@@ -707,6 +722,15 @@ const checks = [
   ['LLM channel schema 缺欄位 → failed、不冒充 ran 或 pending_reports', memoryInvalidSchemaRun.result.failed.includes('memory') && !memoryInvalidSchemaRun.result.ran.includes('memory') && !memoryInvalidSchemaRun.result.pending_reports.some((channel) => channel.key === 'memory') && memoryInvalidSchemaRun.result.pending_reports.some((channel) => channel.key === 'wiki-lint')],
   ['回傳 reconcile 指令', stringArgsRun.result.reconcile_cmd.includes('ledger-reconcile.py')],
   ['workflow 明示不產 digest', stringArgsRun.result.next_action.includes('只做偵測、不產 digest')],
+  ['memory-conflict 每天以子 workflow 檢查改過的筆記、報告交 main 落檔', (() => {
+    const call = silentRun.workflowCalls.find((c) => c.name === 'memory-conflict-check')
+    const report = silentRun.result.pending_reports.find((c) => c.key === 'memory-conflict')
+    return call?.args.scope === 'changed' && call.args.report_path.endsWith('/2026-07-29-memory-conflict.md') && call.args.state_dir.endsWith('/local-analysis/memory-conflict')
+      && Boolean(report) && report.source_path.endsWith('/memory-conflict-daily.sh') && report.report_path === call.args.report_path
+      && !silentRun.calls.some((c) => c.options.label === 'memory-conflict')
+  })()],
+  ['memory-conflict 子 workflow 回 ok=false 或丟例外都進 failed、不進 pending_reports', [memoryConflictFailureRun, memoryConflictThrowRun].every((r) => r.result.failed.includes('memory-conflict') && !r.result.pending_reports.some((c) => c.key === 'memory-conflict'))
+    && memoryConflictThrowRun.logs.some((l) => l.includes('memory-conflict failed: child boom'))],
 ]
 
 let failed = 0

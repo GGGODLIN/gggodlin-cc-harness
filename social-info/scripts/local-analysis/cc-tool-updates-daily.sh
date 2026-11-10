@@ -394,18 +394,40 @@ cargo, brew, npm, uv, mcpnpx = cargo_git_installed(), brew_installed(), npm_g_in
 updates, errors, held, release_pending = [], [], [], []
 RUN_DATE = os.environ.get("LOCAL_ANALYSIS_DATE") or __import__("datetime").date.today().isoformat()
 NPM_MIN_RELEASE_AGE = npm_min_release_age()
+manifest_meta = {e.get("name"): e for e in manifest if isinstance(e, dict) and e.get("name")}
+
+def _is_checkpointed(latest_ver, ack_ver):
+    if not latest_ver or not ack_ver:
+        return False
+    nl, na = norm(str(latest_ver)), norm(str(ack_ver))
+    if nl == na:
+        return True
+    if "*" in na or "?" in na:
+        return __import__("fnmatch").fnmatchcase(nl, na)
+    if re.search(r'\d+\.\d+', nl) and re.search(r'\d+\.\d+', na):
+        return _vkey(nl) <= _vkey(na)
+    return False
 
 def add_update(name, mgr, cur, latest, src, notes="", **details):
     if latest and norm(latest) != norm(cur):
         update = {"name": name, "manager": mgr, "current": cur, "latest": latest, "source": src, "notes": notes}
-        registered = upgrade_notes.get(name)
-        if isinstance(registered, dict) and registered.get("report_note"):
-            update["upgrade_note"] = registered["report_note"]
+        registered = upgrade_notes.get(name) if isinstance(upgrade_notes.get(name), dict) else {}
+        m_entry = manifest_meta.get(name) if isinstance(manifest_meta.get(name), dict) else {}
+        report_note = registered.get("report_note") or m_entry.get("report_note")
+        if report_note:
+            update["upgrade_note"] = report_note
         update.update(details)
-        hold_until = registered.get("hold_until") if isinstance(registered, dict) else None
+        hold_reason = registered.get("hold_reason") or m_entry.get("hold_reason") or ""
+        hold_until = registered.get("hold_until") or m_entry.get("hold_until")
         if hold_until and RUN_DATE <= str(hold_until):
             update["hold_until"] = str(hold_until)
-            update["hold_reason"] = registered.get("hold_reason", "")
+            update["hold_reason"] = hold_reason
+            held.append(update)
+            return
+        ack_latest = registered.get("acknowledged_latest") or m_entry.get("acknowledged_latest")
+        if _is_checkpointed(latest, ack_latest):
+            update["acknowledged_latest"] = str(ack_latest)
+            update["hold_reason"] = hold_reason
             held.append(update)
             return
         updates.append(update)
@@ -484,6 +506,36 @@ for e in manifest:
             if len(pins) > 1:
                 errors.append({"name": name, "reason": f"config mismatch: pins {pins} across " + ", ".join(e["config"] for e in entries)}); continue
             add_update(name, mgr, pins[0], npm_latest(pkg), pkg, configs=[e["config"] for e in entries])
+        elif mgr == "git-fork":
+            repo_path = os.path.expanduser(e.get("path") or "")
+            if not repo_path or not os.path.exists(os.path.join(repo_path, ".git")):
+                errors.append({"name": name, "reason": f"not a git repo: {repo_path or '(missing path)'}"}); continue
+            head_sha = (run(["git", "-C", repo_path, "rev-parse", "HEAD"]) or "").strip()
+            if not head_sha:
+                errors.append({"name": name, "reason": "cannot resolve local HEAD"}); continue
+            track = e.get("track") or "release"
+            if track == "head":
+                latest_sha = gh_head(src)
+                if not latest_sha:
+                    errors.append({"name": name, "reason": "cannot resolve upstream HEAD"}); continue
+                latest_label, notes = latest_sha[:8], ""
+            else:
+                latest_tag = gh_latest(src)
+                if not latest_tag:
+                    errors.append({"name": name, "reason": "cannot resolve upstream release/tag"}); continue
+                latest_sha = (run(["gh", "api", f"repos/{src}/commits/{latest_tag}", "--jq", ".sha"]) or "").strip()
+                if not latest_sha:
+                    errors.append({"name": name, "reason": f"cannot resolve upstream commit for {latest_tag}"}); continue
+                latest_label, notes = latest_tag, gh_notes(src, latest_tag)
+            is_anc = subprocess.run(["git", "-C", repo_path, "merge-base", "--is-ancestor", latest_sha, "HEAD"], capture_output=True).returncode == 0
+            if is_anc:
+                continue
+            if track == "head":
+                cur = head_sha[:8]
+            else:
+                desc_tag = (run(["git", "-C", repo_path, "describe", "--tags", "--abbrev=0", "HEAD"]) or "").strip()
+                cur = desc_tag if (desc_tag and norm(desc_tag) != norm(latest_label)) else head_sha[:8]
+            add_update(name, mgr, cur, latest_label, src, notes, path=repo_path)
         else:
             errors.append({"name": name, "reason": f"unknown manager {mgr}"})
     except Exception as ex:
@@ -550,10 +602,13 @@ if release_pending:
     for u in release_pending:
         out.append(f"- {u['name']} {u['current']}→{u['version']}（{u['manager']}；{u['published']} 發布、min-release-age={u['min_release_age']} 天、{u['unlock_date']} 解禁）")
 if held:
-    out.append("### 暫緩（使用者拍板 hold_until 未到，不列入有更新；到期自動回到有更新）")
+    out.append("### 暫緩（使用者拍板 hold_until 或 acknowledged_latest checkpoint，不列入有更新；到期或上游出新版自動回到有更新）")
     for u in held:
         reason = f"；{u['hold_reason']}" if u.get("hold_reason") else ""
-        out.append(f"- {u['name']} {u['current']}→{u['latest']}（{u['manager']}）hold 至 {u['hold_until']}{reason}")
+        if u.get("hold_until"):
+            out.append(f"- {u['name']} {u['current']}→{u['latest']}（{u['manager']}）hold 至 {u['hold_until']}{reason}")
+        else:
+            out.append(f"- {u['name']} {u['current']}→{u['latest']}（{u['manager']}）checkpoint @{u['acknowledged_latest']}{reason}")
 if discovered:
     out.append("### 待分類（新發現，不在白/黑名單；歸白名單追蹤 or 黑名單忽略）")
     for d in discovered:

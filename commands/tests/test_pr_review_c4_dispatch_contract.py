@@ -70,22 +70,6 @@ class PrReviewC4DispatchContractTest(unittest.TestCase):
         self.assertIn(marker, self.agent)
     self.assertNotIn('"observations"', self.agent)
 
-  def test_web_gpt_axis_collects_the_specified_conversation(self):
-    axis_line = next(line for line in self.command.splitlines() if line.startswith("**加選軸"))
-    collector = axis_line.split("再用 `", 1)[1].split("` 收", 1)[0]
-    self.assertEqual(
-      "web-cli chatgpt detail <id> --markdown true -f json",
-      collector,
-    )
-    self.assertNotIn("web-cli chatgpt read --conversation", axis_line)
-
-  def test_web_gpt_axis_never_waits_on_detail_stabilization(self):
-    axis_line = next(line for line in self.command.splitlines() if line.startswith("**加選軸"))
-    collector = axis_line.split("再用 `", 1)[1].split("` 收", 1)[0]
-    self.assertNotIn("--wait true", collector)
-    self.assertNotIn("--stable", collector)
-    self.assertIn("不要對 detail 用 `--wait true`", axis_line)
-
   def test_multi_target_packet_is_assembled_from_step_205_state(self):
     for marker in (
       "Step 2.05 preparation state",

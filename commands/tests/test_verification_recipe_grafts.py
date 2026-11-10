@@ -87,12 +87,16 @@ class VerificationRecipeGrafts(unittest.TestCase):
                      'A/B 交錯重跑與瓶頸點名', '單變量控制', '/hillclimb'):
       with self.subTest(expected=expected):
         self.assertIn(expected, perf)
-    visual = section(self.reference, '## 視覺零漂移基準鎖定', '## 狀態與併發兩層核驗')
+    visual = section(self.reference, '## 視覺零漂移基準鎖定', '## 狀態與併發三版核驗')
     for expected in ('換底層技術／重構但要求畫面維持一模一樣', '基準截圖或終端輸出', '零非預期視覺漂移'):
       with self.subTest(expected=expected):
         self.assertIn(expected, visual)
-    state = section(self.reference, '## 狀態與併發兩層核驗', '## 程式碼歷史動機追查')
-    for expected in ('簡單版（有限狀態巡檢）', '完整版（數學模型窮舉與反例圖）',
+    state = section(self.reference, '## 狀態與併發三版核驗', '## 程式碼歷史動機追查')
+    for expected in ('第一版（巡檢）', '第二版（掃描＋巡檢）', '第三版（掃描＋模型窮舉）',
+                     '巡檢要涵蓋清單上每個狀態與故障點', '直接呼叫上線程式的判斷純函式',
+                     '四項都有才寫成「確認」', '逐字引用被違反的規格句', '現在是紅燈',
+                     '正式程式哪一行會寫出它', '不是寫報告的人', '範圍限本票改到的檔案',
+                     'agent-dispatch Step 0', 'state-machine-scan-brief-template.md',
                      '不重複詢問', '在指定模型、假設與步數界限內成立'):
       with self.subTest(expected=expected):
         self.assertIn(expected, state)

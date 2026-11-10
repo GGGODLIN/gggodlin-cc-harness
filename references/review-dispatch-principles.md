@@ -56,6 +56,10 @@ implement 第 4 步屬於程式碼審查：有程式碼改動時，至少派一�
 
 使用者在派工前明說取消或替換某個 Claude 席，照辦；派出後才到的回覆只影響還沒派出的席位。
 
+### 跨模型審查與驗收（單點走 `pi-subtask`）
+
+非 `/pr-review`、非 `/review-spec` 第 3 級、非 `review-implement` 的日常派工與 implement 第 4 步收尾，當主 session 使用 Claude 模型時，六個載入 `review-method` 的審查與驗收角色（typescript-reviewer、python-reviewer、code-reviewer、security-reviewer、architecture-critic、task-verifier）優先透過 `pi-subtask` 單點啟動，直接讀取 `~/.claude/config/gpt-models.env` 的 `GPT_SOL` 執行跨模型審查與驗收，不需開啟全 session 的 `/pi-on`。若本機轉發未啟動、額度冷卻或主 session 本身已在跑 `GPT_SOL` 而退回同模型自審，接收審查結果時只修 P0／CRITICAL 與必報清單項目，其餘建議列為已知限制、不改程式碼。
+
 ## 能力不足
 
 reviewer 選到超出自己工具或交付能力的主題時，回報缺哪種能力，並把該主題列為未完成。主 session 可以補派現有角色處理，但不是每次的義務，也不為此新建 agent。

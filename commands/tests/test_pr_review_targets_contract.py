@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 
+import ast
 import os
+import re
 import unittest
 from pathlib import Path
 
@@ -24,6 +26,22 @@ class PrReviewTargetsContractTest(unittest.TestCase):
 
   def finalize(self):
     return self.section("### 2.98.1", "## Step 3: Dispatch Dual Reviews")
+
+  def test_chunking_non_source_list_matches_targets_script(self):
+    # 單一 PR 模式由 agent 照條文分類、多目標模式由腳本分類；清單漂移會讓兩種模式切出不同的塊。
+    tree = ast.parse((ROOT / "scripts/pr-review-targets.py").read_text())
+    suffixes = {}
+    for node in tree.body:
+      if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+        if node.targets[0].id in ("DOC_SUFFIXES", "DATA_CONFIG_SUFFIXES"):
+          suffixes[node.targets[0].id] = set(ast.literal_eval(node.value))
+    chunking = self.section("### Chunking decision", "## Step 2.96")
+    line = next(item for item in chunking.splitlines() if item.startswith("- **non-source**"))
+    listed = set(re.findall(r"`(\.[a-z]+)`", line))
+    self.assertEqual(suffixes["DOC_SUFFIXES"] | suffixes["DATA_CONFIG_SUFFIXES"], listed)
+    self.assertIn("added + deleted lines across the source files in F", chunking)
+    self.assertIn("One non-source chunk", chunking)
+    self.assertIn("never skipped because of its extension", chunking)
 
   def test_multi_target_flow_sits_inside_the_existing_step_order(self):
     for earlier, later in (

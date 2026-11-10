@@ -40,6 +40,14 @@ class PrReviewCcGroupContractTest(unittest.TestCase):
     self.assertIn("security", step)
     self.assertIn("非 CC cell", step)
 
+  def test_step_3_shared_prompt_asks_merge_order_for_multi_target(self):
+    step = self.section("#### Shared prompt to primary and general domain CC reviewers", "#### Consolidating CC-side findings")
+    self.assertIn("多目標合併順序（Step 2.05 準備的多目標才加；單輸入與範圍模式 `kind: range` 不加）", step)
+    self.assertIn("對方 repo 現行已上線的版本（該 repo trunk 上的程式，不是對方 PR 的 head）", step)
+    self.assertIn("先比對這個組合下的結果和這個目標合併前是否完全相同", step)
+    self.assertIn("只因為某個還沒開的開關、還沒做的票才暫時碰不到，就寫成 finding", step)
+    self.assertIn("`MERGE_ORDER: <目標> 單獨先合不影響 — <退路寫在哪>`", step)
+
   def test_step_45_shares_one_repair_round_with_new_interfaces(self):
     step = self.section("## Step 4.5:", "## Step 4.6:")
     self.assertIn("new_interface", step)

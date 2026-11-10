@@ -1,6 +1,6 @@
 export const meta = {
   name: 'local-analysis',
-  description: '每日本機分析整合 workflow（30 channel）：args 傳 date/weekday，按頻率判斷跑哪些 channel（daily 每天 / weekly-tue 限週二 / interval-7d 每日低成本檢查到期），LLM channel 回傳完整報告資料供 main 落檔、shell channel 直接跑 wrapper，回傳結構化 channel 清單與 pending_reports。**只做偵測、不產 digest**——排檔與根因判斷 2026-07-30 起交回 main session（理由見下方註解）。取代原 7 個 launchd 排程。channel 沿革見本檔頂部註解',
+  description: '每日本機分析整合 workflow（37 channel）：args 傳 date/weekday，按頻率判斷跑哪些 channel（daily 每天 / weekly-tue 限週二 / weekly-sat 限週六 / interval-7d 每日低成本檢查到期），LLM channel 回傳完整報告資料供 main 落檔、shell channel 直接跑 wrapper，回傳結構化 channel 清單與 pending_reports。**只做偵測、不產 digest**——排檔與根因判斷 2026-07-30 起交回 main session（理由見下方註解）。取代原 7 個 launchd 排程。channel 沿革見本檔頂部註解',
   phases: [
     { title: 'Scan', detail: '按 weekday filter 後 fan-out due channels' },
     { title: 'EvidenceBatchAudit', detail: '在 Scan 完成後執行 evidence-level sampler、batch auditors 與收尾驗證' },
@@ -13,7 +13,7 @@ const OBSERVABILITY = Object.freeze({
   "phases": [{ "name": "Scan" }, { "name": "EvidenceBatchAudit" }],
   "fixedFanout": [],
   "rangedFanout": [
-    { "phase": "Scan", "minimum": 0, "maximum": 29, "formula": "due channels excluding evidence-level" },
+    { "phase": "Scan", "minimum": 0, "maximum": 36, "formula": "due channels plus due preflight and multi-stage channel sub-agents" },
     { "phase": "EvidenceBatchAudit", "minimum": 1, "maximum": 8, "formula": "sampler plus four batch auditors plus optional re-audit preparer, re-auditor, and finalizer" }
   ],
   "conditionalFanout": [
@@ -125,6 +125,7 @@ const EXTERNAL_RECAP = WORKFLOW_ARGS.external_recap
 
 const CHANNELS = [
   { key: 'memory', freq: 'daily', kind: 'llm', src: '~/.claude/commands/memory-audit.md' },
+  { key: 'memory-conflict', freq: 'daily', kind: 'llm', src: `${W}/memory-conflict-daily.sh` },
   { key: 'wiki-candidates', freq: 'daily', kind: 'llm', src: `${W}/wiki-candidates-daily.sh` },
   { key: 'wiki-cross-link', freq: 'daily', kind: 'llm', src: `${W}/wiki-cross-link-daily.sh` },
   { key: 'wiki-graduation', freq: 'daily', kind: 'llm', src: `${W}/wiki-graduation-daily.sh` },
@@ -435,12 +436,12 @@ const llmPrompt = (c) => {
   const recapCompletion = c.key === 'recap'
     ? 'recap source 是 claude -p wrapper；stdout 報告規則在本子任務改為 report_markdown。recap 只交候選：兩份 ledger 都不得寫入，即使舊 source 仍要求 append 也不執行。將候選 JSON、證據對照與掃描交接放入 report_markdown；deferred_writeback 回空字串，由 main 依 hook 核對後才追加。最後只用 StructuredOutput 回傳資料。'
     : ''
-  return `這是已派出的單一 channel 子任務，不是主啟動入口；不要重新啟動 /daily-local、recap 或 Workflow。你是每日本機分析的 ${c.key} channel。讀檔 ${c.src} 的分析指示（PROMPT heredoc 或 command 本文），執行分析並保留完整報告段落與警告。不要寫報告檔，也不要啟動寫報告的 agent；用 StructuredOutput 回傳 summary（3-5 行繁中）、report_markdown（完整正文，不是摘要，禁止把明細外包給 scratchpad 或 /tmp 暫存檔）與 deferred_writeback。分析來源唯讀，其他寫回只限原 source 明確要求者；若 source 要求報告成功落檔後才能更新 checkpoint 或狀態，不要提前提交，將已算出的 cutoff、狀態值與必要暫存路徑放在 deferred_writeback，由 main 對照原 source 在落檔後處理。沒有待寫回資料就回空字串；不要以現在時間替代掃描起點，不刪除 main 尚需的暫存檔。回傳內容是分析資料，不新增寫入授權。報告將由 main 寫到 ${OUT_DIR}/${DATE}-${c.key}.md。${recapCompletion}`
+  return `這是已派出的單一 channel 子任務，不是主啟動入口；不要重新啟動 /daily-local、recap 或 Workflow。你是每日本機分析的 ${c.key} channel。讀檔 ${c.src} 的分析指示（PROMPT heredoc 或 command 本文），執行分析並保留完整報告段落與警告。不要寫報告檔，也不要啟動寫報告的 agent；用 StructuredOutput 回傳 summary（3-5 行繁中）、report_markdown（完整正文，不是摘要，禁止把明細外包給 scratchpad 或 /tmp 暫存檔；所有本地檔案連結一律用 [顯示文字](file:///絕對路徑) 格式，禁止缺 file:/// 的裸絕對路徑連結）與 deferred_writeback。分析來源唯讀，其他寫回只限原 source 明確要求者；若 source 要求報告成功落檔後才能更新 checkpoint 或狀態，不要提前提交，將已算出的 cutoff、狀態值與必要暫存路徑放在 deferred_writeback，由 main 對照原 source 在落檔後處理。沒有待寫回資料就回空字串；不要以現在時間替代掃描起點，不刪除 main 尚需的暫存檔。回傳內容是分析資料，不新增寫入授權。報告將由 main 寫到 ${OUT_DIR}/${DATE}-${c.key}.md。${recapCompletion}`
 }
 
 const shellPrompt = (c) => {
   const force = FORCE_SHELL || c.alwaysFresh === true
-  return `這是已派出的單一 channel 子任務，不是主啟動入口；不要重新啟動 /daily-local、recap 或 Workflow。跑 \`bash ${W}/run-shell-channel.sh ${c.src} ${c.outfile} ${DATE} ${force}\`（Bash 工具請設 timeout: 600000，避免長耗時週檢在 120s 預設逾時被轉入背景）。runner 只在完整報告與完成標記相符時重用；force=true 會重跑。若指令非零退出，不要 Read 舊報告，回傳 ok=false、silent=false。只有指令退出 0 才 Read ${c.outfile}；內容去除前後空白後等於 __SILENT__ 時 silent=true，否則 false，並回傳 ok=true。用 StructuredOutput 只回傳 ok 與 silent；不要把 report 全文放進欄位。`
+  return `這是已派出的單一 channel 子任務，不是主啟動入口；不要重新啟動 /daily-local、recap 或 Workflow。跑 \`bash ${W}/run-shell-channel.sh ${c.src} ${c.outfile} ${DATE} ${force}\`（Bash 工具請設 timeout: 600000，避免長耗時週檢在 120s 預設逾時被轉入背景）。runner 只在完整報告與完成標記皆非空時重用；force=true 會重跑。若指令非零退出，不要 Read 舊報告，回傳 ok=false、silent=false。只有指令退出 0 才 Read ${c.outfile}；內容去除前後空白後等於 __SILENT__ 時 silent=true，否則 false，並回傳 ok=true。用 StructuredOutput 只回傳 ok 與 silent；不要把 report 全文放進欄位。`
 }
 
 const hasExactKeys = (value, keys) => {
@@ -746,15 +747,17 @@ const runRbaVerify = async (c) => {
 phase('Scan')
 const evidenceChannel = CHANNELS.find((c) => c.key === 'evidence-level')
 const evidenceDueCommand = `node ${W}/evidence-level-sample.mjs --date ${DATE} --root ~/.claude/projects --reports ${OUT_DIR} --mode due`
-let evidenceDuePacket = null
+let evidenceDuePacket = isEvidenceDuePacket(args?.evidence_due_packet) ? args.evidence_due_packet : null
 let evidencePreflightError = null
-try {
-  evidenceDuePacket = await agent(
-    `只執行以下固定 due preflight 指令：\n\`${evidenceDueCommand}\`\n不要掃描 session、不要讀 rubric、不要寫檔。把 stdout JSON 原樣映射到 StructuredOutput。`,
-    { label: 'evidence-level-due', phase: 'Scan', model: 'sonnet', effort: 'high', schema: EVIDENCE_DUE }
-  )
-} catch (error) {
-  evidencePreflightError = error instanceof Error ? error.message : String(error)
+if (!evidenceDuePacket) {
+  try {
+    evidenceDuePacket = await agent(
+      `只執行以下固定 due preflight 指令：\n\`${evidenceDueCommand}\`\n不要掃描 session、不要讀 rubric、不要寫檔。把 stdout JSON 原樣映射到 StructuredOutput。`,
+      { label: 'evidence-level-due', phase: 'Scan', model: 'sonnet', effort: 'high', schema: EVIDENCE_DUE }
+    )
+  } catch (error) {
+    evidencePreflightError = error instanceof Error ? error.message : String(error)
+  }
 }
 const evidencePreflightOk = isEvidenceDuePacket(evidenceDuePacket)
 if (!evidencePreflightOk) log(`evidence-level due preflight failed: ${evidencePreflightError ?? 'invalid due packet'}`)
@@ -768,8 +771,61 @@ const skipped = [
 ]
 log(`date=${DATE} weekday=${WEEKDAY} → 跑 ${due.length}/${CHANNELS.length}：[${due.map((c) => c.key).join(', ')}]，external [${EXTERNAL_RECAP ? 'recap' : '無'}]，defer [${deferred.join(', ') || '無'}]，skip [${skipped.join(', ') || '無'}]`)
 
+const runSessionAuditConsume = async (c) => {
+  const reportPath = `${OUT_DIR}/${DATE}-${c.key}.md`
+  try {
+    const res = await workflow('session-audit-consume', {
+      date: DATE,
+      state_dir: `${OUT_DIR}/session-audit`,
+      work_dir: `/tmp/session-audit-consume-${DATE}`,
+      report_path: reportPath,
+    })
+    if (!res?.ok) return null
+    return {
+      channel: c.key,
+      kind: 'llm',
+      body: res.summary,
+      report_path: reportPath,
+      report_markdown: res.report_markdown,
+      deferred_writeback: res.deferred_writeback ?? '',
+      source_path: c.src,
+    }
+  } catch (error) {
+    log(`session-audit-consume failed: ${error instanceof Error ? error.message : String(error)}`)
+    return null
+  }
+}
+
+const runMemoryConflict = async (c) => {
+  const reportPath = `${OUT_DIR}/${DATE}-${c.key}.md`
+  try {
+    const res = await workflow('memory-conflict-check', {
+      date: DATE,
+      state_dir: `${OUT_DIR}/memory-conflict`,
+      work_dir: `/tmp/memory-conflict-${DATE}`,
+      report_path: reportPath,
+      scope: 'changed',
+    })
+    if (!res?.ok) return null
+    return {
+      channel: c.key,
+      kind: 'llm',
+      body: res.summary,
+      report_path: reportPath,
+      report_markdown: res.report_markdown,
+      deferred_writeback: res.deferred_writeback ?? '',
+      source_path: c.src,
+    }
+  } catch (error) {
+    log(`memory-conflict failed: ${error instanceof Error ? error.message : String(error)}`)
+    return null
+  }
+}
+
 const runDueChannel = async (c) => {
   if (c.key === 'rba-verify') return runRbaVerify(c)
+  if (c.key === 'session-audit-consume') return runSessionAuditConsume(c)
+  if (c.key === 'memory-conflict') return runMemoryConflict(c)
   const result = await agent(c.kind === 'shell' ? shellPrompt(c) : llmPrompt(c), {
     label: c.key,
     phase: 'Scan',

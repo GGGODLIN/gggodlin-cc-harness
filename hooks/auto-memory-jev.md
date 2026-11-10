@@ -7,8 +7,7 @@ Threat model: 提示型、防漂移，只協助誠實但可能忘記回查 memor
 - `Stop` command hook，`async: true`：讀本回合與上一交換，優先用 payload 的 `last_assistant_message`，只問 Jev direct 題。命中僅存 pending 判定，不輸出提醒、不寫 memory、不跑 Git。
 - 第二腿 Drex（2026-10-17 加，使用者批准）：Jev 免費層 429／逾時／冷卻中／免費價查核失敗／Keychain 讀不到 key 時，同一題同一門檻改問 nace `drex-v2.0`（`https://console.nace.ai/v1/systemone`，Keychain `nace-api-key`）。兩腿都失敗才記 `unavailable`。選 v2.0 的依據與數字在 hook 檔頭註解。
 - `UserPromptSubmit` command hook：本機消費上一人類回合的 pending，送 `additionalContext`。不叫 API、不喚醒 idle session、不要求新回合只回 skip。通知／peer／工具結果不消費。
-- 手動 checkpoint 與自動消費共用 `memory_reminder_common.py` 的完整／簡短記憶 checklist、`hooks/state/long_injected_<session>` 紀錄。原手動觸發、block、Git closeout 與 trigger sentinel 不共用給自動入口。
-- 完整規範初次、超過既有 50-turn refresh window、或壓縮後補送；只在輸出完整提醒時記錄。簡短提醒不假稱不存在的完整版已注入。
+- 手動 checkpoint 與自動消費共用 `memory_reminder_common.py` 的簡短記憶 checklist 與 `hooks/state/long_injected_<session>` 紀錄讀取。自動入口一律送簡短 checklist 並指路在需要寫入前先讀 `feedback_memory_cluster_maintenance.md` 的 Tier 1；完整 Tier 1 僅由手動 `checkpoint-judge.sh` 注入並記錄 `long_injected_<session>`。原手動觸發、block、Git closeout 與 trigger sentinel 不共用給自動入口。
 - agent 身分靠 payload `agent_id`／`agent_type` 與 subagents 路徑；不以 `CLAUDE_CODE_CHILD_SESSION` 排除，因為 Native 2.1.289 的 root SDK session 也帶 `1`（隔離 harness 已驗）。不是全部外部 worker CLI 的可靠身分識別。
 - 適用整機 Claude Code 主 session（2026-10-19 KEEP 結案後拿掉 trial 期間的個人目錄白名單與公司字樣過濾，比照 T1-evidence-level）；含金鑰／私鑰的敏感封包、使用者明示不要記、明確要求 memory／closeout、或觀察到 memory 寫入的回合不送。沒有語意 keyword 前置篩選。
 

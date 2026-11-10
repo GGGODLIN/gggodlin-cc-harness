@@ -1,14 +1,19 @@
 ---
-description: rules-size channel 報 CLAUDE.md 或 rules/common 超門檻後，使用者說「來瘦身」「處理超標」「跑 rules-slim」時，找出該砍哪幾段、產草稿逐段拍板、准的才寫回。不適用：全量規則遵守率盤點（那是 ~/.claude/rule-review/ 的一次性重工）、把既有拍板的「做成機制」條目做成 hook（走 gate-authoring）、非 always-on 層的檔案瘦身。
+description: rules-size channel 報 CLAUDE.md 或 rules/common 超門檻後，或使用者指定對某個肥大的 workflow / skill / command 跑結構瘦身（「來瘦身」「處理超標」「跑 rules-slim」「幫這個 workflow/skill 瘦身」）時，找出該砍哪幾段、產草稿逐段拍板、准的才寫回。不適用：全量規則遵守率盤點（那是 ~/.claude/rule-review/ 的一次性重工）、把既有拍板的「做成機制」條目做成 hook（走 gate-authoring）。
 ---
 
 <!-- 本檔在契約測試底下：python3 ~/.claude/commands/tests/test_skill_verify_one_shot_callers.py -->
 
 # Rules Slim
 
-為何固化：rules-size channel 每週二量得出「超標幾個 byte」，量不出「該砍哪一段」，報告因此進 digest 就沉底——CLAUDE.md 自 2026-08-04 起連續超標數週未被處理。本 command 是那個環節缺的消費端。
+為何固化：rules-size channel 每週二量得出「超標幾個 byte」，量不出「該砍哪一段」，報告因此進 digest 就沉底——CLAUDE.md 自 2026-08-04 起連續超標數週未被處理。本 command 是那個環節缺的消費端；另涵蓋對大型 `workflows/*.js`、`skills/*/SKILL.md` 與 `commands/*.md` 的按需結構瘦身。
 
 **既判優先**是本 command 的核心紀律：`~/.claude/rule-review/` 已經把 always-on 層切成 190 條並判過決（原作者 2026-08-25 一次性歷史盤點產物，公開版不附；外部採用者無此目錄時，略過 Step 2 與 Step 3 的 `collection.jsonl`／`split-rules.py` 比對，直接對全檔執行 Step 3 四條判定）；任何新判定之前先查既有判決還剩什麼沒落地——不只為了省工，更因為同一條規則被判兩次時兩次結論可能不一致，而使用者已經對第一次的結論拍板過。
+
+## 0. 判斷目標模式（Always-on 規則層 vs 指定 Workflow／Skill／Command）
+
+- **模式 A（預設：Always-on 規則層瘦身）**：使用者未指定具體的 workflow／skill／command 檔案（例如只說「來瘦身」「處理超標」「跑 rules-slim」）→ 接下方 **Step 1（讀最新超標報告）** 走 Step 1–6。
+- **模式 B（指定 Workflow／Skill／Command 結構體檢與瘦身）**：如果使用者點名具體的 `~/.claude/workflows/*.js`、`~/.claude/skills/*/SKILL.md` 或 `~/.claude/commands/*.md`（或從週報「📦 大型 Workflow／Skill／Command 瘦身候選」挑項），就在動手前直接跳到檔尾 **## 7. 模式 B：指定 Workflow／Skill／Command 結構體檢與瘦身** 執行。
 
 ## 接在哪
 
@@ -217,6 +222,29 @@ VERDICT: VIOLATIONS: <R 編號逗號列表>
 批次改多條時每條改完 grep 驗一次真的改成了：`replace_all` 為 false 的 Edit 在 old_string 不唯一時會失敗，但在「以為改了其實沒改」的 silent no-op 情境下不會報錯。
 
 寫回後重跑一次量測，把「現在幾 bytes、還差門檻多少」回報給使用者。
+
+## 7. 模式 B：指定 Workflow／Skill／Command 結構體檢與瘦身
+
+當 Step 0 判定使用者指定了具體的 `workflows/*.js`、`skills/*/SKILL.md` 或 `commands/*.md` 時，不走 Step 1–3 的 always-on 規則表，改依下列四步執行（不打 0–10 分主觀分數）：
+
+1. **雙證據唯讀盤點**：
+   - 讀取目標檔案並量測各章節／階段的行數與 bytes 佔比。
+   - **查近 7 天真實產出與執行紀錄**（`~/code/social-info/reports/` 或 `~/.claude/projects/` jsonl）：找出每次白跑的單份摘要重寫、只跑一行固定 shell／Python 指令的傳令 subagent，或佔報告大篇幅但下游消費端不讀的輸出段落。
+   - **查 Git 歷史與契約測試**（`git -C ~/.claude log -S`／`git blame` 與 `commands/tests/`、`skills/*/scripts/tests/`）：對任何候選刪減的關卡、停點或 subagent 交接，查明當初防什麼事故，以及近 7 天是否仍有真實攔截紀錄。
+   - **完成判準**：每個候選段落或交接都有 `(a) 檔名:行號與 bytes 佔比`、`(b) 當初加入的 commit SHA 與原因`、`(c) 近 7 天產出或契約測試證據`。完成後接第 2 步。
+2. **產出四欄分類草稿**：
+   將盤點結果分為四欄，每條逐項編號並寫明「修改後該位置變成什麼」：
+   - **🧱 承重牆（保留不動）**：有近期真實攔截紀錄、獨立語義審查職責或契約測試鎖定的關卡，明寫為何不能因底層模型升級而盲砍。
+   - **🪶 入口肥肉（抽去 `references/` 或合併）**：重複的欄位說明、歷史踩坑故事、按需才跑的長分支細節；抽離時入口必須留 `如果 X，就在 Y 前讀 Z` 標準指針。
+   - **🤖 純傳令／單份重寫 subagent（短路或免派）**：零語義判斷工作、只負責轉傳固定命令輸出或把單份材料重寫一遍的 subagent 交接（修改前必核對 Workflow JS runtime 無內建 `Bash`／`fs` 的限制與 `resumeFromRunId` 相容性，優先採 `args` 預計算短路或單份直傳）。
+   - **🔧 邏輯與回報矛盾（順手修）**：步驟間前提衝突、回報文字合併誤導或無分母依據的固定門檻。
+   - **完成判準**：四欄草稿已備妥，每條皆附證據三件套，無 0–10 分主觀打分表。完成後接第 3 步。
+3. **對抗式挑戰與呈現草稿**：
+   - 若草稿涉及砍除／短路 subagent 交接或修改狀態推進邏輯，在呈現四欄草稿時順帶問使用者是否先跑 `/advisor` 做跨模型挑戰。
+   - 依 Step 5 格式將四欄草稿放在回合最終訊息交使用者逐項拍板。完成後接第 4 步。
+4. **准的才寫回並跑契約與行為驗證**：
+   - 接 Step 6，只對使用者拍板同意的編號用 `Edit` 寫回。
+   - 修改 `commands/*.md` 或 `skills/**/SKILL.md` 前先 invoke `skill-creator`，完成後執行 `~/.claude/scripts/contract-test-run <檔案絕對路徑>` 與 RED → GREEN → REFACTOR 行為驗證（純路徑／歷史搬移則跑三項確定性檢查）；修改 `workflows/*.js` 後執行 `AsyncFunction` 語法檢查與對應單元測試，最後回報前後 bytes 變化與驗收結果。
 
 **完成判準**：每條准的都有對應的 Edit 與 grep 驗證；駁的一條都沒動；已回報改後 bytes 與門檻差距。
 

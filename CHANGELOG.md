@@ -2,6 +2,31 @@
 
 公開版 harness 的變更紀錄。每一節對應一次發布；「Unreleased」是已整備、尚未推上公開 repo 的候選。只記對讀者有意義的變動，不逐檔列 diff。
 
+## 2026-11-10
+
+### 新增
+- `hooks/question-tool-conflict-gate.py`（含測試與 `install/hooks/question-tool-conflict-gate.py.md`）：模型在同一回合列出待拍板問題、又接著呼叫工具時，擋下這次工具呼叫，讓回合停下來等使用者回答；同一題最多擋 2 次。仍在觀察期，之後可能改動或移除。
+- `hooks/dotenv-read-gate.py`、`hooks/code-search-root-gate.py`、`hooks/lcu-browser-routing-gate.py`（含測試與 `install/hooks/*.md`）：新增三支 PreToolUse 防護 gate——攔截直接讀取 `.env`／`.dev.env` 印出秘密、攔截對家目錄或 `~/.claude` 未排除 `projects/` 的無限制遞迴搜尋、以及攔截 `mcp__lcu__js` 呼叫不支援的 Playwright 方法或單次呼叫連點多個數字索引。
+- `skills/implement/references/architecture-visual-gate.md`、`skills/research-before-answer/references/pitfalls-history.md`：skill 入口精簡後搬出的架構圖關卡步驟與踩坑紀錄。
+
+### 變更
+- `hooks/pipestatus-zsh-gate.py`：另外擋下測試或建置指令後面用分號接 `ls`、`echo`、`true` 等指令、把失敗的退出碼蓋成 0 的寫法。
+- `skills/implement/SKILL.md`、`skills/research-before-answer/SKILL.md`、`commands/self-closeout.md`：精簡 skill 入口，細節搬到同目錄的 `references/`。
+- `skills/tdd/`、`skills/to-spec/SKILL.md`、`skills/to-tickets/SKILL.md`、`skills/implement/references/regression-closeout.md`：條件式性質測試（PBT）的規則收斂到 `tdd/tests.md` 一處，並新增「空讀」反模式。
+- `commands/pr-review.md`、`scripts/pr-review-gemini-web.py`：多目標審查時，Gemini 與網頁版 GPT 的材料附上 spec 脈絡、Argon 改讀逐目標的差異檔，並請審查者評估每個目標單獨先合併的後果。
+- `skills/grill-me/SKILL.md`、`commands/review-spec.md`：吸收 `grill-with-docs` 與 `explain-diff` 的做法；`skills/grill-with-docs` 移除。
+- `CLAUDE.md`、`settings.json`、`skills/brainstorm/SKILL.md`：低觸發 skill 改用條件式提示，並支援只寫名稱的覆寫。
+- `references/review-dispatch-principles.md`、`references/subagent-routing.md`：載入審查方法的審查與驗收角色，改經單發 pi 子任務派給 `gpt-6.1-sol`。
+- `skills/agent-dispatch/`：Herdr Core 的 worker 改成 main 終端機的子終端機。
+- `hooks/api-error-auto-continue.py`：Herdr App 回報錯誤狀態時也會自動續跑。
+- `hooks/opus-chinese-stop.py`：Markdown 連結被反引號包住時提醒一次。
+- `hooks/daily-local-analysis-trigger.sh`、`workflows/local-analysis.js`、`social-info/scripts/local-analysis/`：每日本機分析加入 skill 觸發健康度的節奏提醒與 deep-check 提名、帳本對帳先收進 findings 再推進游標、規則大小週報附大型 workflow 與 skill 候選表、追蹤更多工具的版本，並修正 workflow 游標與 channel 數。
+- `commands/rules-slim.md`：新增 workflow 與 skill 的結構瘦身模式。
+- `rules/common/dispatch-and-verify.md`、`references/verification-recipes-and-probes.md`：派工規則精簡到大小上限內；縮小 deep-check 提示的觸發條件。
+- `output-styles/Explanatory.md`：結論、狀態流與待拍板改放在回覆最底。
+- `skills/wizard/`：套用上游模板的修正。
+- `skills/INVENTORY.md`、`references/failure-mode-taxonomy.md`：清單與失效模式分類隨上述變動更新。
+
 ## 2026-11-03
 
 ### 新增

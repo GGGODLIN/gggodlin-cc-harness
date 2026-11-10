@@ -46,6 +46,12 @@ check_contains "$TEMPLATE" '預設路徑的聊天主報告' 'template defines th
 check_contains "$SKILL" 'AUDIT_INPUT_MODE: FILE_SNAPSHOT' 'self-verify template enables file snapshot mode'
 check_contains "$SKILL" 'SNAPSHOT_PATH: {path}' 'self-verify template provides snapshot path header'
 check_contains "$SKILL" 'SNAPSHOT_TOTAL_LINES: {lines}' 'self-verify template provides snapshot total lines header'
+check_contains "$SKILL" 'failure-mode-taxonomy.md' 'Step 4 and R5(c) require querying local incident stores'
+check_contains "$SKILL" 'git log --format="%ae"' 'Step 5 and R5(c) require verifying commit authorship'
+check_contains "$SKILL" 'Mechanism-level catchability' 'Step 5 requires verifying the graft point can catch the incident'
+check_contains "$SKILL" 'R5(c) 明顯 FAIL anchor' 'Step 7 R5(c) includes explicit FAIL anchor'
+check_contains "$SKILL" 'R5(c) 明顯 PASS anchor' 'Step 7 R5(c) includes explicit PASS anchor'
+check_contains "$TEMPLATE" '規則沒寫這條，但過去實戰 0 次發生' 'template opening item 4 requires explicit 0-incident disclosure'
 
 printf '%s\n' '----'
 printf 'PASS=%s FAIL=%s\n' "$PASS" "$FAIL"

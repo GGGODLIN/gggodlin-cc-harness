@@ -105,5 +105,15 @@ report="$(cat "$out_file" 2>/dev/null)"
 assert_contains "failure plus over cap still has the over-cap heading" "## 🎯 建議處理" "$report"
 assert_contains "failure plus over cap still has the failure line" "零使用清單產生失敗：rules-roster-unavailable" "$report"
 
+# 6. 大型 workflow/skill/command 候選：always-on 未超標且 0 零使用時維持 __SILENT__；有報告時附候選表。
+mkdir -p "$TMP/home/commands" "$TMP/home/workflows"
+printf '# big command\n01234567890123456789\n' > "$TMP/home/commands/big-cmd.md"
+RULES_SIZE_ASSET_CAP=10 run_wrapper empty; rc=$?
+[ "$rc" -eq 0 ] && [ "$(cat "$out_file" 2>/dev/null)" = "__SILENT__" ] && pass "large asset alone does not break __SILENT__" || fail "large asset alone does not break __SILENT__"
+RULES_SIZE_ASSET_CAP=10 run_wrapper candidates; rc=$?
+report="$(cat "$out_file" 2>/dev/null)"
+assert_contains "report includes large asset section when non-silent" "## 📦 大型 Workflow／Skill／Command 瘦身候選（1，> 10 bytes）" "$report"
+assert_contains "report lists the large asset path" "big-cmd.md" "$report"
+
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

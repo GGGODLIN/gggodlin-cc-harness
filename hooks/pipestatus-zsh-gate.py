@@ -2,7 +2,8 @@
 # 防漂移型提示 gate：
 # 1. 字串比對 $PIPESTATUS（外層 shell 非 bash 時 deny）；
 # 2. 掃描單引號 `python3 -c '...'` 內含 `\"` 的腳本並以 `ast.parse` 驗證語法，若因反斜線跳脫雙引號觸發 SyntaxError 則 deny；
-# 3. 掃描測試／型別檢查／建置命令（pytest、unittest、vitest、jest、tsc、cargo/go/bun/npm/pnpm test 或 build）直接 `| tail`／`| head` 且未設 `pipefail` 或 `PIPESTATUS` 的吞錯寫法並 deny。
+# 3. 掃描測試／型別檢查／建置命令（pytest、unittest、vitest、jest、tsc、cargo/go/bun/npm/pnpm test 或 build）直接 `| tail`／`| head` 且未設 `pipefail` 或 `PIPESTATUS` 的吞錯寫法並 deny；
+# 4. 掃描測試／型別檢查／建置命令後段以分號 `;` 直接尾接 `ls`、`echo`、`printf`、`true`、`pwd`、`date` 等無條件成功指令覆蓋退出碼的吞錯寫法並 deny。
 # 不承諾完整 shell 語意，也會攔到只是談論該指令的文字（替代路徑：改用 Write/Edit 落檔或 `python3 - <<'PY'` 單引號 heredoc）。
 # Surface table: Locked = 本 gate 與測試檔；Editable = 待檢 Bash 指令；Append-only = 審計 JSONL；Human-controlled = settings.json hooks 註冊。
 # Locked lifecycle: bootstrap 由 settings.json 掛載；update 直接編輯本檔並跑 pipestatus-zsh-gate.test.py；recovery 從 settings.json 移除或改用落檔執行。
@@ -11,6 +12,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import sys
 import time
 
@@ -19,20 +21,42 @@ BASH_PREFIX = re.compile(
   r'^\s*(?:[A-Za-z_][A-Za-z0-9_]*=\S+\s+)*(?:command\s+)?(?:/[^\s]*/)?bash\s+(?:-[A-Za-z]*c\b|<<)'
 )
 PYTHON_C_SINGLE_QUOTED = re.compile(
-  r'(?:^|[;&|()\s])(?:/[^\s;()|&]*/)?python(?:3(?:\.\d+)?)?\s+(?:-[IubBdEJsSOqVv]+\s+)*-c\s+\'(?P<code>[^\']*)\''
+  r'(?:^|[;&|()\s"])(?:/[^\s;()|&"]*/)?python(?:3(?:\.\d+)?)?\s+(?:-[IubBdEJsSOqVv]+\s+)*-c\s+\'(?P<code>[^\']*)\''
 )
 TEST_PIPE_SWALLOW = re.compile(
   r'(?:^|[;&()\n]|&&|\|\|)\s*'
   r'(?:env\s+(?:[A-Za-z_][A-Za-z0-9_]*=(?:\"[^\"]*\"|\'[^\']*\'|\S+)\s+)*|(?:[A-Za-z_][A-Za-z0-9_]*=(?:\"[^\"]*\"|\'[^\']*\'|\S+)\s+)+)?'
-  r'(?:(?:uv|poetry|pipenv)\s+run\s+|(?:npx|pnpm|yarn|bunx)\s+(?:--no-install\s+)?)?'
+  r'(?:(?:uv|poetry|pipenv)\s+run\s+|(?:npx|pnpm|yarn|bunx)\s+(?:--no-install\s+|-[sS]\s+|--silent\s+)*)?'
   r'(?P<runner>'
   r'(?:[^\s;|&\n]*/)?(?:pytest|py\.test|vitest|jest|tsc)\b'
   r'|(?:[^\s;|&\n]*/)?python(?:3(?:\.\d+)?)?\s+(?:-[IubBdEJsSOqVv]+\s+)*-m\s+(?:pytest|unittest)\b'
-  r'|(?:bun|npm|pnpm|yarn|cargo|go)\s+(?:run\s+)?(?:test|typecheck|build)\b'
+  r'|(?:[^\s;|&\n]*/)?node\s+(?:[^\n;|&\s]+\s+)*(?:--test|--check)\b'
+  r'|(?:[^\s;|&\n]*/)?(?:bash|sh)\s+[^\n;|&\s]*\.(?:test|spec)\.sh\b'
+  r'|(?:bun|npm|pnpm|yarn|cargo|go)\s+(?:-[sS]\s+|--silent\s+)*(?:run\s+)?(?:-[sS]\s+|--silent\s+)*(?:test(?::[^\s;|&]+)?|typecheck|lint|check|build)\b'
+  r'|(?:[^\s;|&\n]*/)?claude\s+plugin\s+(?:test|validate)\b'
   r')'
-  r'(?:[^;&|\n]|(?<=>)&)*\|(?!\|)[ \t]*(?:[^\s;|&\n]*/)?(?P<sink>tail|head)\b'
+  r'(?:[^;&|\n]|(?<=>)&|\|(?!\|)[ \t]*(?!(?:[^\s;|&\n]*/)?(?:tail|head)\b))*\|(?!\|)[ \t]*(?:[^\s;|&\n]*/)?(?P<sink>tail|head)\b'
 )
-PIPEFAIL_GUARD = re.compile(r'\b(?:pipefail|PIPESTATUS|pipestatus)\b')
+TEST_TRAILING_MASK = re.compile(
+  r'(?:^|[;&()\n]|&&|\|\|)\s*'
+  r'(?:env\s+(?:[A-Za-z_][A-Za-z0-9_]*=(?:\"[^\"]*\"|\'[^\']*\'|\S+)\s+)*|(?:[A-Za-z_][A-Za-z0-9_]*=(?:\"[^\"]*\"|\'[^\']*\'|\S+)\s+)+)?'
+  r'(?:(?:uv|poetry|pipenv)\s+run\s+|(?:npx|pnpm|yarn|bunx)\s+(?:--no-install\s+|-[sS]\s+|--silent\s+)*)?'
+  r'(?P<runner>'
+  r'(?:[^\s;|&\n]*/)?(?:pytest|py\.test|vitest|jest|tsc|prettier)\b'
+  r'|(?:[^\s;|&\n]*/)?python(?:3(?:\.\d+)?)?\s+(?:-[IubBdEJsSOqVv]+\s+)*-m\s+(?:pytest|unittest)\b'
+  r'|(?:[^\s;|&\n]*/)?node\s+(?:[^\n;|&\s]+\s+)*(?:--test|--check)\b'
+  r'|(?:[^\s;|&\n]*/)?(?:bash|sh)\s+[^\n;|&\s]*\.(?:test|spec)\.sh\b'
+  r'|(?:bun|npm|pnpm|yarn|cargo|go)\s+(?:-[sS]\s+|--silent\s+)*(?:run\s+)?(?:-[sS]\s+|--silent\s+)*(?:test(?::[^\s;|&]+)?|typecheck|lint|check|build)\b'
+  r'|(?:[^\s;|&\n]*/)?claude\s+plugin\s+(?:test|validate)\b'
+  r')'
+  r'[^\n;]*;\s*(?P<mask>(?:/[^\s;|&\n]*/)?(?:ls|echo|printf|true|pwd|date|cat)\b[^\n;]*)(?:;|\s*$)'
+)
+PIPEFAIL_GUARD = re.compile(r'\b(?:set\s+-[A-Za-z]*o\s+pipefail|PIPESTATUS|pipestatus)\b')
+BARE_TIMEOUT_PREFIX = re.compile(
+  r'(?:^|[;&()\n]|&&|\|\|)\s*'
+  r'(?:env\s+(?:[A-Za-z_][A-Za-z0-9_]*=(?:\"[^\"]*\"|\'[^\']*\'|\S+)\s+)*|(?:[A-Za-z_][A-Za-z0-9_]*=(?:\"[^\"]*\"|\'[^\']*\'|\S+)\s+)+)?'
+  r'(?P<cmd>timeout\s+(?:-[A-Za-z0-9-]+\s+)*\d+(?:\.\d+)?[smhd]?\s+\S+)'
+)
 SAFE_QUOTED_HEREDOC = re.compile(
   r'^(?P<prefix>\s*[^<#\r\n]*\S)\s*(?<!\\)<<(?P<strip_tabs>-)?\s*'
   r'(?P<quote>[\'\"])(?P<delimiter>[^\'\"\r\n]+)(?P=quote)\s*$'
@@ -117,6 +141,24 @@ def find_unprotected_test_pipe(command):
   return f"{match.group('runner').strip()} | {match.group('sink')}"
 
 
+def find_trailing_test_mask(command):
+  match = TEST_TRAILING_MASK.search(command)
+  if not match:
+    return None
+  mask_cmd = match.group('mask').strip().split()[0]
+  return f"{match.group('runner').strip()} ...; {mask_cmd}"
+
+
+def find_missing_bare_timeout(command):
+  search_path = os.environ.get('PIPESTATUS_TIMEOUT_PATH', os.environ.get('PATH', ''))
+  if shutil.which('timeout', path=search_path) is not None:
+    return None
+  match = BARE_TIMEOUT_PREFIX.search(command)
+  if not match:
+    return None
+  return match.group('cmd').strip()
+
+
 def main():
   payload = read_payload()
   if payload is None:
@@ -151,9 +193,41 @@ def main():
   if swallowed is not None:
     append_audit(command, payload.get('session_id', ''), shell, reason='unprotected-test-pipe-tail-head')
     reason = (
-      f'偵測到測試／檢查命令直接 pipe 給 tail/head（`{swallowed}`），但未設定 `pipefail`。'
+      f'偵測到測試／檢查命令直接 pipe 給 tail/head（`{swallowed}`），但未設定 `set -o pipefail`。'
       '這會讓 tail/head 的 exit 0 吞掉上游測試或編譯失敗的退出碼；'
-      '請在命令開頭加上 `set -o pipefail;`（或移除 `| tail`／`| head` 直接跑測試），若只是寫文件或測試資料請改用 Write/Edit 落檔或 `<<\'EOF\'` 單引號 heredoc。'
+      '請在實際執行該管線的 shell 內加上 `set -o pipefail;`（若管線包在 `bash -c` 內，須加在內層 shell，或先執行測試保存退出碼再處理輸出；直接移除 `| tail`／`| head` 亦可），若只是寫文件或測試資料請改用 Write/Edit 落檔或 `<<\'EOF\'` 單引號 heredoc。'
+    )
+    print(json.dumps({
+      'hookSpecificOutput': {
+        'hookEventName': 'PreToolUse',
+        'permissionDecision': 'deny',
+        'permissionDecisionReason': reason,
+      }
+    }, ensure_ascii=False))
+    return
+  trailing_mask = find_trailing_test_mask(scan_command)
+  if trailing_mask is not None:
+    append_audit(command, payload.get('session_id', ''), shell, reason='trailing-command-masks-test-exit')
+    reason = (
+      f'偵測到測試／檢查命令後段直接用分號 `;` 尾接無條件成功指令（`{trailing_mask}`）。'
+      '即使前段已設 `set -o pipefail`，尾段的 `ls`／`echo`／`true` 仍會把整個 shell 的退出碼覆蓋為 0（吞掉測試紅燈）；'
+      '請改用 `&&` 串接、拆成獨立呼叫，或顯式保存 `rc=$?; ...; exit $rc`，若只是寫文件或測試資料請改用 Write/Edit 落檔或 `<<\'EOF\'` 單引號 heredoc。'
+    )
+    print(json.dumps({
+      'hookSpecificOutput': {
+        'hookEventName': 'PreToolUse',
+        'permissionDecision': 'deny',
+        'permissionDecisionReason': reason,
+      }
+    }, ensure_ascii=False))
+    return
+  missing_timeout = find_missing_bare_timeout(scan_command)
+  if missing_timeout is not None:
+    append_audit(command, payload.get('session_id', ''), shell, reason='missing-gnu-timeout-command')
+    reason = (
+      f'偵測到命令使用裸 `timeout` 前綴（`{missing_timeout}`），但目前 macOS 環境 PATH 未安裝 GNU `timeout`（執行會報 Exit 127 command not found）。'
+      '若需要「到期強制終止子程序」，請改用該命令自帶的限時旗標（如 `curl -m`）或 `python3 -I -c "import subprocess; subprocess.run([\'...\'], timeout=N, check=True)"`；'
+      '若只需設定「前景等待上限」（注意：Bash 工具的 `timeout` 參數逾時後會將命令轉入背景繼續執行，不會自動終止子程序），請改填 Bash 工具的 `timeout` 參數，若只是寫文件或測試資料請改用 Write/Edit 落檔或 `<<\'EOF\'` 單引號 heredoc。'
     )
     print(json.dumps({
       'hookSpecificOutput': {

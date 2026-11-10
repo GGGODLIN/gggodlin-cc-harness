@@ -36,7 +36,8 @@ SKIPPED=()        # things we couldn't do (e.g. gh missing)
 # output isn't a terminal, so piped logs stay readable.
 _clear() {
   [[ -t 1 ]] || return 0
-  if command -v tput >/dev/null 2>&1; then tput clear; else printf '\033[2J\033[3J\033[H'; fi
+  if command -v tput >/dev/null 2>&1 && tput clear 2>/dev/null; then return 0; fi
+  printf '\033[2J\033[3J\033[H'
 }
 
 # banner "Title" — opening frame: what this wizard does.
@@ -74,8 +75,8 @@ open_url() {
     elif command -v explorer.exe >/dev/null 2>&1; then explorer.exe "$url"
     elif command -v xdg-open    >/dev/null 2>&1; then xdg-open "$url"
     elif command -v open        >/dev/null 2>&1; then open "$url"
-    else warn "couldn't open a browser — visit it manually: $url"; fi
-  } >/dev/null 2>&1 || warn "couldn't open a browser — visit it manually: $url"
+    else false; fi
+  } >/dev/null 2>&1 || warn "couldn't open a browser, so visit it manually: $url"
 }
 
 # pause "msg" — wait for the human to confirm they've done the manual part.
@@ -93,12 +94,15 @@ confirm() {
 }
 
 # _existing KEY — current value of KEY in ENV_FILE, if any. Strips the
-# double-quoting write_env applies so re-run defaults round-trip cleanly.
+# single- or double-quoting write_env applies so re-run defaults round-trip cleanly.
 _existing() {
   [[ -f "$ENV_FILE" ]] || return 1
-  local line; line=$(grep -E "^${1}=" "$ENV_FILE" | tail -n1) || return 1
+  local line sq="'\\''"; line=$(grep -E "^${1}=" "$ENV_FILE" | tail -n1) || return 1
   local val="${line#*=}"
-  if [[ "$val" == \"*\" && ${#val} -ge 2 ]]; then
+  if [[ "$val" == \'*\' && ${#val} -ge 2 ]]; then
+    val="${val:1:${#val}-2}"
+    val="${val//"$sq"/\'}"
+  elif [[ "$val" == \"*\" && ${#val} -ge 2 ]]; then
     val="${val#\"}"; val="${val%\"}"
     val="${val//\\\"/\"}"; val="${val//\\\\/\\}"
   fi
@@ -106,31 +110,32 @@ _existing() {
 }
 
 # ask KEY "Prompt" — read a value into $KEY. Offers the existing .env value as
-# a default on re-runs (Enter keeps it). Visible input (non-secret).
+# a default on re-runs (Enter keeps it). Visible input (non-secret), edited
+# with Readline. Fails at EOF with no input.
 ask() {
-  local key="$1" prompt="$2" current input
+  local key="$1" prompt="$2" current input s=$'\001' e=$'\002' p rc=0
   current=$(_existing "$key" || true)
-  if [[ -n "$current" ]]; then
-    printf '  %s%s%s %s[Enter keeps current]%s ' "$BOLD" "$prompt" "$RESET" "$DIM" "$RESET"
-  else
-    printf '  %s%s%s ' "$BOLD" "$prompt" "$RESET"
-  fi
-  read -r input || true
+  # Readline needs the colour codes wrapped in \001..\002 to place the cursor.
+  p="  $s$BOLD$e$prompt$s$RESET$e "
+  [[ -n "$current" ]] && p+="$s$DIM$e[Enter keeps current]$s$RESET$e "
+  read -e -r -p "$p" input || rc=1
+  if (( rc )) && [[ -z "$input" ]]; then return 1; fi
   [[ -z "$input" && -n "$current" ]] && input="$current"
   printf -v "$key" '%s' "$input"
 }
 
 # ask_secret KEY "Prompt" — like ask, but input is hidden.
 ask_secret() {
-  local key="$1" prompt="$2" current input
+  local key="$1" prompt="$2" current input rc=0
   current=$(_existing "$key" || true)
   if [[ -n "$current" ]]; then
     printf '  %s%s%s %s[Enter keeps current]%s ' "$BOLD" "$prompt" "$RESET" "$DIM" "$RESET"
   else
     printf '  %s%s%s ' "$BOLD" "$prompt" "$RESET"
   fi
-  read -rs input || true
+  read -rs input || rc=1
   printf '\n'
+  if (( rc )) && [[ -z "$input" ]]; then return 1; fi
   [[ -z "$input" && -n "$current" ]] && input="$current"
   printf -v "$key" '%s' "$input"
 }
@@ -148,10 +153,10 @@ _check_env_ignored() {
   confirm "Write to $ENV_FILE anyway?" || { printf '  aborted\n'; exit 65; }
 }
 
-# write_env KEY VALUE — upsert KEY=VALUE into ENV_FILE (creates it; replaces
-# any existing line). Idempotent. Values with spaces/#/quotes are written
-# double-quoted (escaped) so dotenv parsers don't truncate them; newlines are
-# refused outright.
+# write_env KEY VALUE — upsert KEY=VALUE into ENV_FILE (creates it at mode 0600;
+# writes through a symlink and keeps an existing file's mode) and sets $KEY.
+# Idempotent. Values with spaces/#/quotes are written double-quoted (escaped)
+# so dotenv parsers don't truncate them; newlines are refused outright.
 write_env() {
   local key="$1" value="$2" tmp out
   if [[ "$value" == *$'\n'* ]]; then
@@ -167,11 +172,13 @@ write_env() {
       out="\"${out}\""
       ;;
   esac
-  touch "$ENV_FILE"
+  [[ -e "$ENV_FILE" ]] || (umask 077 && : > "$ENV_FILE")
   tmp=$(mktemp)
   grep -vE "^${key}=" "$ENV_FILE" > "$tmp" || true
   printf '%s=%s\n' "$key" "$out" >> "$tmp"
-  mv "$tmp" "$ENV_FILE"
+  cat "$tmp" > "$ENV_FILE"
+  rm -f "$tmp"
+  printf -v "$key" '%s' "$value"
   WRITTEN_ENV+=("$key")
   printf '  %s✓ wrote%s %s → %s\n' "$GREEN" "$RESET" "$key" "$ENV_FILE"
 }
@@ -254,7 +261,11 @@ finish() {
 # ──────────────────────────────────────────────────────────────────────────
 # STAGES — author this section. One stage() per step the human takes.
 # Replace the example below. Set TOTAL_STAGES to match the stages you write.
+# Keep every stage inside run_wizard and the last line as is: bash then parses
+# the whole file before the first prompt, so an edit mid-run can't break it.
 # ──────────────────────────────────────────────────────────────────────────
+
+run_wizard() {
 
 TOTAL_STAGES=1
 
@@ -274,3 +285,6 @@ set_secret STRIPE_SECRET_KEY "$STRIPE_SECRET_KEY"   # CI needs this one
 # ──────────────────────────────────────────────────────────────────────────
 
 finish
+}
+
+run_wizard "$@"; exit

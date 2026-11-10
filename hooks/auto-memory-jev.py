@@ -468,20 +468,14 @@ def run_deliver(payload, directory, state, name):
     audit(payload, 'delivery_stale')
     return
   previous = last_long(payload['session_id'], context['turns'], payload['transcript_path'])
-  version = 'short' if previous and context['turns'] <= previous + 50 else 'long'
+  version = 'short'
   message = reminder(version, '[auto-memory:jev:' + version + '] 上一人類回合可能有新且已確認、可跨回合使用的偏好／決策／技術教訓，值得回查既有 memory。', previous, automatic=True)
   if len(message) > 9500:
     raise ValueError('oversized_reminder')
-  # Preflight the shared marker before printing; a pathological target must not count as injected.
-  if version == 'long':
-    with SafeDirectory(Path.home() / '.claude/hooks/state') as shared:
-      shared.read_info('long_injected_' + payload['session_id'])
   state['delivered'] = (state.get('delivered', []) + [pending['packet_sha']])[-20:]
   directory.write(name, dump(state))
   message += '\n\n來源回合 hash：' + pending['turn'][:16]
   print(dump({'hookSpecificOutput': {'hookEventName': 'UserPromptSubmit', 'additionalContext': message}}), flush=True)
-  if version == 'long' and not mark_long(payload['session_id'], max(1, context['turns'])):
-    version = 'reference'
   audit(payload, 'delivered', turn=pending['turn'][:16], version=version, score=pending['score'])
 
 

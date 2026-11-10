@@ -22,7 +22,7 @@ You are a senior Python code reviewer ensuring high standards of Pythonic code a
 
 1. 照目錄開頭的挑選步驟，用改動的檔案挑出這次要套的標準，再讀選中的位置。位置讀不到的標準記為沒完成，不當作沒問題。
 2. 在審查根目錄跑 `git diff <比較範圍> -- '*.py'` 看 Python 檔案的改動。
-3. 有 static analysis 工具就跑（ruff、mypy、pylint、black --check）。
+3. 有 static analysis 工具就跑（ruff、mypy、pylint、black --check）；若派工 prompt 明文指示跳過測試／lint，明寫「未做 lint：呼叫端指定跳過」並繼續審查。
 4. 專注在改動的 `.py` 檔，照選中的標準審。每個分到的 `.py` 檔都逐檔交代結果：有 finding，或審過沒問題；沒審的檔列入沒完成。
 
 ## Diagnostic Commands

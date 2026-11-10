@@ -77,7 +77,7 @@ if is_home_root_cd "$cd_rest" || cd_target_is_absolute "$cd_rest"; then
   exit 0
 fi
 
-MSG="[本機自寫 hook ~/.claude/hooks/cd-cwd-persistence-nudge.sh] 偵測到相對 \`cd <subdir>\`。Bash tool cwd 跨 call 持久化、不會自動回 root —— 後續 Bash 若用 repo-root 相對路徑（特別 \`git add\` / \`git diff\` / \`git restore\`）會 exit 128 路徑重複。預防三選一：(a) subshell 包：\`(cd subdir && cmd)\` 結束自動回原 cwd；(b) 下個 Bash 顯式 \`cd \$REPO_ROOT && ...\`；(c) typecheck/build 類用 \`--project <path>\` flag 取代 \`cd subdir\`。"
+MSG="[cd-cwd-nudge] 偵測到相對 cd：Bash cwd 會跨呼叫持久化，後續 git/相對路徑指令易出錯；請改用 (cd subdir && cmd)、顯式 cd \$REPO_ROOT 或 --project 旗標。"
 
 jq -n --arg ctx "$MSG" '{hookSpecificOutput:{hookEventName:"PreToolUse",additionalContext:$ctx}}'
 exit 0

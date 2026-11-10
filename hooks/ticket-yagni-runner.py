@@ -155,6 +155,17 @@ def find_batch_context(session, run, ticket, tfile):
       if choices and choices[-1] not in seen:
         seen.add(choices[-1])
         lines.append(choices[-1])
+    dispatch_dir = tfile.parent.parent / 'dispatch'
+    if dispatch_dir.is_dir():
+      for brief in sorted(dispatch_dir.glob('brief-*.md')):
+        if not brief.is_file() or brief.is_symlink():
+          continue
+        try:
+          btext = brief.read_text(errors='replace').strip()
+        except OSError:
+          continue
+        if btext:
+          lines.append(f'### 同批次派工單摘錄（{brief.name}）\n{btext[:12000]}')
   return '\n'.join(lines) if lines else None
 
 

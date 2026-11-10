@@ -30,6 +30,7 @@ cat <<'EOF'
 （從 `_schema.md` 反向降級段 + `~/.claude/CLAUDE.md` / `~/.claude/rules/` 對位反查）
 
 ## 已掃但不夠成熟
+（只列當日 0/4、1/4、2/4 各分數桶的總數統計與「無 changelog 段、無法判定」警告，不逐一列出 0–2/4 的個別 entity 名稱；HOLD 與 3/4 明細仍保留於各自段落）
 
 ## 🎯 今日推薦 actions
 ```

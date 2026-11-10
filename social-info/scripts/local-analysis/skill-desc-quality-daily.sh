@@ -47,7 +47,7 @@ bash ~/.claude/scripts/skill-inventory-paths.sh --paths
 bash ~/.claude/scripts/skill-inventory-paths.sh --counts
 ```
 
-`--paths` 的輸出作為完整掃描範圍；`--counts` 的 `global / project / total` 原樣寫進「## 掃描範圍」。若 total 大幅偏離（< 15 或 > 80），表示 INVENTORY 維護出問題、報告內加 ⚠️ warning。INVENTORY 或本 prompt 不再手寫預期數量。
+`--paths` 的輸出作為完整掃描範圍；`--counts` 的 `global / project / total` 原樣寫進「## 掃描範圍」。若 total 大幅偏離（< 15 或 > 100），表示 INVENTORY 維護出問題、報告內加 ⚠️ warning。INVENTORY 或本 prompt 不再手寫預期數量。
 
 **`(command)` 後綴 skip**：INVENTORY 內 `align (command)` / `harness (command)` / `trial-review (command)` 這類 row 是 slash command 不是 skill、實體檔在 `<project>/.claude/commands/<name>.md` 而非 `<scope>/<name>/SKILL.md`；且 command 由使用者顯式 `/<name>` 觸發、沒有 LLM discriminative trigger match 問題、本 channel 判準不適用 → awk 直接 skip。
 

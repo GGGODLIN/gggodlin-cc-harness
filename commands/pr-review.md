@@ -584,21 +584,30 @@ gh api --paginate "repos/<owner>/<repo>/pulls/<number>/files?per_page=100" --jq 
 # Bitbucket: use the diffstat already fetched per bitbucket-pr-review skill — list every changed file path.
 ```
 
-範圍模式的 F = 範圍目標的 `changed_files`（入口檔案的 T 側路徑，逐目標帶 `target_identity`），直接讀 `$PREPARATION_PATH`；不跑上方 PR files API，那份清單只作對照、不當 F。容量與切塊沿用下方門檻，以 `review_diff` 行數計。
+範圍模式的 F = 範圍目標的 `changed_files`（入口檔案的 T 側路徑，逐目標帶 `target_identity`），直接讀 `$PREPARATION_PATH`；不跑上方 PR files API，那份清單只作對照、不當 F。容量與切塊沿用下方門檻，以 `review_diff` 裡 source 檔的行數計（source／non-source 分法見下方 Chunking decision）。
 
 Record F as an explicit list. Exclude nothing at this stage — lockfiles / generated / vendored files stay in F so the coverage assertion (Step 4.5) can mark them "intentionally skipped" rather than silently dropped.
 
 ### Chunking decision
 
-Compute two numbers from F and the diff:
+先把 F 分成兩組。分類與 `~/.claude/scripts/pr-review-targets.py` 的 `source_files()` 是同一份清單，改一邊要同步另一邊：
 
-- `FILE_COUNT` = number of source files in F (exclude lockfiles, generated, vendored, docs)
-- `DIFF_LINES` = total added + deleted lines across F
+- **non-source**：lockfile、generated、vendored、文件（`.md` `.mdx` `.rst` `.txt` `.adoc`），以及資料／設定檔（`.json` `.yml` `.yaml` `.toml` `.po` `.svg` `.csv`）。
+- **source**：其餘所有檔。
+
+Compute two numbers from **source files only**——non-source 的檔數與行數都不算，算進去會切出整塊沒有程式碼的 chunk、白派 reviewer：
+
+- `FILE_COUNT` = number of source files in F
+- `DIFF_LINES` = added + deleted lines across the source files in F
 
 **Threshold: chunk when `FILE_COUNT > 15` OR `DIFF_LINES > 800`.**
 
 - **Below threshold** → if a primary cell is selected, that selected path reviews all of F at once; if no primary cell is selected, do not dispatch a primary reviewer.
-- **Above threshold** → if a primary cell is selected, deterministically partition **all of F**——含 lockfiles／generated／vendored（它們也要有 chunk owner、才有人對其輸出 `INTENTIONALLY_SKIPPED` accounting；門檻計算仍只數 source files）——into chunks of ≤ 15 source files (and roughly ≤ 800 diff-lines each). Partition is **stable and exhaustive**: sort file paths, fill chunks in order, every file lands in exactly one chunk. Record the chunk→files map — Step 3 dispatches that selected primary reviewer once per chunk, and Step 4.5 asserts the union equals F. Without a selected primary, record `N-A (primary not selected)` instead.
+- **Above threshold** → if a primary cell is selected, deterministically partition **all of F** in two passes. Partition is **stable and exhaustive**: every file lands in exactly one chunk.
+  1. **Source chunks**：sort source file paths and fill them in order into chunks of ≤ 15 source files and roughly ≤ 800 source diff-lines each; a single file over 800 lines forms its own chunk.
+  2. **One non-source chunk**：put every non-source file into one extra chunk. It is exempt from the 15-file／800-line caps, so every file still has a chunk owner. Its reviewer outputs `INTENTIONALLY_SKIPPED` only for lockfile／generated／vendored files; every other non-source file — API contracts such as `openapi.json`, `package.json`, CI／deploy config, i18n messages, docs — is reviewed for content like any other file, never skipped because of its extension. No non-source files → no non-source chunk.
+
+  Record the chunk→files map — Step 3 dispatches that selected primary reviewer once per chunk, and Step 4.5 asserts the union equals F. Without a selected primary, record `N-A (primary not selected)` instead.
 
 ## Step 2.96: Collect Conditional Angle Eligibility
 
@@ -697,7 +706,7 @@ JSON
 )
 ```
 
-- 容量沿既有門檻同時計算逐目標與整組加總（任一 `FILE_COUNT > 15` OR `DIFF_LINES > 800` → 需裁決／切塊）。`capacity.targets` 保留每 target 的 chunk 資料，`capacity.review_set` 記整組總檔案、總行數與 target 數；逐目標超界以該 `target_identity` 裁決，整組加總超界另以固定 key `review_set` 裁決。**任一超界先由使用者裁定**範圍或接受哪些未完成項；沒有裁決就不啟動應等待該裁決的席位，具體以 `capacity.unresolved` 非空為阻擋，也不能把未執行的角度標成通過。這不是新的成本服務或任意硬預算。
+- 容量沿既有門檻同時計算逐目標與整組加總（任一 `FILE_COUNT > 15` OR `DIFF_LINES > 800` → 需裁決／切塊）。檔數只算 source 檔，但腳本的 `diff_lines` 是平台回傳的整份 diff 總行數、含 non-source，所以這道裁決閘比 Step 2.95 的切塊判斷保守：可能多問一次裁決，不會少問。`capacity.targets` 保留每 target 的 chunk 資料，`capacity.review_set` 記整組總檔案、總行數與 target 數；逐目標超界以該 `target_identity` 裁決，整組加總超界另以固定 key `review_set` 裁決。**任一超界先由使用者裁定**範圍或接受哪些未完成項；沒有裁決就不啟動應等待該裁決的席位，具體以 `capacity.unresolved` 非空為阻擋，也不能把未執行的角度標成通過。這不是新的成本服務或任意硬預算。
 - `division_of_labor` 逐席分開列主責材料、額外 context 與共用材料體積，避免「主責唯一」掩蓋重複傳遞。
 - 只有 `preparation_path` 指向的準備狀態為 `READY` 時才接受 finalize；`BLOCKED`／`NEEDS_INPUT`／已取消一律回 `PREPARATION_NOT_READY`，不寫入選席。
 
@@ -837,6 +846,7 @@ Each selected primary reviewer and selected eligible general domain reviewer suc
   - 範圍模式（`kind: range`）：審查根目錄是該範圍目標的 review root，審查對象是入口檔案，比較範圍是 `start.sha`→`end.sha`（R→T，差異檔 `review_diff.file`）。多目標：該筆 prompt 內三欄逐目標各填一組，取自 `$PREPARATION_PATH` 該 target 的 `review_root`、PR 身分與 `base`→`head`，不拿整組共用一組值。
   - 一行：「由 /pr-review 派出。」
   - 目錄指引一句：「開審前讀 `~/.claude/review-standards/catalog.md`，照它的挑選步驟挑這次要套的標準，結尾寫『這次審查範圍』。」Step 2.8 的基準清單經這一行與上一行套用（目錄的必套列），不在 prompt 內貼清單文字。
+- **多目標合併順序（Step 2.05 準備的多目標才加；單輸入與範圍模式 `kind: range` 不加）**：資料格式全部相容時，對方 repo 已上線的版本仍可能讓這個目標的新行為對一部分使用者不生效，所以合併順序另外問。原文一句：「多目標合併順序：逐目標回答一次——如果只有這個目標先合進它的 base、其他目標都還沒合，對方 repo 現行已上線的版本（該 repo trunk 上的程式，不是對方 PR 的 head）會送來或讀到什麼。先比對這個組合下的結果和這個目標合併前是否完全相同：相同（新功能只是還沒啟用），而且 spec 或 PR 已寫明這個退路，就輸出一行 `MERGE_ORDER: <目標> 單獨先合不影響 — <退路寫在哪>`。不同時，寫出哪些使用者或資料會失效（寫錯資料、丟錯，或對一部分使用者一律走「對不上／略過」都算）與多常發生；有一類使用者每次都會遇到，或只因為某個還沒開的開關、還沒做的票才暫時碰不到，就寫成 finding，寫出要先合哪一個目標；其餘輸出 `MERGE_ORDER` 行並寫理由與查到的位置。」
 - Reminder: "Apply your Context-Gathering Discipline — for any 'missing X / should handle Y' finding, search the codebase first using the tool noted above AND check the attached spec for explicit scope/non-goals before flagging. If spec marks something as out-of-scope, do not flag. Attach search-proof AND spec-reference when relevant. If a finding falls in the direct-report tier of `~/.claude/review-standards/must-report.md` (strict-liability), read that file before flagging: its members, conditions and exceptions decide what may be flagged without search."
 - **Runtime-assertion discipline**: "For any finding asserting observable behavior — 'this will crash' / 'this button does nothing' / 'renders undefined' — trace the mechanism the assertion depends on before flagging: form-library defaultValues, native form submit (a button without `type` inside a `<form>` submits it), framework/library internals (read the library source when the failure mode hinges on it). State which mechanism you traced and why the assertion still holds. If the trace shows the behavior is covered, do not flag."
 - **Spec-mapping check**: "Before citing a spec passage as evidence AGAINST the code, confirm the passage governs the same flow as the code you are flagging. Accurate spec text applied to the wrong code path is worse than no citation — spec quotes carry authority. If the flows differ, drop the citation (and usually the finding)."
@@ -857,7 +867,7 @@ Each reviewer returns its own finding list. Merge into a single "CC findings" bu
   2. 入場核對：`relevance` 引用的 `path:line` 由 Main 實際讀過、確認是本 PR 的改動或執行路徑；除了 `unknown` 那一項，題目依賴的其他前提都已查證；`impact` 寫出「答案是壞的」時會到 Must Fix 等級（不修就壞會出貨的東西）。任一項不成立就捨棄，捨棄的題數寫進「這次審查範圍」。
   3. Main 試答一次：用自己讀得到、能回答這一題的權威來源查（PR 的 spec 或票、repo 文件、團隊知識庫、對方服務的程式碼），查到就停。查到答案而且顯示有缺陷，改寫成 finding 回到本 bucket，照常走 Step 4；查到答案而且沒問題，就捨棄並記進「這次審查範圍」。
   4. 仍答不了的題目，原樣保留五欄，進 Step 5「待確認問題」。
-- **C4 deterministic result validation**: before admission, pass the packet, raw candidate, raw runtime input, and review root to the reducer. It re-reads the transcript and requires the extracted reviewer output to equal the candidate; no caller-built runtime receipt is trusted. Require `reviewer="spec-compliance-reviewer"`, top-level `dispatch_id` to equal the bound packet, `status="COMPLETE"`, and `errors=[]`; validate classification against the eight-value allowlist; require every input clause ID and spec path exactly once in their accounting arrays, every referenced `finding_id` to resolve to exactly one finding, every finding to be referenced by exactly one accounting row, and no unknown, duplicate, or omitted IDs. For each row, require `contract_type`, `normative_quote`, and `spec_anchor` to equal the trusted input clause byte-for-byte. For each finding, require those duplicated fields and all four same-flow values to equal its packet clause, require its trace-anchor ID set to equal the complete authored-plus-guard set in that clause's `clause_traces` row, and recompute the finding line range from the anchor's unique offset inside an authored quote whose exact line overlaps a reducer-derived Git hunk. Re-read canonical clauses and `side=head` evidence from regular-file blobs in the immutable `review_head` Git object; symlink-mode entries fail. Revalidate `side=base` only after proving `provenance_base_tree^{tree}` equals `authored_diff_base^{tree}`, then match `old_path`, `blob_oid`, exact quote range, and `blob_size_bytes`; query and enforce the 120,000-byte size before reading blob content, and never require the old path at PR HEAD. The reducer computes stale range/provenance invalidations itself, retains unaffected findings, suppresses accounting that depends on invalid evidence, and recomputes human-safe classification counts after filtering. Reject malformed containers, packet-budget overflow, authority mismatch, binding mismatch, missing concrete impact, or count mismatch. Any batch-level failure finalizes C4 as `FAILED`, admits zero C4 findings, and preserves only a stable validation error without re-dispatch.
+- **C4 deterministic result validation**: before admission, pass the packet, raw candidate, raw runtime input, and review root to `pr-review-c4.py validate` under the exact input, transcript-equality, per-clause/finding accounting, provenance/hunk-binding, and stale-evidence invalidation rules specified at the Step 3 `spec-compliance-reviewer` validation block above. Require `reviewer="spec-compliance-reviewer"`, top-level `dispatch_id` to equal the bound packet, `status="COMPLETE"`, and `errors=[]`, and reject malformed containers, packet-budget overflow, authority mismatch, binding mismatch, missing concrete impact, or count mismatch. Any batch-level failure finalizes C4 as `FAILED`, admits zero C4 findings, and preserves only a stable validation error without re-dispatch.
 - **C4 admission**: only a validated spec reviewer row with an observable shortfall plus complete `normative_quote`, `spec_anchor`, `same_flow`, authored-hunk code `anchor`, `behavioral_evidence`, and concrete runtime/data/build/CI impact enters the CC findings bucket. Main session attaches the exactly matched trusted packet-allowlist entry as `evidence_binding` before any Step 4 routing; the reviewer neither supplies nor alters this binding. `undocumented_behavior` also requires an explicit closed-world or prohibitive clause. Other classifications remain in `spec_compliance_observations`, not findings. On multi-target runs, the reducer resolves the finding's code location to exactly one authored code binding target; zero or multiple target matches fail with `C4_CODE_TARGET_AMBIGUOUS`. It emits only admitted rows through `group_findings`, stamped with that code target's canonical `target_identity` and the `reducer_validated` marker before Step 4.8 routing, so the group helper's existing `C4_NOT_VALIDATED` gate admits them into the set report; main forwards this projection unchanged, and a row the reducer refuses never reaches the report.
 - **C4 dedup**: merge only when hunk, root cause, clause ID set, required observable result, behavioral delta, and remediation are all equivalent. Otherwise keep separate obligations even when they point to the same hunk. Preserve every C4 trace field on the consolidated row.
 - **C4 verification routing**: overlap with another CC reviewer is not cross-axis consensus; it still enters Step 4.2. Only an equivalent Codex/Gemini finding can invoke the existing consensus path to Step 4.3a. The strict-liability verification exemption never applies to C4: every admitted C4 finding must receive an independent full formal-spec trace check through Step 4.2 or Step 4.3a.
@@ -1244,7 +1254,7 @@ Pro 跑完先讀 `/tmp/gemini-pro-path.txt` 確認實際走哪條：`ccp-gemini-
 
 #### 多目標整組材料（Step 2.05 準備的多目標才跑；單輸入沿上方既有 Gemini 段）
 
-多目標時 Gemini 的**已選角度以一次執行取得整組**（Pro 先走 `ccp-gemini-argon`，失敗才換 `agy`；Flash 走 `agy`）：`--add-dir` 重複列出**每一個目標**的 `review_root`（`ccp-gemini-argon` 另以第一個 root 為 cwd），prompt 內逐目標寫出 `target_identity`／head／head_ref／base／base_ref／`authored_diff_base`，讓同一個 root 綁同一份版本；**不按 PR 或 repo 數量拆成多次完整審查**。只保留該 cell 的 selected 角色、requested model（Pro 沿 `Gemini 4 Argon (High)`、Flash 沿 `$GEMINI_FLASH_MODEL`，由 `model-routing.sh` 解析後傳入；payload 與環境都缺時回 `MODEL_UNAVAILABLE`＋0 executions，不自創 model id）與材料範圍；不新增通道、不偷換模型。材料構建與執行替身接線走 `scripts/pr-review-gemini-web.py materials`（讀 `$PREPARATION_PATH`，輸出 packet 與 executions；executions 只描述、不代跑）。packet 是唯一持久 receipt，完整 prompt 保留在 packet 的 execution，不另寫 `*-prompt.txt`。`agy` 沿既有契約由 main 直接執行 executions：argv 形狀與既有段相同——`--print=<prompt 全文>`（prompt 全文作為 flag value，不是檔案路徑）、`--model=`／`--print-timeout 10m` 等號綁、每個 root 一組兩個 argv（`--add-dir`，`<review_root>`）、`</dev/null` 必加。Pro 的 executions 有兩筆：`role: primary`（`via: ccp-gemini-argon`、`command: zsh`，argv 已帶單目標段那組精簡唯讀旗標，`cwd` 是第一個 root，回覆是 JSON envelope，取 `.result` 當 `reply.output`、`.modelUsage` 的 key 當 `reply.model`）與 `role: fallback`（上述 `agy` 形狀，`run_if` 寫明只在 primary 失敗時跑）；`dispatch_call_count` 只數 primary，兩筆不會都跑。`collect` 的 `reply.model` 接受 `google/gemini-4-argon:high` 與 `Gemini 4 Argon (High)`。選席鍵沿用 `seat: agy`（`pr-review-targets.py` 用它比對選了哪一席），不代表實際執行路徑。
+多目標時 Gemini 的**已選角度以一次執行取得整組**（Pro 先走 `ccp-gemini-argon`，失敗才換 `agy`；Flash 走 `agy`）：`--add-dir` 重複列出**每一個目標**的 `review_root`（`ccp-gemini-argon` 另以第一個 root 為 cwd），prompt 內逐目標寫出 `target_identity`／head／head_ref／base／base_ref／`authored_diff_base`，讓同一個 root 綁同一份版本；**不按 PR 或 repo 數量拆成多次完整審查**。只保留該 cell 的 selected 角色、requested model（Pro 沿 `Gemini 4 Argon (High)`、Flash 沿 `$GEMINI_FLASH_MODEL`，由 `model-routing.sh` 解析後傳入；payload 與環境都缺時回 `MODEL_UNAVAILABLE`＋0 executions，不自創 model id）與材料範圍；不新增通道、不偷換模型。材料構建與執行替身接線走 `scripts/pr-review-gemini-web.py materials`（讀 `$PREPARATION_PATH`，輸出 packet 與 executions；executions 只描述、不代跑）。prompt 在 PR context 後附 Step 2.6 的 `SPEC_CONTEXT_BLOCK`：helper 從準備狀態的 `material_manifest` 組出同一份 canonical block（前言與 `BEGIN/END SPEC DATA JSON` markers 同 Step 2.6），每份 spec 逐字一個 object、同內容只出現一次，除固定五欄外另附 `source_targets`（`target_identity` 與 path）保留來源目標身分，不摘要、不截斷；準備狀態沒有 spec 時為 `no spec attached`，範圍目標且狀態無 spec 時不附。一般 PR 目標也改讀檔、比照範圍目標：helper 在 materials 時把 `git diff --no-color --no-ext-diff <authored_diff_base>..<head>` 寫成該目標 materials 目錄下的 `review.diff`（寫檔前先重建準備狀態記錄的該目標 materials 目錄，因為 Step 7 cleanup 會刪掉它；git 失敗或空 diff 回 `ERROR`／`TARGET_DIFF_UNAVAILABLE`，建目錄或寫檔失敗回 `ERROR`／`TARGET_DIFF_WRITE_FAILED`，兩者都附 `failed_targets`、不派工），prompt 該目標那行列 `review_diff=<檔案>` 並要求用 Read 讀到 EOF、不要自己跑 git diff 或 merge-base，每筆 execution 另以 `--add-dir` 加上該目錄；原因是 Argon 的唯讀白名單不放行 `git -C <root> …`（放行會連 commit／push 一起開），cwd 以外的 root 無法自己取得 diff。packet 是唯一持久 receipt，完整 prompt 保留在 packet 的 execution，不另寫 `*-prompt.txt`。`agy` 沿既有契約由 main 直接執行 executions：argv 形狀與既有段相同——`--print=<prompt 全文>`（prompt 全文作為 flag value，不是檔案路徑）、`--model=`／`--print-timeout 10m` 等號綁、每個 root 一組兩個 argv（`--add-dir`，`<review_root>`）、`</dev/null` 必加。Pro 的 executions 有兩筆：`role: primary`（`via: ccp-gemini-argon`、`command: zsh`，argv 已帶單目標段那組精簡唯讀旗標，`cwd` 是第一個 root，回覆是 JSON envelope，取 `.result` 當 `reply.output`、`.modelUsage` 的 key 當 `reply.model`）與 `role: fallback`（上述 `agy` 形狀，`run_if` 寫明只在 primary 失敗時跑）；`dispatch_call_count` 只數 primary，兩筆不會都跑。`collect` 的 `reply.model` 接受 `google/gemini-4-argon:high` 與 `Gemini 4 Argon (High)`。選席鍵沿用 `seat: agy`（`pr-review-targets.py` 用它比對選了哪一席），不代表實際執行路徑。
 
 **派工閘（單一來源，與 Ticket 01 同一道）**：`materials` 重用 `pr-review-targets.py` 的 `dispatch_decision`——selection 確實含對應 seat+angle、容量裁決已得、且 payload 帶 `confirmation=true` 才允許輸出 executions；否則回 `NOT_DISPATCHABLE`（reason = `selection-required`／`awaiting-adjudication`／`awaiting-confirmation`／`seat-not-selected`／`preparation-blocked`／`cancelled`）＋ `executions=[]`、`dispatch_call_count=0`。容量裁決缺時同樣 0 executions、不把 skipped 算通過。
 
@@ -1797,30 +1807,7 @@ Each block:
 
 #### 範例（口語化基準）
 
-```markdown
-#### #2 編輯既有 reward 按 Save 會被擋下來
-
-**File**: `frontend/routes/Program/rewardsPages/CustomReward.jsx`
-**Line**: 219
-
-**Comment**:
-```
-
-之前那個 useEffect（把 useGetDiscountCode 回傳塞進 setSelectedDiscount）拆掉之後，
-selectedDiscount 在編輯既有 reward 時會一直是 null，畫面上看得到 savedDiscount，
-但 checkForm() 還是只看 selectedDiscount → 按 Save 永遠跳「Please select a discount code」。
-
-改 checkForm 看 derived 那條就好：
-
-if (rewardType === 'customDiscountCode' && !selectedDiscount && !savedDiscount) {
-errors.selectedDiscount = 'Please select a discount code';
-}
-
-```
-
-```
-
-Strict-liability 類（XSS / SQL injection / hardcoded secret）一樣用口語化口氣，不用 `[CRITICAL]` tag — 嚴重性靠描述的具體攻擊路徑表達，不靠 tag：
+一般與 Strict-liability 類（XSS / SQL injection / hardcoded secret）一樣用口語化口氣，不用 `[CRITICAL]` tag — 嚴重性靠描述具體故障或攻擊路徑表達，不靠 tag：
 
 ```markdown
 #### #1a 這個 alt 沒 escape，merchant 能注 XSS
@@ -1947,8 +1934,6 @@ Weighted by verification verdict, but **all findings from selected cells are sti
 - 兩者重疊率: X% (consensus 筆數 / 總 finding 數)
 - CC 複查 Codex 的結果分佈 (4.1): CONFIRMED N, REFUTED M, PARTIAL K, INCONCLUSIVE L
 - **Codex 複查 CC 的結果分佈 (4.2、2026-06-29 對稱化)**: CONFIRMED N, REFUTED M, PARTIAL K, OUT_OF_SCOPE O, INCONCLUSIVE L
-  - **REFUTED 率高**（> 30%）= CC 在這個 PR over-flag 嚴重、user 看「參考用」段 CC 條目時可下調權重
-  - **REFUTED 率低**（< 10%）= CC first-pass 命中率高、Must Fix / Should Fix 可放心採納
 - **對抗式第三軸增益**: 對抗式獨有（中性 Codex + CC 都沒 flag）且 CC 複查 CONFIRMED 的 finding 數 = 紅隊軸對本 PR 的差異化價值。本 PR：**N 個獨有 CONFIRMED** / M 個對抗式總 findings（REFUTED K）
 
 ## 沒做的部分（結案對帳）
@@ -2063,6 +2048,8 @@ git worktree list --porcelain | grep -qx "worktree $REVIEW_ROOT" && echo "⚠️
 - Worktree 沒 remove → 累積佔盤、`git worktree list` 越長越亂、下次 review 同 PR 撞 "already exists" 要 --force
 
 如果 user 在 review 過程明確說「我要進去手動跑 test」→ 把 worktree 保留並告知 user 路徑、用 task list 追蹤稍後 cleanup。（config restore 仍然做、跟 worktree 保留無關）
+
+若本次審查的 PR 變更達 8 個檔案以上（或跨多個模組），在最終報告呈現結尾順口詢問一句是否需要用 `/pr-explain` 畫呼叫樹／架構圖帶讀（或產出互動式 HTML＋理解測驗）；若使用者在收到報告後已主動針對某條 finding 追問來龍去脈，則直接解釋或進入 `/pr-explain` Finding mode，不重複詢問「要不要解釋」。
 
 範圍模式在 Step 7 結束、不接 Step 8：不修改 code、不 push、不建立或留言任何 PR。worktree 清理對 `$PREPARATION_PATH` 的每個範圍目標 `review_root` 各跑一次上方 remove 與確認。
 

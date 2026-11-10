@@ -300,6 +300,34 @@ class Send(Base):
     self.assertFalse(any(c.startswith("send ") for c in self.hc_calls()))
     self.assertEqual(self.actions(), ["skip_session_mismatch"])
 
+  # 2026-11-02～03 實際踩過：hc 在 API 錯誤後回報 state=error，舊條件只認 idle/done，8 次送字 6 次 skip_not_ready
+  def test_hc_sends_when_terminal_in_error_state_after_api_failure(self):
+    self.set_hc_term("error")
+    self.set_cc_status("t13", SESSION)
+    self.hook.send("hc:t13", SESSION, self.transcript())
+    self.assertIn(f"send t13 {self.hook.CONTINUE_TEXT}\r", self.hc_calls())
+    self.assertEqual(self.actions(), ["sent"])
+
+  def test_hc_error_state_with_other_session_still_skips(self):
+    self.set_hc_term("error")
+    self.set_cc_controls("t13", "other-session")
+    self.hook.send("hc:t13", SESSION, self.transcript())
+    self.assertFalse(any(c.startswith("send ") for c in self.hc_calls()))
+    self.assertEqual(self.actions(), ["skip_session_mismatch"])
+
+  def test_hc_working_state_does_not_send(self):
+    self.hook.READY_POLL_SECONDS = 0.05
+    self.set_hc_term("working")
+    self.set_cc_status("t13", SESSION)
+    orig_sleep = self.hook.time.sleep
+    self.hook.time.sleep = lambda _s: None
+    try:
+      self.hook.send("hc:t13", SESSION, self.transcript())
+    finally:
+      self.hook.time.sleep = orig_sleep
+    self.assertFalse(any(c.startswith("send ") for c in self.hc_calls()))
+    self.assertEqual(self.actions(), ["skip_not_ready"])
+
   def test_hc_non_claude_app_skips_as_mismatch(self):
     self.set_hc_term("idle", app="zsh")
     self.hook.send("hc:t13", SESSION, self.transcript())

@@ -34,6 +34,8 @@ Finding _facts_ is your job, never mine. When a frontier question needs a fact f
 
 If a decision belongs to a third party (such as a PM, designer, or coworker), propose `to-questionnaire`; wait for my confirmation before drafting it, and never send it on my behalf.
 
+If the target project has domain model or architecture decision directories (such as `openspec/glossary.md` or `openspec/decisions/`), the first time a newly crystallized term or architectural trade-off needs recording during the session, invoke `domain-modeling` and record it per its rules.
+
 If I say 訪談我 or 一題一題來, switch to one question at a time — the global 訪談模式 rule takes precedence over rounds.
 
 Track a running confidence number for "I could write this spec correctly right now" (e.g. ~30% → ~90%). Below ~70%, name what's missing in one line — the number forces honesty about gaps a vague "getting clearer" would hide.
@@ -48,7 +50,7 @@ Product-layer lens (2026-07-11, condensed from gstack /office-hours forcing ques
 
 The final restate covers six fields: Outcome / User / Why now / Success / Constraint / Out of scope. "Out of scope" is where scope creep hides — its absence means the boundary was never actually decided.
 
-Do not enact the plan until I confirm we have reached a shared understanding. Once confirmed, if the next step is writing a spec (`to-spec`) and the design involves non-trivial architectural trade-offs, offer the option to run `/review-brainstorm` (6-seat isolated zero-context shootdown) before `to-spec`.
+Do not enact the plan until I confirm we have reached a shared understanding. Once confirmed, proceed to the global workflow choice checkpoint (`走流程／直接做`, which serves as the single owner for offering `/review-brainstorm` if not yet run or declined on this topic).
 
 ## 踩過的坑
 

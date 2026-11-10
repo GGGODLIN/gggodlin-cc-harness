@@ -184,6 +184,7 @@ def table_cells(line):
   raw_cells = []
   current = []
   backslashes = 0
+  in_code = False
   for character in line.strip():
     if character == "\\":
       current.append(character)
@@ -191,7 +192,11 @@ def table_cells(line):
       continue
     escaped = backslashes % 2 == 1
     backslashes = 0
-    if character == "|" and not escaped:
+    if character == "`" and not escaped:
+      in_code = not in_code
+      current.append(character)
+      continue
+    if character == "|" and not escaped and not in_code:
       raw_cells.append("".join(current))
       current = []
     else:

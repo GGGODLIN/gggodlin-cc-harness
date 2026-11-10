@@ -215,6 +215,14 @@ check "skill-changes -> 白名單接受" 0 "$?"
 check "skill-changes -> 新 entry 寫入" 1 "$(grep -c 'skill-changes-item' "$TMP/skill-changes-channel.jsonl")"
 check "skill-changes -> 既有 rows 不改" 1 "$(python3 -c 'import json,sys; before=[json.loads(x) for x in open(sys.argv[1])]; after=[json.loads(x) for x in open(sys.argv[2])]; print(int(before==[r for r in after if r["title"]!="skill-changes-item"]))' "$TMP/gates.jsonl" "$TMP/skill-changes-channel.jsonl")"
 
+cat > "$TMP/session-audit-consume-channel.json" <<'EOF'
+[{"title":"session-audit-consume-item","match":null,"channel":"session-audit-consume","source_key":"session-audit-consume:test-item"}]
+EOF
+cp "$TMP/gates.jsonl" "$TMP/session-audit-consume-channel.jsonl"
+python3 "$SCRIPT" --date 2026-07-30 --ledger "$TMP/session-audit-consume-channel.jsonl" --findings "$TMP/session-audit-consume-channel.json" --apply --no-health >/dev/null 2>&1
+check "session-audit-consume -> 白名單接受" 0 "$?"
+check "session-audit-consume -> 新 entry 寫入" 1 "$(grep -c 'session-audit-consume-item' "$TMP/session-audit-consume-channel.jsonl")"
+
 echo "== 壞輸入要明確失敗、不得靜默 =="
 printf '{"title":"ok","status":"pending","count":1,"first_seen":"2026-07-01","last_seen":"2026-07-01","note":""}\nNOT JSON\n' > "$TMP/broken.jsonl"
 python3 "$SCRIPT" --date 2026-07-30 --ledger "$TMP/broken.jsonl" --no-health >/dev/null 2>&1

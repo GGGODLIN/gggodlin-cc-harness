@@ -26,17 +26,6 @@
         ]
       },
       {
-        "matcher": "WebSearch|WebFetch|mcp__claude-in-chrome__navigate|mcp__chrome-devtools__navigate_page",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/usr/bin/python3 ~/.claude/hooks/dispatch-obligation-nudge.py tool",
-            "timeout": 5,
-            "statusMessage": "搜尋次數派工提醒（dispatch-obligation）..."
-          }
-        ]
-      },
-      {
         "matcher": "Bash|Edit|Write|NotebookEdit|Agent",
         "hooks": [
           {
@@ -133,39 +122,9 @@
             "asyncRewake": true
           }
         ]
-      },
-      {
-        "matcher": "TaskOutput",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 ~/.claude/hooks/taskoutput-dedup-hook.py",
-            "timeout": 10
-          }
-        ]
       }
     ],
     "PreCompact": [
-      {
-        "matcher": "manual",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "~/.claude/hooks/checkpoint-judge.sh",
-            "timeout": 5
-          }
-        ]
-      },
-      {
-        "matcher": "auto",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "~/.claude/hooks/checkpoint-judge.sh",
-            "timeout": 5
-          }
-        ]
-      },
       {
         "matcher": "manual|auto",
         "hooks": [
@@ -179,6 +138,26 @@
       }
     ],
     "PreToolUse": [
+      {
+        "matcher": "Read|Edit|Write|MultiEdit|Bash|Skill|Agent|Workflow|mcp__lcu__js",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/question-tool-conflict-gate.py",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "Read|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/python3 -I ~/.claude/hooks/dotenv-read-gate.py",
+            "timeout": 5
+          }
+        ]
+      },
       {
         "matcher": "mcp__semble__search|mcp__semble__find_related",
         "hooks": [
@@ -217,6 +196,11 @@
           {
             "type": "command",
             "command": "python3 ~/.claude/hooks/pipestatus-zsh-gate.py",
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/code-search-root-gate.py",
             "timeout": 5
           },
           {
@@ -311,6 +295,16 @@
             "statusMessage": "檢查票關閉前的 YAGNI verdict..."
           }
         ]
+      },
+      {
+        "matcher": "mcp__lcu__js|mcp__lcu__js_reset",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/lcu-browser-routing-gate.py",
+            "timeout": 5
+          }
+        ]
       }
     ],
     "SessionStart": [
@@ -330,15 +324,6 @@
         ]
       },
       {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "~/.claude/hooks/fable-gate.sh ~/.claude/hooks/T1-warning-check.sh",
-            "timeout": 5
-          }
-        ]
-      },
-      {
         "matcher": "compact",
         "hooks": [
           {
@@ -346,15 +331,6 @@
             "command": "node ~/.claude/compact-guard/bin/compact-guard.mjs --vendor claude --managed-id compact-guard/v1/claude/sessionstart",
             "timeout": 10,
             "statusMessage": "Compact Guard: restoring checkpoint"
-          }
-        ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 ~/.claude/hooks/taskoutput-dedup-hook.py",
-            "timeout": 10
           }
         ]
       }
@@ -376,33 +352,6 @@
             "command": "python3 ~/.claude/hooks/auto-memory-jev.py stop",
             "timeout": 10,
             "async": true
-          }
-        ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "~/.claude/hooks/verify-audit-silent-log.sh",
-            "timeout": 5
-          }
-        ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "~/.claude/hooks/fable-gate.sh ~/.claude/hooks/T1-claim-detect-local-first.sh",
-            "timeout": 30
-          }
-        ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "~/.claude/hooks/T1-evidence-level-detect.sh",
-            "timeout": 10
           }
         ]
       },
@@ -483,16 +432,6 @@
             "statusMessage": "worker 交件 YAGNI 審查（ticket-yagni）...",
             "async": true,
             "asyncRewake": true
-          }
-        ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/usr/bin/python3 ~/.claude/hooks/dispatch-obligation-nudge.py prompt",
-            "timeout": 5,
-            "statusMessage": "派工義務判斷（dispatch-obligation）..."
           }
         ]
       }

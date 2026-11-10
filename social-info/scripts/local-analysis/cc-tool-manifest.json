@@ -85,9 +85,16 @@
     "source": "graphifyy"
   },
   {
+    "name": "google-colab-cli",
+    "manager": "uv-tool",
+    "source": "google-colab-cli"
+  },
+  {
     "name": "skillevaluator",
     "manager": "uv-git",
-    "source": "NVIDIA/SkillEvaluator"
+    "source": "NVIDIA/SkillEvaluator",
+    "acknowledged_latest": "c3b298c2",
+    "hold_reason": "釘定既有相容 commit，不隨上游 HEAD 變動自動升級"
   },
   {
     "name": "beads",
@@ -193,5 +200,42 @@
     "name": "zellij",
     "manager": "brew",
     "source": "zellij"
+  },
+  {
+    "name": "prismantis",
+    "manager": "git-fork",
+    "path": "~/Desktop/projects/prismantis",
+    "source": "NahumLitvin/prismantis"
+  },
+  {
+    "name": "claude-mem-example-owner",
+    "manager": "git-fork",
+    "path": "~/Desktop/projects/claude-mem-example-owner",
+    "source": "thedotmack/claude-mem",
+    "acknowledged_latest": "v15.13.0",
+    "hold_reason": "上游新版主體為雲端功能與遙測，本地精簡 fork 維持 v13.35.0"
+  },
+  {
+    "name": "magpie-runtime",
+    "manager": "git-fork",
+    "path": "~/Desktop/projects/magpie-runtime",
+    "source": "yetone/magpie",
+    "acknowledged_latest": "v0.1.3216",
+    "hold_until": "2026-11-21",
+    "hold_reason": "上游每日 CI rolling tag，設 checkpoint 與 14 天冷卻期"
+  },
+  {
+    "name": "tokscale",
+    "manager": "git-fork",
+    "path": "~/Desktop/projects/tokscale",
+    "source": "junhoyeo/tokscale"
+  },
+  {
+    "name": "VoiceInk",
+    "manager": "git-fork",
+    "path": "~/Desktop/projects/VoiceInk",
+    "source": "Beingpax/VoiceInk",
+    "acknowledged_latest": "v2.26",
+    "hold_reason": "新版僅為外部串流服務與更新檢查修補，維持本地 v2.25 build"
   }
 ]

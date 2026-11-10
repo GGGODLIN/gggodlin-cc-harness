@@ -443,6 +443,23 @@ class PrReviewTargetsTest(unittest.TestCase):
     self.assertEqual([], accepted["capacity"]["unresolved"])
     self.assertEqual("awaiting-confirmation", accepted["dispatch"]["reason"])
 
+  def test_data_and_config_files_do_not_count_as_source(self):
+    selection = [{"seat": "opus/code-reviewer", "angle": "context-aware primary"}]
+    platform = self.fx.saas_pair_platform()
+    key = "github.com/acme/saas#12"
+    platform[key]["changed_files"] = [f"src/f{index}.ts" for index in range(15)] + [
+      "messages/en/common.json", "deploy/app.yml", "openapi.yaml", "pyproject.toml",
+      "locale/zh.po", "assets/logo.svg", "fixtures/rows.csv", "docs/notes.md", "pnpm-lock.yaml",
+    ]
+    platform[key]["diff_lines"] = 100
+    prepared = self.prepare(self.fx.payload(
+      self.fx.inputs_11_12(), platform, run_id="run-non-source-classification",
+    ))
+    pending = self.finalize(prepared["preparation_path"], selection)
+    target = pending["capacity"]["targets"]["github:github.com/acme/saas#12"]
+    self.assertEqual(15, target["source_file_count"])
+    self.assertFalse(target["chunked"])
+
   def test_any_target_failure_stops_whole_set_and_cancel_only_clears_this_run(self):
     selection = [{"seat": "opus/code-reviewer", "angle": "context-aware primary"}]
     broken = self.fx.saas_pair_platform()

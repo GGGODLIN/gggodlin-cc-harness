@@ -287,6 +287,21 @@ class OpusChineseStopTest(unittest.TestCase):
     for event in ("MessageDisplay", "PostToolBatch", "PreToolUse", "PostToolUse"):
       self.assertFalse(any("opus-chinese-stop.py" in h.get("command", "") for row in hooks.get(event, []) for h in row.get("hooks", [])))
 
+  def test_backtick_wrapped_link_reminds_once_and_never_hangs(self):
+    bad = "已完成查驗，詳見 `[upstream-ledger.md](file://~/Desktop/projects/collie-example-owner/docs/owner/upstream-ledger.md)`。"
+    output = self.run_hook(bad)
+    self.assertNotIn("decision", output)
+    self.assertIn("反引號", output["hookSpecificOutput"]["additionalContext"])
+    self.assertEqual(self.run_hook(bad), {})
+    rows = self.log_rows()
+    self.assertEqual([r["outcome"] for r in rows], ["reminded_link", "already_reminded"])
+
+  def test_normal_links_and_fenced_or_quoted_links_do_not_trigger(self):
+    good = "請見 [upstream-ledger.md](file://~/Desktop/projects/collie-example-owner/docs/owner/upstream-ledger.md) 與 `inline_code` [官網](https://example.com)。"
+    fenced = "範例如下：\n```markdown\n`[doc](file:///tmp/a.md)`\n```\n> `[quoted](https://example.com)`"
+    self.assertEqual(self.run_hook(good), {})
+    self.assertEqual(self.run_hook(fenced), {})
+
 
 if __name__ == "__main__":
   unittest.main()

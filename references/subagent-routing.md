@@ -190,6 +190,8 @@ T2-routing-gate hook 強制 enforce；互動式 `routed-mech` 即使 sentinel �
 
 實作 / 重構型派工 prompt 先套模板（目標 / 不變量 / 範圍 / spec / 驗收 / 回報合約六件套）→ 見 memory `reference_dispatch_prompt_templates`。若目標檔案受契約測試保護（檔頭含 `<!-- 本檔在契約測試底下：... -->`），派工前確認受委派 subagent 的 `tools` 含 `Bash` 可執行契約測試，不派無 `Bash` 的 subagent 直接修改受保護檔案（`contract-test-preflight-gate.sh` 會在首次 Edit/Write 前攔截無 `Bash` 的改動）。
 
+**背景 subagent 並發上限**：`~/.claude/settings.json` 設有 `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS=5`，單一訊息平行派發（或同時間在途）的背景 Agent 上限為 **5 個**；超過 5 個時必須分批派發（先派 ≤5 個，收到完成通知釋出槽位後再派下一批）。若收到 `Concurrent subagent limit reached (5)... Do not retry right now`，嚴禁在同一回合內重試派發。
+
 #### Read-only worktree preflight
 
 read-only Agent 只讀既有 detached worktree 時，不要為了隔離再傳 `isolation=worktree`。派工前先驗 Agent launch cwd 是否位於可建立 worktree 的 Git repo，或環境是否提供 WorktreeCreate hook；target path 本身是 worktree 不代表 launch cwd 通過前提。前提不成立就用 no-isolation，並在 prompt 給 absolute target path、明文禁止寫入。需要寫入但 isolation 不可得時，不套這個 fallback，改回 shared-tree 序列化或停止。
@@ -222,15 +224,15 @@ Workflow specific 細節（哪些 phase 算機械 / Search vs Fetch downgrade ta
 
 - 不需加 `<routed:>` token（E1 pass）；`routed-mech` 例外，description 必須有 `<mech-ok>`
 - 不需在 opts 指定 model（agent 預設處理）
-- 視情況可加 model override（如 `parallel-search` 預設 haiku、main 想用 sonnet）
-- 如果派的是審查程式碼的 reviewer（code-reviewer、typescript-reviewer、python-reviewer、security-reviewer），就在派工前讀 `~/.claude/references/review-dispatch-principles.md`：範圍三欄、底線、兩層授權與未完成揭露。
+- 視情況可加 model override（如 `url-fetcher` 預設 haiku、main 想用 sonnet）
+- 如果派的是審查程式碼的 reviewer（code-reviewer、typescript-reviewer、python-reviewer、security-reviewer），就在派工前讀 `~/.claude/references/review-dispatch-principles.md`：範圍三欄、底線、兩層授權與未完成揭露。在 Claude 主模型下，日常派這四支 reviewer、`architecture-critic`（非 `/review-spec` Tier 3）與 `task-verifier` 優先依該檔單點走 `pi-subtask` 讀取 `gpt-models.env` 的 `GPT_SOL` 跨模型執行；退回同模型自審時只修 P0／CRITICAL 與必報項。
 
 ## 回報合約：輸出長度上限
 
 subagent 回傳的內容整包進 main context；長回覆同時撐爆 main 的 context 與 CC 的 32000 output token 上限（2026-09-20 枚舉：`~/.claude/projects` 全庫 17 個 jsonl 命中 `output token maximum`，其中 11 個落在 `subagents/` 或 `workflows/` 底下）。三場景都適用：
 
 - 每個派工 prompt 明寫回傳上限。預設 ≤300 字；判斷 / 合論類放寬到 ≤600 字，仍要在 prompt 內寫出數字
-- 長產物（報告 / 逐條清單 / 抽取結果 / diff）一律寫檔，回傳只給絕對路徑 + 摘要 + 需要 main 拍板的項目
+- 長產物（報告 / 逐條清單 / 抽取結果 / diff）：由於 Claude Code 內建 subagent guardrail 禁止直接 `Write` 報告／分析類 `.md` 檔案，subagent 長篇報告一律透過最終訊息或 `StructuredOutput` 回傳由 main 落檔（或寫入 `.json` 結構化工件），嚴禁被 `Write` 擋下後改用 `Bash`（`cat <<EOF` / `python3`）寫 `.md` 檔繞過
 - 逐條枚舉型任務給筆數上限，超過就分批派；不要讓單一 agent 回完整清單
 - 不靠調高 `CLAUDE_CODE_MAX_OUTPUT_TOKENS` 解決——上限調高只是讓更大的回覆進 main context，主 session 死得更快
 

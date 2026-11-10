@@ -68,6 +68,13 @@ check "記憶回看先找既有檔再新建" "主題相同就併進去，沒有�
 check "記憶回看接回第 1 步" "完成後接第 1 步"
 check "回報有記憶欄" "記憶：新增 N、併入 M"
 check "記憶欄不跳過" "「記憶」不論哪種格式都要寫"
+check "記憶回看接到文件落差登記" "完成後接第 0b 步"
+check "文件落差登記是編號步驟" "0b. **文件落差登記**"
+check "文件落差不寫進 memory" "也不寫進 memory，交給第 0b 步"
+check "文件落差寫進摩擦掃描範圍" "~/.claude/friction/doc-drift.md"
+check "文件落差欄位照協議格式" "target=rule:<文件絕對路徑>"
+check "回報有文件落差欄" "文件落差：新增 N"
+check "文件落差欄不跳過" "「文件落差」同樣不跳過"
 check "第 2 步只讀摘要" "closeout-provenance.py --repo <repo> --plan"
 check "共用 checkpoint 用白名單檔 add" "add --pathspec-from-file=<shared.pathspec_file>"
 check "共用 checkpoint 只看差異核對" "diff --cached --name-only | diff - <shared.pathspec_file>"
@@ -76,6 +83,7 @@ check "未收只給數字" "未收只寫數字、不列路徑"
 check "外來暫存是異常" "\`staged_foreign\` 非空，該 repo 的提交被擋下"
 check "停在非 trunk 是異常" "personal repo 的 \`branch\` 不是 trunk"
 check "自己的檔沒收進來是異常" "本 session 的檔沒進 commit"
+check "並行搶先收走時分開標示且未收取自 unclaimed" "已由並行 session 收走"
 
 if [[ -x "$SCRIPT" ]] && python3 "$SCRIPT" --help >/dev/null 2>&1; then
   PASS=$((PASS + 1)); printf '  ok   provenance script 可執行\n'
@@ -83,7 +91,12 @@ else
   FAIL=$((FAIL + 1)); printf '  FAIL provenance script 可執行\n'
 fi
 
-SELF_REPOS=$(CLAUDE_CODE_SESSION_ID=contract-test-no-such-session python3 "$SCRIPT" --self-repos 2>/dev/null || true)
+FIXTURE=$(mktemp -d "${TMPDIR:-/tmp}/self-closeout-fixture.XXXXXX")
+EMPTY_PROJECTS="$FIXTURE.empty-projects"
+CODEX_TMP="$FIXTURE.codex"
+mkdir -p "$EMPTY_PROJECTS" "$CODEX_TMP"
+
+SELF_REPOS=$(CLOSEOUT_PROJECTS_DIR="$EMPTY_PROJECTS" CLOSEOUT_CODEX_SESSIONS="$CODEX_TMP" CLAUDE_CODE_SESSION_ID=contract-test-no-such-session python3 "$SCRIPT" --self-repos 2>/dev/null || true)
 if printf '%s\n' "$SELF_REPOS" | grep -qx "$HOME/.claude" && printf '%s\n' "$SELF_REPOS" | grep -qx "$HOME/Desktop/projects/.claude"; then
   PASS=$((PASS + 1)); printf '  ok   --self-repos 永遠含固定共用 repo\n'
 else
@@ -91,7 +104,6 @@ else
 fi
 
 # 行為測試：shared／vendor_managed／staged_differs 三個欄位要對真實 git 狀態判對
-FIXTURE=$(mktemp -d "${TMPDIR:-/tmp}/self-closeout-fixture.XXXXXX")
 git -C "$FIXTURE" init -q
 mkdir -p "$FIXTURE/memory" "$FIXTURE/skills/.trash/x"
 printf 'a\n' > "$FIXTURE/memory/MEMORY.md"
@@ -102,7 +114,7 @@ git -C "$FIXTURE" -c user.email=t@t -c user.name=t commit -q -m base
 printf 'staged\n' > "$FIXTURE/plain.txt"
 git -C "$FIXTURE" add plain.txt
 printf 'worktree\n' > "$FIXTURE/plain.txt"
-JSON=$(CLOSEOUT_SHARED_REPOS="$FIXTURE" python3 "$SCRIPT" --repo "$FIXTURE" --json 2>/dev/null || echo '{}')
+JSON=$(CLOSEOUT_PROJECTS_DIR="$EMPTY_PROJECTS" CLOSEOUT_CODEX_SESSIONS="$CODEX_TMP" CLOSEOUT_SHARED_REPOS="$FIXTURE" python3 "$SCRIPT" --repo "$FIXTURE" --json 2>/dev/null || echo '{}')
 if printf '%s' "$JSON" | python3 -c '
 import json,sys
 r=json.load(sys.stdin); rows={d["path"]:d for d in r.get("dirty",[])}
@@ -117,7 +129,7 @@ else
 fi
 
 # 回歸：普通專案 repo 有同名 memory/ 資料夾，不得被當成共用帳本（2026-10-09 REFACTOR 題）
-JSON_PLAIN=$(CLOSEOUT_SHARED_REPOS="$ROOT" python3 "$SCRIPT" --repo "$FIXTURE" --json 2>/dev/null || echo '{}')
+JSON_PLAIN=$(CLOSEOUT_PROJECTS_DIR="$EMPTY_PROJECTS" CLOSEOUT_CODEX_SESSIONS="$CODEX_TMP" CLOSEOUT_SHARED_REPOS="$ROOT" python3 "$SCRIPT" --repo "$FIXTURE" --json 2>/dev/null || echo '{}')
 if printf '%s' "$JSON_PLAIN" | python3 -c '
 import json,sys
 r=json.load(sys.stdin); rows={d["path"]:d for d in r.get("dirty",[])}
@@ -130,7 +142,7 @@ fi
 
 # 行為測試：--plan 只印摘要，共用白名單落檔、未收只給數字
 PLAN_DIR="$FIXTURE.plan"
-PLAN=$(CLOSEOUT_SHARED_REPOS="$FIXTURE" python3 "$SCRIPT" --repo "$FIXTURE" --session contract-test-no-such-session --plan "$PLAN_DIR" 2>/dev/null || echo '{}')
+PLAN=$(CLOSEOUT_PROJECTS_DIR="$EMPTY_PROJECTS" CLOSEOUT_CODEX_SESSIONS="$CODEX_TMP" CLOSEOUT_SHARED_REPOS="$FIXTURE" python3 "$SCRIPT" --repo "$FIXTURE" --session contract-test-no-such-session --plan "$PLAN_DIR" 2>/dev/null || echo '{}')
 if printf '%s' "$PLAN" | python3 -c '
 import json,sys
 p=json.load(sys.stdin)
@@ -146,8 +158,6 @@ else
 fi
 
 # 行為測試：codex_touched 略過全程 read-only 沙箱 rollout，但保留非 read-only 或含寫檔工具之 rollout
-CODEX_TMP="$FIXTURE.codex"
-mkdir -p "$CODEX_TMP"
 printf 'x\n' > "$FIXTURE/ro-target.txt"
 printf 'y\n' > "$FIXTURE/rw-target.txt"
 RO_PATH=$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$FIXTURE/ro-target.txt")
@@ -160,7 +170,7 @@ cat > "$CODEX_TMP/rollout-rw.jsonl" <<EOF
 {"type":"turn_context","payload":{"sandbox_policy":{"type":"workspace-write"}}}
 {"type":"response_item","payload":{"type":"function_call","name":"exec","arguments":"cat $RW_PATH"}}
 EOF
-JSON_CODEX=$(CLOSEOUT_CODEX_SESSIONS="$CODEX_TMP" CLOSEOUT_SHARED_REPOS="$ROOT" python3 "$SCRIPT" --repo "$FIXTURE" --json 2>/dev/null || echo '{}')
+JSON_CODEX=$(CLOSEOUT_PROJECTS_DIR="$EMPTY_PROJECTS" CLOSEOUT_CODEX_SESSIONS="$CODEX_TMP" CLOSEOUT_SHARED_REPOS="$ROOT" python3 "$SCRIPT" --repo "$FIXTURE" --json 2>/dev/null || echo '{}')
 if printf '%s' "$JSON_CODEX" | python3 -c '
 import json,sys
 r=json.load(sys.stdin); rows={d["path"]:d for d in r.get("dirty",[])}
@@ -171,6 +181,33 @@ sys.exit(0 if ok else 1)
 else
   FAIL=$((FAIL + 1)); printf '  FAIL codex_touched 排除純 read-only rollout 並保留非 read-only rollout\n'
 fi
+
+# 行為測試：cd <repo> && ... --out <relpath> 可認領為 self_bash_only，且 rg -o 不誤認成寫入者
+PROJ_TMP="$FIXTURE.projects/test-proj"
+mkdir -p "$PROJ_TMP" "$FIXTURE/sub"
+printf 'generated\n' > "$FIXTURE/sub/out.json"
+printf 'unclaimed\n' > "$FIXTURE/sub/rg-only.json"
+REAL_FIXTURE=$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$FIXTURE")
+cat > "$PROJ_TMP/sess-self.jsonl" <<EOF
+{"timestamp":"2099-01-01T00:00:00Z","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"cd $REAL_FIXTURE && python3 gen.py --out sub/out.json"}}]}}
+EOF
+cat > "$PROJ_TMP/sess-other.jsonl" <<EOF
+{"timestamp":"2099-01-01T00:00:00Z","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"cd $REAL_FIXTURE && rg -o sub/rg-only.json README.md > /tmp/unrelated.txt"}}]}}
+EOF
+JSON_OUT=$(CLOSEOUT_PROJECTS_DIR="$FIXTURE.projects" CLOSEOUT_CODEX_SESSIONS="$CODEX_TMP" CLOSEOUT_SHARED_REPOS="$ROOT" python3 "$SCRIPT" --repo "$FIXTURE" --session sess-self --json 2>/dev/null || echo '{}')
+if printf '%s' "$JSON_OUT" | python3 -c '
+import json,sys
+r=json.load(sys.stdin); rows={d["path"]:d for d in r.get("dirty",[])}
+ok = rows["sub/out.json"]["self_bash_only"] is True and rows["sub/out.json"]["co_written"] is False
+ok = ok and rows["sub/rg-only.json"]["candidates"] == []
+sys.exit(0 if ok else 1)
+'; then
+  PASS=$((PASS + 1)); printf '  ok   cd <repo> && --out <relpath> 正確認領且 rg -o 不誤判為寫入者\n'
+else
+  FAIL=$((FAIL + 1)); printf '  FAIL cd <repo> && --out <relpath> 正確認領且 rg -o 不誤判為寫入者\n'
+fi
+rm -rf "$EMPTY_PROJECTS"
+rm -rf "$FIXTURE.projects"
 rm -rf "$CODEX_TMP"
 rm -rf "$PLAN_DIR"
 rm -rf "$FIXTURE"

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-# 提示型 Stop hook：只認常見的整段英文結案，不承諾完整語意；判不出來就放行。
-# 不能阻止第一份英文顯示，也不能保證 Opus 接受提醒；不處理中途進度或刻意繞過。
-# 背景任務進行中也提醒（2026-10-13 起）：舊版跳過這類回合，fa52de65 兩天 5 次英文結案 0 次提醒，
-# 通知喚醒回合的 nudge 注入了 Opus 也沒照做；每則人類訊息仍只提醒一次。
-# decisions.jsonl 是純診斷 log、無消費端：英文結案才記一筆（提醒或放行原因＋背景任務種類／狀態），超過 512KB 停寫。
+# 提示型 Stop hook：只認常見的整段英文結案與反引號包住的 Markdown 連結，不承諾完整語意；判不出來就放行。
+# 字串比對型：會攔到「談論該寫法的非 code block 文字」，不能阻止第一份回覆顯示，也不保證模型接受提醒；不處理中途進度或刻意繞過。
+# 背景任務進行中也提醒（2026-10-13 起）：舊版跳過這類回合，導致有背景任務時英文結案 0 次提醒，
+# 通知喚醒回合的 nudge 注入了 Opus 也沒照做；每則人類訊息透過 mark_once 仍只提醒一次（第二次必放行、不卡死）。
+# decisions.jsonl 是純診斷 log、無消費端：觸發檢查才記一筆（提醒或放行原因＋背景任務種類／狀態），超過 512KB 停寫。
 # 本檔在契約測試底下：python3 ~/.claude/hooks/opus-chinese-stop.test.py
 import fcntl
 import hashlib
@@ -35,13 +35,28 @@ REMINDER = (
   "請以繁體中文重述相同的結論與必要資訊，不增減內容，也不要重跑已完成的工具工作；"
   "背景任務還在跑就照原計畫等它的通知，不要另開新動作。"
 )
+LINK_REMINDER = (
+  "[opus-chinese-stop] 剛才的回覆把 Markdown 連結包進了反引號（如 `[文字](file:///...)`），這會讓終端機超連結失效。"
+  "請去掉連結外面的反引號（直接寫 [顯示文字](完整URL)）並重述結論，不增減內容，也不要重跑已完成的工具工作；"
+  "背景任務還在跑就照原計畫等它的通知，不要另開新動作。"
+)
+BACKTICK_LINK = re.compile(r"(?<!`)`\[[^\]`\n]+\]\((?:https?://|file://)[^)\s`]+\)`(?!`)")
 LOG_LIMIT = 512 * 1024
 
 
-def natural_text(text):
+def strip_blocks(text):
   text = re.sub(r"<pasted_content\b[^>]*>.*?</pasted_content>", "", text, flags=re.DOTALL)
   text = re.sub(r"```.*?```", "", text, flags=re.DOTALL)
   text = re.sub(r"(?m)^\s*>.*$", "", text)
+  return text
+
+
+def backtick_wrapped_link(text):
+  return bool(BACKTICK_LINK.search(strip_blocks(text)))
+
+
+def natural_text(text):
+  text = strip_blocks(text)
   text = re.sub(r"`[^`\n]*`", "", text)
   text = re.sub(r"(?:https?://|file://)\S+", "", text)
   return text
@@ -198,7 +213,11 @@ def main():
     if not isinstance(payload, dict) or payload.get("hook_event_name") != "Stop" or payload.get("agent_id"):
       return
     text = payload.get("last_assistant_message")
-    if not isinstance(text, str) or not english_dominant(text):
+    if not isinstance(text, str):
+      return
+    has_english = english_dominant(text)
+    has_backtick_link = backtick_wrapped_link(text)
+    if not has_english and not has_backtick_link:
       return
     root = Path(os.environ.get("OPUS_CHINESE_STOP_STATE_DIR", str(Path.home() / ".claude/hooks/state/opus-chinese-stop")))
     fields = {name: payload.get(name) for name in ("session_id", "prompt_id", "transcript_path")}
@@ -211,18 +230,35 @@ def main():
     if user_text is None or not isinstance(anchor_id, str):
       log_decision(root, payload, "no_human_turn")
       return
-    if not user_wants_chinese(user_text):
-      log_decision(root, payload, "english_requested")
-      return
-    model = active_model(payload, transcript_model, user_time)
-    if model != OPUS:
-      log_decision(root, payload, "model:" + (model or "unknown"))
+    english_fire = False
+    if has_english:
+      if not user_wants_chinese(user_text):
+        if not has_backtick_link:
+          log_decision(root, payload, "english_requested")
+          return
+      else:
+        model = active_model(payload, transcript_model, user_time)
+        if model != OPUS:
+          if not has_backtick_link:
+            log_decision(root, payload, "model:" + (model or "unknown"))
+            return
+        else:
+          english_fire = True
+    if not english_fire and not has_backtick_link:
       return
     if not mark_once(root, session_id, anchor_id):
       log_decision(root, payload, "already_reminded")
       return
-    log_decision(root, payload, "reminded")
-    print(json.dumps({"hookSpecificOutput": {"hookEventName": "Stop", "additionalContext": REMINDER}}, ensure_ascii=False))
+    if english_fire and has_backtick_link:
+      log_decision(root, payload, "reminded")
+      msg = REMINDER + "另外請去掉 Markdown 連結外面的反引號（直接寫 [顯示文字](完整URL)），避免終端機超連結失效。"
+    elif english_fire:
+      log_decision(root, payload, "reminded")
+      msg = REMINDER
+    else:
+      log_decision(root, payload, "reminded_link")
+      msg = LINK_REMINDER
+    print(json.dumps({"hookSpecificOutput": {"hookEventName": "Stop", "additionalContext": msg}}, ensure_ascii=False))
   except (OSError, ValueError, TypeError, AttributeError, UnicodeError):
     return
 

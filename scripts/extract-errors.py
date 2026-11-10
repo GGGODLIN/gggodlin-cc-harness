@@ -206,12 +206,12 @@ for line in sys.stdin:
     buffer.append(line)
     stats["lines"] += 1
 
-    if not detected and len(buffer) <= 10:
+    if not detected:
         try:
             obj = json.loads(line)
             if obj.get("type") == "session" and "cwd" in obj:
                 detected = "pi"
-            elif obj.get("type") in ("user", "assistant"):
+            elif obj.get("type") in ("user", "assistant", "permission-mode", "file-history-snapshot", "queue-operation"):
                 detected = "claude"
             elif obj.get("type") in ("session_meta", "turn_context", "response_item", "event_msg"):
                 detected = "codex"

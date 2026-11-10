@@ -229,7 +229,7 @@ VERDICT: COMPLIANT | VIOLATIONS: <R 編號逗號列表>
 
 - **不恢復例行選題與模型詢問**：一般題直接開始、每題拍板後直接接下一題；只有 Step 0「強模型通知」命中時先停。清單標籤不能代替直接通知，也不能以避免打擾為由跳過已命中的通知。
 - **偵測查詢先窄後寬**（2026-07-11 首跑實證）：先用精確 pattern `grep -rl` 出檔案名單（快、輸出小），再對名單逐檔看命中行上下文判回音；不要一發寬字串全域 grep（工具名會出現在 skill 清單 / hook 文案，撈回 70KB 噪音）、不要 `grep -rh` 全文掃全目錄（2 分鐘 timeout）。
-- **jsonl invoke 偵測必排回音**（2026-07-05 check-my-stack：單格式 + 3 目錄系統性漏 35%；2026-07-10 systematic-debugging：天真 grep 10 個假命中）：雙格式以上 pattern（`"skill":"<name>"`、`Launching skill: <name>`、`command-name>/<name>`）+ 全目錄 `grep -rl ... ~/.claude/projects/`；排除 subagents/、排除編輯或 review 過該 entry / SKILL.md 本體的 session、排除 workflow script / bench / probe 模擬 session。
+- **jsonl invoke 偵測必排回音**（2026-07-05 check-my-stack：單格式 + 3 目錄系統性漏 35%；2026-07-10 systematic-debugging：天真 grep 10 個假命中）：先用 `ccsi search` 搭配雙格式以上 pattern（`"\"skill\":\"<name>\""`、`"Launching skill: <name>"`、`"command-name>/<name>"`）定位候選 session 檔，再對命中的單一 `.jsonl` 檔讀取上下文，嚴禁對 `~/.claude/projects/` 跑全目錄遞迴 `grep`；排除 subagents/、排除編輯或 review 過該 entry / SKILL.md 本體的 session、排除 workflow script / bench / probe 模擬 session。
 - **0 真實觸發 ≠ KILL**：glm-workflow-monitor（2026-07-03）、relay-workflow-monitor 皆因「機制未受考驗非壞掉」延期；plannotator（2026-06-13）走「轉事件驅動 + backstop 日期」變體。先判三格（沒出題 / 沒接上 / 測出沒用，判準見 Step 1 第 3 點）再選路——**2026-07-30 補**：原本只有兩格，plannotator 第二輪「有出題但從未想起開它」因此被歸進「測出沒用」並 KILL，但那是接線失敗、不是價值失敗。第三格就是為這個誤判開的。
 - **認領不能依賴 review 中途刷新**（2026-08-05 設計修正）：CC 不會可靠記得在研究過程持續改 ledger；每次認領的 marker 只寫一次、期限由 active.md 檔頭定義，真正防舊 session 回魂的是落檔前重驗 owner。
 - **active.md 超 50KB**：hook 會附 ℹ️ 提示；grep/sed 分段讀，結案時順手照 SOP 搬遷瘦身。

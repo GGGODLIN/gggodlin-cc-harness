@@ -120,13 +120,14 @@ class ReminderTests(unittest.TestCase):
     self.assertEqual(set(result), {'hookSpecificOutput'})
     self.assertEqual(result['hookSpecificOutput']['hookEventName'], 'UserPromptSubmit')
     text = result['hookSpecificOutput']['additionalContext']
-    self.assertIn('[auto-memory:jev:long]', text)
-    self.assertIn('## Tier 1:', text)
-    self.assertIn('先檢索既有 memory', text)
+    self.assertIn('[auto-memory:jev:short]', text)
+    self.assertIn('feedback_memory_cluster_maintenance.md 的 Tier 1', text)
+    self.assertNotIn('## Tier 1:', text)
+    self.assertIn('先查既有 memory／index', text)
     self.assertNotIn('Git closeout', text)
     self.assertIn('本輪使用者要求優先', text)
     self.assertNotIn('只回 "skip"', text)
-    self.assertEqual((common.state_directory() / 'long_injected_session-1').read_text().strip(), '1')
+    self.assertFalse((common.state_directory() / 'long_injected_session-1').exists())
     for prefix in ('checkpoint_', 'trigger_'):
       self.assertFalse((common.state_directory() / (prefix + 'session-1')).exists())
     self.assertEqual(common.rule_file().read_bytes(), original)
@@ -141,7 +142,7 @@ class ReminderTests(unittest.TestCase):
   def test_threshold_boundary(self):
     self.response['answers']['direct_nudge']['noul'] = 0.5
     self.invoke()
-    self.assertIn('[auto-memory:jev:long]', self.deliver())
+    self.assertIn('[auto-memory:jev:short]', self.deliver())
 
   def test_turn_dedup_and_stop_reentry(self):
     self.invoke()
@@ -176,7 +177,7 @@ class ReminderTests(unittest.TestCase):
                          capture_output=True, text=True, timeout=5, check=True)
     result = json.loads(out.stdout)
     self.assertEqual(result['decision'], 'block')
-    self.assertIn('[checkpoint:trigger:short]', result['reason'])
+    self.assertIn('[checkpoint:trigger:long]', result['reason'])
     self.assertNotIn('Git closeout', result['reason'])
 
   def test_refresh_boundary_and_compaction(self):
@@ -185,15 +186,19 @@ class ReminderTests(unittest.TestCase):
     self.entries += [assistant(self.final)]
     self.flush()
     self.invoke()
-    self.assertIn('[auto-memory:jev:short]', self.deliver())
+    first_short = self.deliver()
+    self.assertIn('[auto-memory:jev:short]', first_short)
+    self.assertIn('完整規範上次送出 @ turn 1', first_short)
     self.next_turn()
     self.invoke()
-    self.assertIn('[auto-memory:jev:long]', self.deliver())
+    self.assertIn('[auto-memory:jev:short]', self.deliver())
     newer = (datetime.now(timezone.utc) + timedelta(seconds=1)).isoformat()
     self.entries += [{'type': 'system', 'subtype': 'compact_boundary', 'uuid': 'compact-1', 'timestamp': newer}]
     self.next_turn('Another new reusable preference.')
     self.invoke()
-    self.assertIn('[auto-memory:jev:long]', self.deliver())
+    post_compact = self.deliver()
+    self.assertIn('[auto-memory:jev:short]', post_compact)
+    self.assertIn('尚無有效完整版注入紀錄；寫前先讀 feedback_memory_cluster_maintenance.md 的 Tier 1', post_compact)
 
   def test_rule_change_invalidates_shared_marker(self):
     common.mark_long('session-1', 1)
@@ -204,8 +209,10 @@ class ReminderTests(unittest.TestCase):
   def test_missing_rule_does_not_claim_full_injection(self):
     common.rule_file().unlink()
     self.invoke()
-    self.assertIn('Tier 1 段抽不到', self.deliver())
+    self.assertIn('尚無有效完整版', self.deliver())
     self.assertFalse((common.state_directory() / 'long_injected_session-1').exists())
+    self.assertFalse(common.mark_long('session-1', 1))
+    self.assertIn('Tier 1 段抽不到', common.reminder('long', '[test]'))
     self.assertIn('尚無有效完整版', common.reminder('short', '[test]'))
 
   def test_packet_repeat_dedup(self):
@@ -262,7 +269,7 @@ class ReminderTests(unittest.TestCase):
     self.invoke()
     self.entries += [user('Continue the original task.', 'human-2')]
     self.flush()
-    self.assertIn('[auto-memory:jev:long]', self.deliver())
+    self.assertIn('[auto-memory:jev:short]', self.deliver())
 
   def test_notifications_do_not_consume_pending(self):
     self.invoke()
@@ -271,7 +278,7 @@ class ReminderTests(unittest.TestCase):
                   {'prompt': 'meta', 'isMeta': True}, {'prompt': 'unknown', 'promptSource': 'unknown'}):
       self.assertEqual(self.invoke('deliver', **extra), '')
       self.assertIn('pending', json.loads(self.journal().read_text()))
-    self.assertIn('[auto-memory:jev:long]', self.deliver())
+    self.assertIn('[auto-memory:jev:short]', self.deliver())
 
   def test_human_sdk_source_pairs(self):
     for extra in ({}, {'origin': {'kind': 'human'}, 'turnOrigin': 'human', 'promptSource': 'typed'},
@@ -294,7 +301,7 @@ class ReminderTests(unittest.TestCase):
     # Native 2.1.289 sets this flag on a root streaming-SDK session with no agent_id.
     with patch.dict(os.environ, {'CLAUDE_CODE_CHILD_SESSION': '1'}):
       self.invoke()
-      self.assertIn('[auto-memory:jev:long]', self.deliver())
+      self.assertIn('[auto-memory:jev:short]', self.deliver())
     self.assertEqual(len(self.calls), 1)
 
   def test_secret_and_private_rejected_before_clipping(self):
@@ -334,7 +341,7 @@ class ReminderTests(unittest.TestCase):
     self.flush()
     self.assertEqual(self.invoke(cwd=str(work_cwd)), '')
     self.assertEqual(len(self.calls), 1)
-    self.assertIn('[auto-memory:jev:long]', self.invoke('deliver', cwd=str(work_cwd), prompt='Next work task in acme.'))
+    self.assertIn('[auto-memory:jev:short]', self.invoke('deliver', cwd=str(work_cwd), prompt='Next work task in acme.'))
     subagent_tx = self.home / '.claude/projects/personal/subagents/agent-1.jsonl'
     subagent_tx.parent.mkdir(parents=True)
     subagent_tx.write_text(self.transcript.read_text())
@@ -586,7 +593,8 @@ class ReminderTests(unittest.TestCase):
       else:
         os.mkfifo(marker)
       with self.assertRaises((OSError, ValueError)):
-        self.deliver()
+        common.mark_long('session-1', 1)
+      self.assertIn('[auto-memory:jev:short]', self.deliver())
       self.assertEqual(target.read_text(), 'unchanged')
       marker.unlink()
 

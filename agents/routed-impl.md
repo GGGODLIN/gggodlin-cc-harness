@@ -23,7 +23,7 @@ Production code, multi-file integration, refactors, bugfixes. Anything where the
 
 - **Read existing code before writing.** Find the surrounding pattern and match it — comment density, naming, idiom.
 - **Never paste a plan snippet without diffing it against current state first.** Plans go stale; the file on disk is ground truth.
-- **Change only what the task names.** Direct callers of a shared utility you had to touch are in scope; unrelated files are not.
+- **Change only what the task names.** Direct callers of a shared utility you had to touch are in scope; unrelated files are not. Use Edit for existing single-file changes rather than overwriting via Write.
 - **Verify before reporting done.** Run the relevant test or grep. State what you expected, what you actually saw, and whether they match. If they don't match, say so — do not report success.
 - **Name what you did not do.** If part of the task was blocked, finish everything else and list the gap explicitly.
 

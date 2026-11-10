@@ -109,7 +109,6 @@ DigUp（原作者試用中，用一支小 wrapper 包起來、掃描範圍由私
 - `hooks/review-spec-dual-permit.py`
 - `hooks/review-spec-yagni-permit.py`
 - `hooks/session-limit-nudge.sh`
-- `hooks/verify-audit-silent-log.sh`
 - `hooks/websearch-parallel-enforce.sh`
 - `hooks/workflow-monitor-nudge.sh`
 - `references/subagent-routing.md`
@@ -208,10 +207,6 @@ Herdr
 - `commands/pr-review.md`
 - `commands/review-spec.md`
 - `config/gpt-models.env`
-- `hooks/T1-claim-detect-local-first.sh`
-- `hooks/T1-evidence-level-detect.sh`
-- `hooks/T1-warning-check.sh`
-- `hooks/dispatch-obligation-nudge.py`
 - `hooks/memory-ripple-runtime.py`
 - `hooks/ticket-yagni-runner.py`
 - `hooks/ticket-yagni.py`

@@ -116,6 +116,27 @@
       "owner": "friction-review-state.py"
     },
     {
+      "path": "~/.claude/friction/doc-drift.md",
+      "kind": "state",
+      "threshold": [
+        {
+          "metric": "size",
+          "unit": "KB",
+          "operator": ">",
+          "value": 64
+        },
+        {
+          "metric": "friction_age_days",
+          "unit": "days",
+          "operator": ">",
+          "value": 90
+        }
+      ],
+      "action": "提醒把超過保留期的已折條目按季搬到 friction/archive/",
+      "retirement": "已折條目按季退場，主檔保留待折與近期已折",
+      "owner": "friction-review-state.py"
+    },
+    {
       "path": "~/.claude/skills/INVENTORY.md",
       "kind": "state",
       "threshold": [

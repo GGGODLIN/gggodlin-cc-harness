@@ -3,7 +3,7 @@ name: wizard
 description: Generate an interactive bash wizard that walks a human through steps only they can perform. Use when provisioning infrastructure, setting up credentials or CI secrets, walking an unfamiliar third-party dashboard, or running a one-off migration or cutover. Don't invoke this for steps the agent can perform itself, nor when the procedure has fewer than 4 human steps and no values to persist — list those steps in chat instead.
 upstream: mattpocock/skills
 upstream-path: skills/engineering/wizard/SKILL.md
-upstream-pinned: 6654f6b
+upstream-pinned: 4ae2317
 ---
 
 # Wizard
@@ -48,6 +48,7 @@ Hold the bar the template sets: open the URL before asking for its value, use `a
 
 ## 踩過的坑
 
+- 2026-11-04 graft 上游 `template.sh` 修正（Readline 行編輯、EOF 空輸入 `return 1`、`_clear` 防 `tput` 非零退出、`.env` `0600` 建立與 symlink 保留、`run_wizard` 函數包裹），保留本地 H1–H4 四塊安全補丁。
 - 2026-08-11 graft 上游 `wizard-no-minutes`（移除 `TOTAL_MINUTES`／time-remaining 整套），四塊本地補丁零衝突。**目前 pin 只看 frontmatter `upstream-pinned`，本節不記 hash。**
 - 2026-08-06 fork 自 mattpocock/skills v1.2.2（`8b36d4f`）。本地 template.sh 對上游打了四個補丁（B 組實測抓洞、8/8 test pass）：H1 無 TTY 直接 exit 64（防無人輸入時假成功寫空值）；H2 write_env 含空格／#／引號的值加雙引號轉義、拒絕換行、_existing 反解引號保 round-trip；H3 首次寫 `.env` 前驗 gitignore、未忽略要 confirm 否則 exit 65；H4 set_secret／set_var 一律顯式 `--repo`（`WIZARD_GH_REPO` 可覆寫）＋逐筆 confirm 帶 repo 與帳號名（雙帳號環境防推錯）。上游 template.sh 有更新時不可直接覆蓋、要 graft 保這四塊。
 - 規模門檻（description 也有）：少於 4 個人工步驟、或沒有值要落地 → 不生成，走 dispatch-and-verify 的文字清單出口。

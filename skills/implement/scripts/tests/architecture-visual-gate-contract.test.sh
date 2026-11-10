@@ -2,12 +2,20 @@
 set -uo pipefail
 
 SKILL="${IMPLEMENT_SKILL_PATH:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/SKILL.md}"
+REF="${IMPLEMENT_VISUAL_REF_PATH:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/references/architecture-visual-gate.md}"
+COMBINED="$(mktemp)"
+trap 'rm -f "$COMBINED"' EXIT
+if [ -f "$REF" ]; then
+  awk '{print} /references\/architecture-visual-gate\.md/ { while ((getline line < "'"$REF"'") > 0) print line }' "$SKILL" > "$COMBINED"
+else
+  cp "$SKILL" "$COMBINED"
+fi
 PASS=0
 FAIL=0
 
 check() {
   local label=$1 pattern=$2
-  if grep -qE "$pattern" "$SKILL"; then
+  if grep -qE "$pattern" "$COMBINED"; then
     printf 'PASS: %s\n' "$label"
     PASS=$((PASS + 1))
   else
@@ -18,7 +26,7 @@ check() {
 
 check_absent() {
   local label=$1 pattern=$2
-  if grep -qE "$pattern" "$SKILL"; then
+  if grep -qE "$pattern" "$COMBINED"; then
     printf 'FAIL: %s\n' "$label"
     FAIL=$((FAIL + 1))
   else
@@ -30,9 +38,9 @@ check_absent() {
 check_order() {
   local label=$1 first=$2 second=$3 third=$4
   local a b c
-  a=$(grep -nE "$first" "$SKILL" | cut -d: -f1 | head -1)
-  b=$(grep -nE "$second" "$SKILL" | cut -d: -f1 | head -1)
-  c=$(grep -nE "$third" "$SKILL" | cut -d: -f1 | head -1)
+  a=$(grep -nE "$first" "$COMBINED" | cut -d: -f1 | head -1)
+  b=$(grep -nE "$second" "$COMBINED" | cut -d: -f1 | head -1)
+  c=$(grep -nE "$third" "$COMBINED" | cut -d: -f1 | head -1)
   if [ -n "$a" ] && [ -n "$b" ] && [ -n "$c" ] && [ "$a" -lt "$b" ] && [ "$b" -lt "$c" ]; then
     printf 'PASS: %s\n' "$label"
     PASS=$((PASS + 1))
@@ -85,7 +93,6 @@ check 'blocked outcomes cannot become waiver or accepted' '不會變成 waiver �
 check 'shipping binds latest review and adapter receipt' '最新.*review-implement.*terminal outcome.*最新 adapter visual decision receipt.*同一最終.*head_sha'
 check 'rollback removes adapter runtime and receipts' 'rollback.*移除 Plannotator adapter.*runtime 變更.*receipts'
 check 'rollback preserves Archify evidence' '保留既有 Archify trial evidence'
-check 'rollback scripts belong to Ticket 05' 'rollback script 與 fixture.*Ticket 05'
 check 'artifact and architecture rejection are separate' 'artifact-inaccurate.*architecture-rejected'
 check 'code change invalidates both receipts' 'review-implement.*visual.*同時失效'
 check 'ship requires matching final SHA' '同一最終 `head_sha`'

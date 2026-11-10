@@ -59,14 +59,12 @@ It is a reference, not a product. You can install single pieces, but nothing gua
    - 防止 `cd && git ...` 污染後續工作目錄：[`install/hooks/cd-cwd-persistence-nudge.sh.md`](/install/hooks/cd-cwd-persistence-nudge.sh.md)
    - 攔截 zsh 下誤用 `$PIPESTATUS`：[`install/hooks/pipestatus-zsh-gate.py.md`](/install/hooks/pipestatus-zsh-gate.py.md)
    - 連續重跑同一驗證指令時提醒換角度：[`install/hooks/repeat-verify-reminder.sh.md`](/install/hooks/repeat-verify-reminder.sh.md)
-   - 攔截重複的 `TaskOutput` 輪詢：[`install/hooks/taskoutput-dedup-hook.py.md`](/install/hooks/taskoutput-dedup-hook.py.md)
    - 修改規則或新增 hook 時提醒對齊治理規範：[`install/hooks/gate-authoring-nudge.sh.md`](/install/hooks/gate-authoring-nudge.sh.md)、[`install/hooks/skill-description-gate.sh.md`](/install/hooks/skill-description-gate.sh.md)
 2. **規劃 → 實作 → 審查工作流組**（適合整組借鑑流程設計）：
    - 釐清模糊意圖與探索邊界：[`skills/align-intent/`](/skills/align-intent/SKILL.md) → [`skills/grill-me/`](/skills/grill-me/SKILL.md) → [`skills/wayfinder/`](/skills/wayfinder/SKILL.md)
    - 規格撰寫、審查與拆票：[`skills/to-spec/`](/skills/to-spec/SKILL.md) → [`commands/review-spec.md`](/commands/review-spec.md) → [`skills/to-tickets/`](/skills/to-tickets/SKILL.md)
    - 實作、TDD 守門與收尾審查：[`skills/implement/`](/skills/implement/README.md) ＋ [`install/hooks/matt-tdd-gate.sh.md`](/install/hooks/matt-tdd-gate.sh.md) → [`skills/review-implement/`](/skills/review-implement/SKILL.md) → [`commands/pr-review.md`](/commands/pr-review.md)（搭配 [`review-standards/`](/review-standards/catalog.md)）
 3. **宣稱證據與模型路由守門組**（部分需接 [`WIRING.md`](/WIRING.md) 的跨模型後端或判官 API）：
-   - 宣稱詞本地偵測與證據層級判官：[`install/hooks/T1-claim-detect-local-first.sh.md`](/install/hooks/T1-claim-detect-local-first.sh.md)、[`install/hooks/T1-evidence-level-detect.sh.md`](/install/hooks/T1-evidence-level-detect.sh.md)
    - Subagent 路由與高單價模型守門：[`references/subagent-routing.md`](/references/subagent-routing.md)、[`install/hooks/T2-routing-gate.sh.md`](/install/hooks/T2-routing-gate.sh.md)、[`install/hooks/fable-gate.sh.md`](/install/hooks/fable-gate.sh.md)
 4. **四大回饋帳本與跨壓縮守衛**：
    - 跨 session 兩層記憶提醒（背景小模型判官＋手動收尾檢查點）：[`install/hooks/auto-memory-jev.py.md`](/install/hooks/auto-memory-jev.py.md)、[`install/hooks/checkpoint-judge.sh.md`](/install/hooks/checkpoint-judge.sh.md)、[`examples/memory/`](/examples/memory/)
@@ -168,8 +166,8 @@ It is a reference, not a product. You can install single pieces, but nothing gua
 - [`examples/`](examples/) — 10 個檔案；內含 `friction/`、`memory/`、`tool-upgrade-notes/`、`trials/`、`wiki/`
 - [`folder-level/`](folder-level/) — 17 個檔案；內含 `.claude/`、`CLAUDE.md`
 - [`friction/`](friction/) — 1 個檔案；內含 `PROTOCOL.md`
-- [`hooks/`](hooks/) — 110 個檔案；內含 `T1-claim-detect-local-first.llm.test.sh`、`T1-claim-detect-local-first.sh`、`T1-claim-detect-local-first.test.sh`、`T1-evidence-level-detect.sh`、`T1-evidence-level-detect.test.sh`、`T1-evidence-level-fixtures/`、`T1-evidence-level-prompt-v2.txt`、`T1-system-prompt-v5d.txt`…（共 106 項）
-- [`install/`](install/) — 45 個檔案；內含 `cc-session-index/`、`compact-guard/`、`folder-level/`、`hooks/`、`output-styles/`、`workflows/`
+- [`hooks/`](hooks/) — 96 個檔案；內含 `T2-routing-gate.sh`、`T2-routing-gate.test.sh`、`agent-contract-gate-permit.sh`、`api-error-auto-continue.py`、`api-error-auto-continue.test.py`、`ask-explainer.py`、`ask-explainer.test.py`、`auto-memory-jev-question.json`…（共 96 項）
+- [`install/`](install/) — 43 個檔案；內含 `cc-session-index/`、`compact-guard/`、`folder-level/`、`hooks/`、`output-styles/`、`workflows/`
 - [`model-routing.env`](model-routing.env)
 - [`openspec/`](openspec/) — 3 個檔案；內含 `specs/`
 - [`output-styles/`](output-styles/) — 1 個檔案；內含 `Explanatory.md`
@@ -178,6 +176,6 @@ It is a reference, not a product. You can install single pieces, but nothing gua
 - [`rules/`](rules/) — 14 個檔案；內含 `common/`、`typescript/`
 - [`scripts/`](scripts/) — 100 個檔案；內含 `advisor-extract-context.py`、`agent-contract-command/`、`agent-contract-validator.definition.test.sh`、`agent-contract-validator.diagnostics.test.sh`、`agent-contract-validator.frontmatter.test.sh`、`agent-contract-validator.mcp-tools.test.sh`、`agent-contract-validator.mjs`、`agent-contract-validator.name.test.sh`…（共 86 項）
 - [`settings.json`](settings.json)
-- [`skills/`](skills/) — 213 個檔案；內含 `INVENTORY.md`、`absorb-pack/`、`agent-authoring/`、`agent-dispatch/`、`align-intent/`、`auto-choice/`、`brainstorm/`、`caveman/`…（共 43 項）
+- [`skills/`](skills/) — 215 個檔案；內含 `INVENTORY.md`、`absorb-pack/`、`agent-authoring/`、`agent-dispatch/`、`align-intent/`、`auto-choice/`、`brainstorm/`、`caveman/`…（共 42 項）
 - [`social-info/`](social-info/) — 76 個檔案；內含 `scripts/`、`tests/`
 - [`workflows/`](workflows/) — 8 個檔案；內含 `best-of-n-implement.js`、`failure-mode-daily.sh`、`local-analysis-flow.svg`、`local-analysis.js`、`skill-changes-daily.sh`、`skillevaluator-weekly.sh`、`tests/`

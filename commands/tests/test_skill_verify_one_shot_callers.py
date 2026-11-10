@@ -20,15 +20,11 @@ CALLERS = {
   "save-session": "commands/save-session.md",
   "absorb-pack": "skills/absorb-pack/SKILL.md",
   "auto-choice": "skills/auto-choice/SKILL.md",
-  "bitbucket-pr-mutation": "skills/bitbucket-pr-mutation/SKILL.md",
   "check-my-stack": "skills/check-my-stack/SKILL.md",
-  "deep-check": "skills/deep-check/SKILL.md",
   "e2e-explore-then-batch": "skills/e2e-explore-then-batch/SKILL.md",
-  "explain-diff": "skills/explain-diff/SKILL.md",
   "github-repo-research": "skills/github-repo-research/SKILL.md",
   "model-onboard": "skills/model-onboard/SKILL.md",
   "mutation-testing": "skills/mutation-testing/SKILL.md",
-  "pr-explain": "skills/pr-explain/SKILL.md",
   "research-before-answer": "skills/research-before-answer/SKILL.md",
   "wayfinder": "skills/wayfinder/SKILL.md",
 }
@@ -140,11 +136,6 @@ class FourStates(unittest.TestCase):
 
 class DownstreamDifferencesSurvive(unittest.TestCase):
   """統一四態不得抹掉各 caller 既有的下游差異。"""
-
-  def test_bitbucket_still_blocks_approval_without_a_pass(self):
-    text = read(CALLERS["bitbucket-pr-mutation"])
-    self.assertIn("never create approval", text)
-    self.assertIn("human approval", text)
 
   def test_pr_review_keeps_advisory_skip_and_per_rule_consistency(self):
     text = read(CALLERS["pr-review"])

@@ -179,7 +179,7 @@ Spec:
 
 合成完成後接「標準 Tier 1–4 共用收斂」，共用收斂完成才照呈現紀律 surface。**報告開頭第一段固定列「本輪跳過的 lens + 理由」**，無跳過就寫「無」——跳單沉默等於宣稱全派，no silent caps。
 
-想要**互動式**拷問而非自動 panel → 改去 `grill-me`（一句一句問）或 `grill-with-docs`（對既有 doc 互動壓測）；那是另一條路，不在這 command 內自動跑。
+想要**互動式**拷問而非自動 panel → 改去 `grill-me`（會自動在專案有 `openspec/glossary.md` 或 `openspec/decisions/` 時呼叫 `domain-modeling` 維護詞彙與決策）；那是另一條路，不在這 command 內自動跑。
 
 ## Tier 4 — 外部跨模型暗門（手動，高風險 spec 才用）
 
@@ -189,7 +189,7 @@ Spec:
 
 🔌 接線點：ChatGPT 網頁版席位 — 見 WIRING.md
 
-- **codex-rescue**：單 job（一次只跑一個）、**prompt 內硬性禁止開放式外查**（不准 WebSearch / WebFetch / 開 URL / 查 GitHub 星數）。T4 的 xhigh＋長 spec 一律視為可能超過 8–10 分鐘，照 `~/.claude/commands/pr-review.md` 的 canonical Run 段走 `subshell + nohup detach + rollout jsonl poll`；不要用 companion 自帶 background、Agent subagent 或 Bash `run_in_background` 直包。把 spec 當 prompt 要它讀一次就 adversarial 評，同 severity scale。（你的 codex 已配 `model = gpt-6-astra` + `model_reasoning_effort = ultra` = 旗艦，不用另指定 model；effort 比 model 更決定聰明度。）
+- **codex-rescue**：單 job（一次只跑一個）、**prompt 內硬性禁止開放式外查**（不准 WebSearch / WebFetch / 開 URL / 查 GitHub 星數）。T4 的 xhigh＋長 spec 一律視為可能超過 8–10 分鐘，照 `~/.claude/commands/pr-review.md` 的 canonical Run 段走 `subshell + nohup detach + rollout jsonl poll`；不要用 companion 自帶 background、Agent subagent 或 Bash `run_in_background` 直包。把 spec 當 prompt 要它讀一次就 adversarial 評，同 severity scale。（你的 codex 已配 `~/.codex/config.toml` 的 `model = gpt-6.1-sol` + `model_reasoning_effort = xhigh` = 旗艦，不用另指定 model；effort 比 model 更決定聰明度。）
 - **agy Gemini Flash**——預設外部第二路；model id 只從 `~/.claude/model-routing.env` 的 `GEMINI_FLASH_MODEL` 讀取（trial 用 3.5 Flash 結案收編，後續升版不再分散寫進 command）：
   ```bash
   GEMINI_FLASH_MODEL=$(bash "$HOME/.claude/scripts/model-routing.sh" GEMINI_FLASH_MODEL)

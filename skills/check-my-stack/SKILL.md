@@ -37,7 +37,7 @@ Before reading the tool's README / feature list, dispatch a **deep-explore agent
 Then reconcile **only the load-bearing rows** — the 2-4 rows whose maturity will be cited as a divisor in Block 2 or in the verdict. Reconciling the whole table is expensive and invites rubber-stamping; a stale row no decision rests on is harmless. Probe by capability type:
 
 - CLI tool → `scripts/reconcile.sh <name>` (install state across PATH/uv/npm/brew/pipx + self-stack references)
-- skill / agent → session jsonl invoke counts (file existence never counts as adoption — agents marked "mature" have turned out to have 0 spawns)
+- skill / agent → session jsonl invoke counts (file existence never counts as adoption — agents marked "mature" have turned out to have 0 spawns; locate candidate sessions via `ccsi search '"[Skill]" "<skill-name>"' -k 20` or `ccsi search '"[Agent]" "<agent-name>"' -k 20` — plus `~/.claude/logs/T2-routing-gate-audit.jsonl` as a dispatch hint for agents — then verify structured `tool_use` entries on the matched session files; do not run unbounded `find ~/.claude/projects` full-tree grep scans, and do not count prose mentions or denied routing rows as invocations; if the full population cannot be bounded, label "evidence of use found, total count unverified")
 - hook → its audit/trace log
 - scheduled job → launchd/cron last-run
 
@@ -58,10 +58,13 @@ For each tool capability, ask "does the user already have an equivalent, and at 
 The tool's own marketing frame is only one candidate. Search the user's stack for the frame where the tool would land best. Three guardrails:
 
 1. A frame must anchor to a **named Block 1 capability area** — invented frames can't be checked against anything.
-2. Every candidate frame passes the **pain-vs-absence check**: name which Block 1 gap it closes or which divisor it upgrades. An uncovered area nobody has felt as pain is absence, not a gap — "the tool covers X and you don't have X" is not by itself a reason to adopt.
+2. Every candidate frame passes the **pain-vs-absence check**: name which Block 1 gap it closes or which divisor it upgrades. An uncovered area nobody has felt as pain is absence, not a gap — "the tool covers X and you don't have X" is not by itself a reason to adopt. Inferring pain from a text gap in a `SKILL.md` or rule file ("your doc doesn't mention X") or from unattributed repo commits produces false-positive recommendations that collapse on audit. Before marking any frame or candidate as `Pain`, verify against the user's actual history:
+   - Query the four local incident and behavior stores (`~/.claude/references/failure-mode-taxonomy.md`, `~/code/social-info/reports/local-analysis/retro-accumulation/records.jsonl`, `~/code/social-info/reports/local-analysis/session-audit/state.sqlite`, `~/.claude/friction/*.md`) and relevant runtime logs; record the exact hit count and case IDs.
+   - If citing project `git log` commits as evidence of pain, verify commit authorship (`git log --format="%h %an <%ae> %ad %s"` or `git blame`) — commits written by teammates or upstream authors before fork do not count as the user's pain.
+   - When the user's verified incident count is `0` and current safeguards have no gap, state `"rule text omits X, but 0 real user incidents"` and classify as `Absence` (default: do not adopt or extract).
 3. At most one alternative frame beyond the tool's own; "none found" is a legal and common answer.
 
-Lesson this step exists for: graphify's winning frame (brownfield structural signal) was never proposed during its analysis — the user hit it themselves 12 days after a "definitive" rejection. Done → Step 5.
+Lesson this step exists for: graphify's winning frame (brownfield structural signal) was never proposed during its analysis — the user hit it themselves 12 days after a "definitive" rejection. Done when every frame in Block 3 is anchored to Block 1 and any `Pain` claim cites verified user incident counts and case IDs → Step 5.
 
 ### Step 5 — Draft the verdict direction; extraction hunt on rejection drafts
 
@@ -69,9 +72,13 @@ Draft where this is heading: adopt / trial / extract / watch-defer / landscape. 
 
 - Minimum protocol: read README / API surface / examples / config / hooks / CLI entrypoints.
 - Output three columns per candidate: `stealable mechanism / graft point in the user's stack / reason rejected`.
+- Every candidate that is **not** rejected (i.e. proposed for `extract`, or recommended anywhere in `先用白話回答` / `Verdict` prose as "順手借鑑／補進某檔案") must pass three checks in its row or accompanying prose:
+  1. **Empirical, unresolved user incident denominator**: >0 verified user incidents (with case IDs from the four local incident stores in Step 4, or user-authored commits verified via `git blame` / `git log --format="%ae"`) that are **not already prevented or solved by an existing mechanism in the user's stack**. `0` user incidents, or historical incidents already solved by the active stack (`Quotient ≈ 0`) → reject as absence/covered, even if a rule file lacks the literal sentence.
+  2. **Mechanism-level catchability**: the proposed graft point can actually detect or prevent the user's real incidents at runtime/review time (e.g., a static diff checklist cannot compute rendered font pixel widths; if existing runtime E2E or lock mechanisms already catch it and the proposed rule cannot, reject the candidate).
+  3. **Active wiring target**: the graft point is an adoption-verified (`mature` or `mature+automated` in Block 1) high-frequency workflow entrypoint — or `/deep-check` for heavy full-repo checks — rather than a 0-invoke file or a standalone command the user must remember to run. Do not reject a heavy mechanism solely because it is tedious for the AI to run; if it solves verified user pain, split it into a lightweight daily check wired into an active workflow plus a full check wired into `/deep-check`. Never set Verdict to `landscape` while sneaking a casual borrow recommendation ("順手補進某檔") into `先用白話回答`.
 - Closed-source or no public source → downgrade to API-level / architecture-concept assessment and say so (guessing at internals produces hallucinated steals).
 
-Lesson: ocr's "the deterministic layer can't be stolen" flipped to "it's the easiest part to steal" only after the user pushed. The hunt is cheap; re-running the analysis after the user pushes is not. Done → Step 6.
+Lesson: ocr's "the deterministic layer can't be stolen" flipped to "it's the easiest part to steal" only after the user pushed. The hunt is cheap; re-running the analysis after the user pushes is not. Done when every Block 4 candidate either states its rejection reason or records verified user incident count (>0 + author-checked IDs), catchability proof, and an adoption-verified graft point → Step 6.
 
 ### Step 6 — Verdict
 
@@ -92,7 +99,7 @@ Lesson: ocr's "the deterministic layer can't be stolen" flipped to "it's the eas
 5. **Symmetric evidence obligations** — the adoption-first posture must not become an over-recommendation machine, so action verdicts carry their own paperwork:
    - rejection (ambiguous zone): show the work — frames tried, test output, extraction three-columns — plus "what evidence would overturn this".
    - trial: KPI + review date + kill condition + register the H2 entry in `~/Desktop/projects/.claude/trials/active.md` (`## <name> (YYYY-MM-DD)`) yourself；新 entry 只在 H2 下留 `started`／`status`／`detail` 三個索引欄位，長段寫 `trials/active/<slug>-<started>.md`，detail 缺失就停並回報 — 未登記的 trial 沒有 review reminder。
-   - extract: named file/mechanism + graft point + next action. "Worth stealing" with no landing site is not an extract verdict.
+   - extract: named file/mechanism + adoption-verified graft point + verified user incident count (>0 with case IDs and author check from Step 4–5) + proof that the graft point catches those incidents + next action. "Worth stealing" with no landing site or 0 verified user incidents is not an extract verdict.
 6. **Action exit + ledger write-back** (both are steps, not afterthoughts):
    - Close with "the cheapest path to value" or "the test that would settle it". "None — overturn condition: X" is a legal value; Step 0 fast-kills skip the action path entirely (padding an honest kill makes the tool look more useful than the arithmetic says).
    - Write the verdict back to the precedent log in frame-scoped format. This skill **auto-writes** — a deliberate exception to the ask-first memory convention, because the graphify ledger sat stale for 7 weeks under ask-first and misled a later session. One guard: if this run is a bench / probe / simulation (the prompt supplied fabricated inventory facts, or says "測試環境"), skip the write-back and state that — a synthetic verdict in the real ledger is a fabricated precedent that later sessions will cite. trial/extract entries get `pending-outcome` + a pointer to their follow-up ledger. Re-evaluating a tool under a new frame requires a stated delta (what changed on the tool side or the stack side); 3 frame-scoped rejections + zero residuals → mark the tool `exhausted` (soft seal — new delta evidence reopens). Keep rows short; details go to a `[[reference_*]]` file. Full format rules: memory 帳本記錄格式 section (SSOT).
@@ -129,7 +136,9 @@ R3【adoption 行為證據】maturity / adoption 判斷是否有行為證據支�
 
 R4【結構完整】報告是否照 output-template 順序完整：先用白話回答 → Block 1 → Block 2 → Block 3 → Block 4 → Gate Ledger → Verdict；白話開頭是否依序含六項（結論／它是什麼／跟你現有的差在哪／用了會得到什麼／代價／依結論二選一），且結論直接回答原問句，各 block 該有的表格欄位齊全？（例外一：Step 0 fast-kill 短版 = 白話回答 + Gate Ledger + Verdict，Gate Ledger 的 Step 0 行需載明 qualification。例外二：narrow-scope 短版 = 白話回答 + 最小帳（範圍限定 + 跳過的 gate 一行、Verdict 依據一行）。例外三：退役／缺口盤點路徑 = 聊天主報告含 `缺什麼／哪些已對應／退役前做哪三件`，同一草稿另含完整 Blocks 1–4、Gate Ledger 與 Verdict 作證據副檔；任一部分缺席 = FAIL。）
 
-R5【anti-pattern】(a) Gate Ledger 的 testing triage 標 `Runnable now` 但 Test output 是 n/a / 空 = FAIL（paper verdict while runnable）；(b) 報告任何地方把 star / fork / i18n / sponsor badge 數字當能力證據引用 = FAIL。
+R5【anti-pattern】(a) Gate Ledger 的 testing triage 標 `Runnable now` 但 Test output 是 n/a / 空 = FAIL（paper verdict while runnable）；(b) 報告任何地方把 star / fork / i18n / sponsor badge 數字當能力證據引用 = FAIL；(c) 報告任何位置（含 `先用白話回答` 第 1／6 項、Block 3 判 `Pain`、Block 4 留未拒候選、或 Verdict 判 `adopt` / `trial` / `extract`，包含 Verdict 寫 `landscape` 卻在白話段建議「順手借鑑／補進某檔案」）只要建議採納或借鑑，未同時附齊三項實證即 FAIL：① 本機真實事故與行為庫（`failure-mode-taxonomy.md`、`retro-accumulation/records.jsonl`、`session-audit/state.sqlite`、`friction/*.md`）或真實運行日誌有 `>0` 筆**尚未被既有防線解決**的本人事故（附案例 ID）；② 若引 `git log` / commit 為痛點證據，經 `git log --format="%ae"` 或 `git blame` 確認屬使用者本人而非同事或上游舊碼；③ 擬接線落點（graft point）具 adoption 證據且在執行機制上真能攔住該類本人事故。僅憑「某規則檔／SKILL.md 沒寫這句話」的文字缺口、未驗作者的 commit、拿已被既有 stack 解決的歷史舊案當痛點、或落點攔不住本人真實事故卻建議借鑑 = FAIL（實戰 0 發或已被既有防線解決時，明標 `Absence` 且全篇不提借鑑建議 = PASS）。
+  - R5(c) 明顯 FAIL anchor：「`software-factory/SKILL.md` 沒寫 JSON 收據 `NaN` 消毒規則，且 repo `git log` 搜到 3 筆 state 修正 commit → Block 3 判 Pain、Verdict 判 extract 進 `prototype/SKILL.md`」（未查四大事故庫本人次數、未驗 commit 作者是否本人、且落點 0 invokes 攔不住該問題）。
+  - R5(c) 明顯 PASS anchor：「查四大事故庫與工廠運行日誌，本人收據寫壞事故 0/18 起，repo 內 3 筆 commit 經 `git log --format='%ae'` 確認為上游舊碼 → 判 Absence、Verdict 判 landscape」或「查 `records.jsonl` 命中本人真事故 3 起（附 ID）、`git blame` 確認本人 commit，擬接進 `adoption-verified` 的 `implement` Step 6 可在發生點攔截 → 判 Pain、Verdict 判 extract」。
 
 三態判定與白名單：
 
@@ -176,7 +185,7 @@ Verify 結果處理：退役／缺口盤點路徑的 self-verify 狀態只寫進
 
 - 全 PASS → 進 Step 8，訊息末尾附一行「🔎 self-verify: COMPLIANT (5/5)」
 - NEEDS_HUMAN_REVIEW（全部非 PASS 條目都落在白名單）→ 報告照發（照進 Step 8），末尾標「🔎 self-verify: COMPLIANT — NEEDS_HUMAN_REVIEW R#（白名單第 N 項：<一句話>）」。**不要為了消除這條而在報告裡補寫實際上取不到的內容**——證據結構性取不到就如實留著讓使用者判，硬掰一句話滿足規則是繞過驗證而不是通過驗證
-- 任一 FAIL 且已修正 → **先修報告再進 Step 8**（補 probe 輸出 / 補 Gate Ledger 行 / 改回誠實 maturity 標籤 / 重排 block），修完不重驗、在 Step 8 訊息末尾如實列出「🔎 self-verify: FIXED_AFTER_AUDIT — R#（…）」並明寫「未經第二次獨立稽查」
+- 任一 FAIL 且已修正 → **先修報告再進 Step 8**（補 probe 輸出 / 補 Gate Ledger 行 / 改回誠實 maturity 標籤 / 重排 block；若本回合另有含相同錯誤主張的證據副檔、評估快照或記憶帳本列，必須先以 Edit/Write 同步修正該檔案再交付），修完不重驗、在 Step 8 訊息末尾如實列出「🔎 self-verify: FIXED_AFTER_AUDIT — R#（…）」並明寫「未經第二次獨立稽查」
 - 任一 FAIL 且修不掉 → 末尾標「🔎 self-verify: FAILED — R#（缺口）」，並把該條支撐的判斷從 Verdict 刪除或收窄成「證據不足、無法判定」，不得保留原結論
 - Verify subagent 失敗（timeout / 空輸出 / 格式錯誤 / agent error）→ 照進 Step 8、末尾標「🔎 self-verify: SKIPPED (agent error)」，不要靜默省略
 - 政策禁派 Agent（system prompt 出現 `Do not call the AgentTool unless the user requested it` 一類禁令）→ 改由 main 依同一份 rubric inline 逐條判，末尾照常標 self-verify 行並加註「inline 執行」，證據副檔寫明降級原因。降級只換執行者、不換標準：每條仍要判、仍要附證據句，判不出來標 FAIL 或 EVIDENCE-UNAVAILABLE，不得整段省略或改標 SKIPPED
@@ -209,6 +218,8 @@ If those personal feedback memories exist, recall them by grepping the memory st
 - ❌ Assigning priority labels before the Step 1 inventory has run
 - ❌ Treating star count / fork count / i18n / sponsor badges as evidence of capability
 - ❌ Calling something "fills a gap" when it fails Step 4's pain-vs-absence check (absence is not pain)
+- ❌ Inferring user pain from a text gap in a `SKILL.md` or rule file ("your doc doesn't mention X") or from unattributed teammate/upstream commits without verifying the four local incident stores and `git blame` authorship
+- ❌ Proposing an extract graft point that has 0 real invocations or structurally cannot catch the user's actual incidents (e.g. static diff checklist for rendered pixel-width overflow)
 - ❌ Citing a sibling or precedent case that was not actually retrieved in Step 2 (confabulated calibration to fill the template slot)
 - ❌ Rejecting in the ambiguous zone without the challenge pass, or with Gate Ledger rows missing
 - ❌ Shipping a paper verdict while the triage says `Runnable now`

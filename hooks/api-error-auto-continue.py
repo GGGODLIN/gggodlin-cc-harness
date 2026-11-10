@@ -2,7 +2,7 @@
 # 提示型 hook：互動 session 因可重試的 API 錯誤結束回合時，經 Herdr 在原 pane 代打接續句。
 # 不承諾辨認所有暫時性錯誤，只認下方白名單；判不出來就什麼都不做（不打字）。
 # 不保證接續後會成功：15 分鐘串流上限類的斷線，重試仍可能再撞同一上限，由連續上限止損。
-# 不防使用者正在輸入時的字元交錯；送字前只確認 pane 內是同一個 session 且處於 idle/done。
+# 不防使用者正在輸入時的字元交錯；送字前只確認 pane 內是同一個 session 且處於可輸入狀態（見 HC_READY_STATES）。
 # 停用：touch ~/.claude/state/api-error-auto-continue/DISABLED，或設環境變數 CC_AUTO_CONTINUE=0。
 # 本檔在契約測試底下：python3 ~/.claude/hooks/api-error-auto-continue.test.py
 import json
@@ -22,6 +22,9 @@ SEND_DELAY_SECONDS = 3
 RATE_LIMIT_DELAY_SECONDS = 30
 MAX_RATE_LIMIT_DELAY_SECONDS = 960
 READY_POLL_SECONDS = 15
+# Herdr App 在回合因 API 錯誤結束後把 terminal 標成 error（prompt 仍可輸入）；少了它，
+# 這支 hook 觸發的正是 error 狀態，hc 路徑會等滿輪詢時間後一律 skip_not_ready。
+HC_READY_STATES = ("idle", "done", "error")
 RETRYABLE_TYPES = {"server_error", "overloaded"}
 # 中繼站在上游串流沒送完就斷線時固定回這句，CC 把它歸成 error=unknown
 STREAM_CUT_MARKER = "stream disconnected before completion"
@@ -279,7 +282,7 @@ def send(pane, session_id, transcript, delay=None):
         log({"event": "send", "session": session_id, "action": "skip_session_mismatch", "pane": pane})
         return
       status = (info.get("status") or {}).get("state")
-      if sess_state == "match" and status in ("idle", "done"):
+      if sess_state == "match" and status in HC_READY_STATES:
         if disabled():
           log({"event": "send", "session": session_id, "action": "disabled", "pane": pane})
           return 0

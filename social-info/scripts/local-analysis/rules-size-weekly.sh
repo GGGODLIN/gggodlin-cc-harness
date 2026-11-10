@@ -32,6 +32,7 @@ CLAUDE_MD="$CLAUDE_HOME/CLAUDE.md"
 CLAUDE_CAP="${RULES_SIZE_CLAUDE_CAP:-14000}"   # 14KB（2026-09-22 起）
 RULE_CAP="${RULES_SIZE_RULE_CAP:-9728}"        # 9.5KB
 TOTAL_CAP="${RULES_SIZE_TOTAL_CAP:-46080}"     # 45KB
+ASSET_CAP="${RULES_SIZE_ASSET_CAP:-35840}"     # 35KB（大型 workflow/skill/command 參考門檻，不單獨觸發 OVER）
 
 # 零使用候選清單（唯讀、不呼叫模型）：state 與 rules repo 走 session-audit.py 的 production 預設。
 # python 不能用 /usr/bin/python3（3.9，session-audit.py 要 3.11+）。
@@ -45,9 +46,10 @@ ZERO_ARGS=(zero-use)
   echo "=== rules-size weekly started: $(date) ==="
 
   VIOLATIONS=$(mktemp)
+  ASSET_VIOLATIONS=$(mktemp)
   ZERO_OUT=$(mktemp)
   ZERO_ERR=$(mktemp)
-  trap 'rc=$?; rm -f "$VIOLATIONS" "$ZERO_OUT" "$ZERO_ERR"; exit $rc' EXIT
+  trap 'rc=$?; rm -f "$VIOLATIONS" "$ASSET_VIOLATIONS" "$ZERO_OUT" "$ZERO_ERR"; exit $rc' EXIT
   TOTAL=0
 
   check_file() {
@@ -61,9 +63,23 @@ ZERO_ARGS=(zero-use)
     fi
   }
 
+  check_asset() {
+    local f="$1" cap="$2"
+    [ -f "$f" ] && [ ! -L "$f" ] || return 0
+    local size
+    size=$(wc -c < "$f" | tr -d ' ')
+    if [ "$size" -gt "$cap" ]; then
+      echo "| \`$f\` | $size | $cap | 超 $((size - cap)) bytes |" >> "$ASSET_VIOLATIONS"
+    fi
+  }
+
   check_file "$CLAUDE_MD" "$CLAUDE_CAP"
   for f in "$CLAUDE_HOME"/rules/common/*.md "$CLAUDE_HOME"/rules/external/*.md; do
     check_file "$f" "$RULE_CAP"
+  done
+
+  for f in "$CLAUDE_HOME"/commands/*.md "$CLAUDE_HOME"/skills/*/SKILL.md "$CLAUDE_HOME"/workflows/*.js; do
+    check_asset "$f" "$ASSET_CAP"
   done
 
   TOTAL_LINE=""
@@ -72,6 +88,7 @@ ZERO_ARGS=(zero-use)
   fi
 
   HIT_COUNT=$(wc -l < "$VIOLATIONS" | tr -d ' ')
+  ASSET_HIT_COUNT=$(wc -l < "$ASSET_VIOLATIONS" | tr -d ' ')
 
   # zero-use 失敗不讓週報整份失敗：記原因、報告照常產生。失敗也不靜默，否則這段會無聲消失。
   ZERO_COUNT=""
@@ -122,6 +139,16 @@ ZERO_ARGS=(zero-use)
         echo "⚠️ 零使用清單產生失敗：$ZERO_FAIL"
       else
         cat "$ZERO_OUT"
+      fi
+      if [ "$ASSET_HIT_COUNT" -gt 0 ]; then
+        echo ""
+        echo "## 📦 大型 Workflow／Skill／Command 瘦身候選（${ASSET_HIT_COUNT}，> ${ASSET_CAP} bytes）"
+        echo ""
+        echo "此表僅供參考，不單獨觸發週報超標；想對單一大型資產做結構體檢與瘦身，可執行 \`/rules-slim <檔名或名稱>\`。"
+        echo ""
+        echo "| 檔案 | 現況 bytes | 參考門檻 | 超出量 |"
+        echo "|---|---|---|---|"
+        cat "$ASSET_VIOLATIONS"
       fi
     } > "$OUT"
     echo "violations=$HIT_COUNT total=$TOTAL → report written"

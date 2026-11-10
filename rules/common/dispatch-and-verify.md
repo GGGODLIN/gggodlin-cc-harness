@@ -36,7 +36,7 @@ Main session 預設只做三件事：
 
 規模判準（治 overinvestment）：簡單事實查證 1 個 agent（3-10 tool calls）、直接對比 2-4 個（各 10-15）、複雜研究/全量掃描才 10+。fan-out 前先問「這題需要幾個」，不是預設開滿。
 
-派工後先做不相依工作，禁止輪詢（`implement` 的 20 分鐘單次 `WORKER-WATCHDOG` 除外）。Claude Code 保留 Agent／TaskOutput 背景通知語意；Codex 已批准必要結果 pending、下一步受阻且無其他工作時，留在 active turn 用 `wait_agent` 有界等待，不 final 等通知開新 turn。timeout 不算完成或取消，仍必要就續等、不因此 `close_agent`；收到結果立即整合續做。僅任務已無需、範圍改變或方向錯誤／不安全時中止 running agent。
+派工後先做不相依工作，禁止輪詢（`implement` 的 20 分鐘單次 `WORKER-WATCHDOG` 除外）。僅任務已無需、範圍改變或方向錯誤／不安全時中止 running agent。
 
 ## Don't dispatch when
 
@@ -98,7 +98,7 @@ Main session 預設只做三件事：
 
 1. **不可逆 / 破壞性動作且未被既有授權涵蓋**：對照 `git-workflow.md`「仍要 confirm」清單；工作 repo 無 vibe coding 授權、範圍更窄
 2. **解法需要動使用者沒提到的系統邊界（scope 變更）**；同 repo 內順著原請求影響面的呼叫端不算
-3. **goal-gen 五類 human blocker**：sudo / 需要使用者本人在場的動作（macOS 權限視窗、鎖手機、實體接線）/ 互動式 auth / sensitive credential 設定 / 系統升級 → Claude 結構性做不到、列出具體動作（含命令 / 路徑）等使用者。有工具可操作的 GUI（LCU、iPhone 鏡像）不算 blocker：agent 自己操作、自己驗，不推回使用者；例外是使用者要親自體驗的 UX 項目（trial global-gui-not-a-blocker，2026-10-21 review）。有非互動 setter 的 config 變更 → 先查三點再說做不到（[[feedback_dont_overapply_interactive_cli_rule]]）
+3. **goal-gen 五類 human blocker**：sudo / 需要使用者本人在場的動作（macOS 權限視窗、鎖手機、實體接線）/ 互動式 auth / sensitive credential 設定 / 系統升級 → Claude 結構性做不到、列出具體動作（含命令 / 路徑）等使用者。有工具可操作的 GUI（LCU、iPhone 鏡像、`ssh`／排程工作可操作的遠端機器）不算 blocker：agent 自己操作、自己驗，不推回使用者；例外是使用者要親自體驗的 UX 項目。有非互動 setter 的 config 變更 → 先查三點再說做不到（[[feedback_dont_overapply_interactive_cli_rule]]）
 4. **修正額度用盡 + 換路仍不過**：接 subagent-routing.md「額度用盡四選一」的出口 4 → 帶完整失敗軌跡問（試過什麼、為什麼排除、剩什麼選項），不要只丟「做不出來」
 
 反例通則（不問直接做）：動作可逆（git 可回復 / 檔案可還原）且是順著原請求的下一步 → 不問。「要不要我繼續？」「我可以開始了嗎？」這類問句一律禁止。

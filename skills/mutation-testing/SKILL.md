@@ -166,7 +166,7 @@ Skill 執行資料：
 
 R1. Baseline 全綠：Step 1 有記錄目標 test PASS 且 count 符合預期
 R2. Mutate 範圍收斂：mutate 範圍（conf 的 array 或 CLI 的 --mutate）只列這次改動檔、沒拉整個 src/
-R3. 每個 survived 有分類：清單覆蓋所有 survived mutant、每個標 A/B/C/D
+R3. 每個 survived 有分類：清單覆蓋所有 survived mutant、每個標 A/B/C/D 其一（允許全部屬於同一類，不要求四類皆出現）
 R4. B/C 分類有原因與落點原文：每個 B/C mutant 都有一行理由，且上方「B/C 類理由落點原文」已直接貼出原始碼 disable comment 或（repo 未裝 Stryker／慣例不收 comment 時）票檔／活規格／收據中的實際段落原文；僅在清單自稱已寫入、只填路徑或寫「略」而未貼出落點原文（且未宣告 AUDIT_INPUT_MODE: FILE_SNAPSHOT）一律判 FAIL
 R5. Rerun 有實跑：Step 5 有 rerun stryker、score 有變化或明確理由不變
 R6. 沒偷分數且附測試 diff 原文：A 類補測已在上方「A 類新增測試 diff 原文」貼出實際測試 diff，確認 assertion 補在 test、沒用 test.skip / mock 掩蓋，且等價判定走 R4 的合法落點；有 A 類卻只填路徑、寫「略」或未貼出測試 diff 原文（且未宣告 AUDIT_INPUT_MODE: FILE_SNAPSHOT）一律判 FAIL

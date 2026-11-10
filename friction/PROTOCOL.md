@@ -39,6 +39,7 @@ CC 執行過程的摩擦（卡住、繞路、重複踩坑、規則沒被遵守�
 
 - **有主摩擦**（屬於某個 skill / command / agent / hook）→ 該機制目錄下的 `friction-log.md`（固定檔名）。command / agent / hook 在 `~/.claude/` 下是平檔、沒有自己的目錄，一律用 `~/.claude/skills/<name>/friction-log.md`，該目錄不需要 `SKILL.md`。有主摩擦不得落在 `~/.claude/friction/`
 - **無主摩擦**（工作流級、跨機制）→ `~/.claude/friction/workflow-general.md`
+- **文件與程式碼不一致**（agent 回報某個 repo 的文件跟現有程式碼對不上）→ `~/.claude/friction/doc-drift.md`，由 `/self-closeout` 第 0b 步寫入；折入＝把那份文件改對，落點見該檔開頭
 - 新建或首次接入本協議的檔案固定使用 `## 待折`、`## 休眠` 與 `## 已折／已否決` 三段；既有檔案若仍用 `## 已折 / 已否決`，處理前先正規化標題，不另開第三個已折段。`## 休眠` 缺席時視為空，處理該檔前補上
 - 沒有 `## 待折` 的舊摩擦檔不在掃描範圍；下次該機制 append 時先補固定段，再把新紀錄寫入待折
 - 折入後不刪原紀錄，逐筆完整搬到已折段並附日期、歸因紀錄與落點；分群只用於提案，不用短標識取代原文

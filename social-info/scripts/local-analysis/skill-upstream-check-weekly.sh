@@ -191,11 +191,12 @@ PY
       fm_behind=$((fm_behind + 1))
       continue
     fi
+    up_dir=$(dirname "$up_path")
     cmp_files=$(gh api "repos/$up_repo/compare/$up_pin...$up_branch" --jq '.files[].filename' 2>/dev/null) || cmp_files="__CMP_FAIL__"
     if [ "$cmp_files" = "__CMP_FAIL__" ]; then
       echo "- ⚠️ **${sk_name}** — compare 失敗（pinned \`${up_pin}\` 可能已不在上游、或 API 失敗），人工確認" >> "$LOG_FILE"
       fm_behind=$((fm_behind + 1))
-    elif printf '%s\n' "$cmp_files" | grep -Fxq "$up_path"; then
+    elif printf '%s\n' "$cmp_files" | awk -v p="$up_path" -v d="$up_dir/" '$0 == p || (d != "./" && index($0, d) == 1) { found=1; exit } END { exit !found }'; then
       echo "- ⬆️ **${sk_name}** — 上游有未對賬變更（只看 \`${up_path}\`；對賬後推進 upstream-pinned）: https://github.com/${up_repo}/compare/${up_pin}...${up_branch}" >> "$LOG_FILE"
       fm_behind=$((fm_behind + 1))
     else

@@ -211,7 +211,6 @@ LOGDIR="${LOGDIR:-$(dirname "$BRIEF")/watch-logs}"
 mkdir -p "$LOGDIR" || fail "could not create log directory: $LOGDIR"
 
 HC_BIN="${HC_BIN:-hc}"
-HERDR_APP_BIN="${HERDR_APP_BIN:-herdr-app}"
 
 HERDR_ANY=0
 if [ -n "${HERDR_PANE_ID:-}" ] || [ -n "${HERDR_WORKSPACE_ID:-}" ]; then
@@ -445,10 +444,7 @@ start_herdr() {
 }
 
 cleanup_hc_worker() {
-  local pane="${1:-}" tab="${2:-}"
-  if [ -n "$tab" ] && [ "$tab" != "$pane" ]; then
-    "$HERDR_APP_BIN" do tab.close --id "$tab" --confirmed true >/dev/null 2>&1 || true
-  fi
+  local pane="${1:-}"
   if [ -n "$pane" ]; then
     "$HC_BIN" kill "$pane" >/dev/null 2>&1 || true
     "$HC_BIN" rm "$pane" >/dev/null 2>&1 || true
@@ -482,7 +478,7 @@ print("; ".join(parts))
 }
 
 start_herdr_core() {
-  local main main_session space app_status created created_info pane tab cc_uuid env_args env_cmd launch_cmd out prompt log session u e
+  local main main_session created pane tab cc_uuid env_args env_cmd launch_cmd out prompt log session u e
   main="$HC_TERMINAL_ID"
   main_session="${CLAUDE_CODE_SESSION_ID:-hc:$HC_TERMINAL_ID}"
   [ "$HARNESS" != pi ] || prepare_pi_worktree
@@ -494,31 +490,17 @@ start_herdr_core() {
   elif [ "$HARNESS" = pi ]; then
     session="$PI_UUID"
   fi
-  pane=""
-  tab=""
-  space=""
-  if app_status=$("$HERDR_APP_BIN" status 2>/dev/null); then
-    space=$(printf '%s' "$app_status" | python3 -c 'import json,sys; d=json.load(sys.stdin); s=d.get("space") if isinstance(d,dict) else ""; print(s if isinstance(s,str) and s else "")' 2>/dev/null) || space=""
-  fi
-  if [ -n "$space" ]; then
-    if created=$("$HERDR_APP_BIN" do tab.new --space "$space" --name "$LABEL" --folder "$CWD" 2>/dev/null); then
-      created_info=$(printf '%s' "$created" | python3 -c 'import json,sys; d=json.load(sys.stdin); t=d.get("terminal",""); b=d.get("tab",""); print(t + "\t" + b) if isinstance(d,dict) and t and b and not d.get("error") else sys.exit(1)' 2>/dev/null) || created_info=""
-      if [ -n "$created_info" ]; then
-        IFS=$'\t' read -r pane tab <<< "$created_info"
-        "$HC_BIN" label "$pane" "name=$NAME" >/dev/null 2>&1 || true
-      fi
-    fi
-  fi
-  if [ -z "$pane" ]; then
-    created=$("$HC_BIN" run --bg --name "$NAME" --cwd "$CWD" 2>&1) || fail "$created"
-    pane=$(printf '%s' "$created" | python3 -c 'import json,re,sys; s=sys.stdin.read().strip()
+  # --parent 讓 Herdr App 把 worker 列在 main 的 sub_agents 底下；刻意不加 --outlive-parent，
+  # 關掉 main 的 terminal 時 worker 跟著結束。--no-notify 是因為喚醒交給 agent-watch.sh，
+  # 兩邊都開 main 會被叫兩次。
+  created=$("$HC_BIN" run --bg --name "$NAME" --cwd "$CWD" --parent "$main" --no-notify 2>&1) || fail "$created"
+  pane=$(printf '%s' "$created" | python3 -c 'import json,re,sys; s=sys.stdin.read().strip()
 try:
   d=json.loads(s); a=d.get("address","") if isinstance(d,dict) else ""
 except Exception:
   m=re.search(r"(?:still running as |^)(t[0-9a-zA-Z_-]+)", s); a=m.group(1) if m else ""
 print(a) if a else sys.exit(1)' 2>/dev/null) || fail "invalid hc run response: $created"
-    tab="$pane"
-  fi
+  tab="$pane"
   env_args=()
   for u in ${UNSET_NAMES[@]+"${UNSET_NAMES[@]}"}; do
     env_args+=(-u "$u")
@@ -529,14 +511,26 @@ print(a) if a else sys.exit(1)' 2>/dev/null) || fail "invalid hc run response: $
   if [ "${#env_args[@]}" -gt 0 ]; then
     env_cmd=$(build_hc_env_cmd "${env_args[@]}")
     if [ -n "$env_cmd" ]; then
-      out=$("$HC_BIN" send "$pane" "$env_cmd" 2>&1) || { cleanup_hc_worker "$pane" "$tab"; fail "hc send env failed: $out"; }
+      out=$("$HC_BIN" send "$pane" "$env_cmd" 2>&1) || { cleanup_hc_worker "$pane"; fail "hc send env failed: $out"; }
     fi
   fi
   launch_cmd=$(python3 -c 'import shlex,sys; print(" ".join(shlex.quote(a) for a in sys.argv[1:]))' "$KIND" ${START_ARGS[@]+"${START_ARGS[@]}"})
-  out=$("$HC_BIN" send "$pane" "$launch_cmd" 2>&1) || { cleanup_hc_worker "$pane" "$tab"; fail "hc send launch failed: $out"; }
-  out=$("$HC_BIN" wait "$pane" 2>&1) || { cleanup_hc_worker "$pane" "$tab"; fail "hc wait ready failed: $out"; }
+  out=$("$HC_BIN" send "$pane" "$launch_cmd" 2>&1) || { cleanup_hc_worker "$pane"; fail "hc send launch failed: $out"; }
+  out=$("$HC_BIN" wait "$pane" 2>&1) || { cleanup_hc_worker "$pane"; fail "hc wait ready failed: $out"; }
+  fg_agent=$("$HC_BIN" get "$pane" 2>/dev/null | python3 -c 'import json,sys
+try:
+  d=json.load(sys.stdin)
+  print((d.get("agent") or d.get("app") or "") if isinstance(d,dict) else "")
+except Exception:
+  print("")' 2>/dev/null) || fg_agent=""
+  case "$fg_agent" in
+    zsh|bash|sh|fish|-zsh|-bash|-sh|-fish)
+      cleanup_hc_worker "$pane"
+      fail "worker exited back to shell ($fg_agent) before prompt (check worktree trust dialog or launch flags)"
+      ;;
+  esac
   prompt="[main] Read $BRIEF and follow it. Ask your questions in plain text and stop; do not assume answers."
-  out=$("$HC_BIN" send "$pane" "$prompt" 2>&1) || { cleanup_hc_worker "$pane" "$tab"; fail "prompt failed: $out"; }
+  out=$("$HC_BIN" send "$pane" "$prompt" 2>&1) || { cleanup_hc_worker "$pane"; fail "prompt failed: $out"; }
   if [ "$HARNESS" = codex ]; then
     session=$("$HC_BIN" get "$pane" 2>/dev/null | python3 -c 'import json,sys; d=json.load(sys.stdin); s=(d.get("session_id") or (d.get("labels") or {}).get("session_id") or "") if isinstance(d,dict) else ""; print(s)' 2>/dev/null) || session=""
     [ -n "$session" ] || session="hc-$pane"

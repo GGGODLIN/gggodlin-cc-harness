@@ -156,6 +156,17 @@ class RunnerUnreviewedTests(unittest.TestCase):
     self.assertEqual(result.returncode, 0, result.stderr)
     self.assertIn('# 09 — Wire ticket', (self.root / 'out/packet.md').read_text())
 
+  def test_dispatch_brief_is_included_in_batch_context_when_present(self):
+    dispatch_dir = self.ticket.parent.parent / 'dispatch'
+    dispatch_dir.mkdir(parents=True, exist_ok=True)
+    brief = dispatch_dir / 'brief-worker.md'
+    brief.write_text('# Worker brief\n- 必做：依規格完成票內指定驗收項目\n', encoding='utf-8')
+    result, _ = self.run_runner('--dry-run', ticket_file=self.ticket)
+    self.assertEqual(result.returncode, 0, result.stderr)
+    packet = (self.root / 'out/packet.md').read_text()
+    self.assertIn('brief-worker.md', packet)
+    self.assertIn('依規格完成票內指定驗收項目', packet)
+
 
 if __name__ == '__main__':
   unittest.main()

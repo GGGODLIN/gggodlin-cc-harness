@@ -9,10 +9,11 @@ import time
 from pathlib import Path
 
 WRITE_TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
-BASH_WRITE_MARKERS = ("open(", ".write(", "write_text(", "write_bytes(", ">>", "> ", "tee ", "sed -i", "cp ", "mv ")
+BASH_WRITE_MARKERS = ("open(", ".write(", "write_text(", "write_bytes(", ">>", "> ", "tee ", "sed -i", "cp ", "mv ", "--out", "--output")
 CD_TOKEN = re.compile(r"(?:^|&&|;|\|\||\n)\s*cd\s+([^\s;&|]+)")
 # Bash 寫入只認「路徑是寫入構造的目標」：`sed -n … > /tmp/x` 這種唯讀指令帶重導向，
 # 以前因為指令裡同時出現 repo 路徑與 `> ` 就被當成寫入者，造成假的 co_written（2026-10-09 實證兩例）
+# 僅接受明確長旗標 `--out`／`--output`，不接受泛用 `-o`（避免把 `rg -o` 等讀取旗標誤判為寫檔）。
 WRITE_TARGET_PATTERNS = (
   re.compile(r"(?<![<>])>{1,2}\s*['\"]?([^\s'\"|;&<>]+)"),
   re.compile(r"\btee\s+(?:-a\s+)?['\"]?([^\s'\"|;&]+)"),
@@ -20,6 +21,7 @@ WRITE_TARGET_PATTERNS = (
   re.compile(r"\b(?:cp|mv)\s+(?:-\S+\s+)*(?:\S+\s+)+['\"]?([^\s'\"|;&]+)"),
   re.compile(r"open\(\s*['\"]([^'\"]+)['\"]\s*,\s*['\"][wa]"),
   re.compile(r"Path\(\s*['\"]([^'\"]+)['\"]\s*\)"),
+  re.compile(r"(?:^|[\s;|&(])--out(?:put)?(?:=|\s+)['\"]?([^\s'\"|;&<>]+)"),
 )
 # 共用集合：每個 session 都在寫的帳本，self-closeout 整組收成 checkpoint、不看作者；
 # 清單與 commands/self-closeout.md 第 2 步同步，改一邊要改另一邊。
@@ -32,7 +34,7 @@ SHARED_BASENAMES = ("friction-log.md",)
 # claude.ai 同步輪搬進來的 vendor skill 副本，不是自撰內容，收進歷史只會每輪同步再報一次
 VENDOR_MANAGED_PREFIXES = ("skills/.trash/", "skills/synced/")
 BASH_PATH_TOKEN = re.compile(r"(?:~|/Users/[A-Za-z0-9_.-]+)(?:/[^\s'\"`;|<>()&]+)+")
-PROJECTS_DIR = Path.home() / ".claude" / "projects"
+PROJECTS_DIR = Path(os.environ.get("CLOSEOUT_PROJECTS_DIR", str(Path.home() / ".claude" / "projects"))).expanduser()
 CODEX_SESSIONS = Path(os.environ.get("CLOSEOUT_CODEX_SESSIONS", str(Path.home() / ".codex" / "sessions"))).expanduser()
 
 
@@ -190,13 +192,14 @@ def session_last_active(session_id):
 def collect_writers(targets, days):
   wanted = {str(p): p for p in targets}
   writers = {str(p): {} for p in targets}
-  needle_root = os.path.commonpath([str(p) for p in targets]) if len(targets) > 1 else str(next(iter(targets)))
+  needle_root = os.path.commonpath([str(p) for p in targets]) if len(targets) > 1 else str(repo_toplevel(targets[0]) or targets[0].parent)
+  basenames = tuple(p.name.encode() for p in targets)
   for session_id, project_name, jsonl in session_files(days):
     try:
       raw = jsonl.read_bytes()
     except OSError:
       continue
-    if needle_root.encode() not in raw:
+    if needle_root.encode() not in raw and not any(b in raw for b in basenames):
       continue
     for ts, (kind, value) in iter_events(jsonl):
       hits = []
@@ -310,9 +313,19 @@ def self_touched_repos(session_id, days):
     if sid != session_id:
       continue
     for _ts, (kind, value) in iter_events(jsonl):
-      # Bash 事件只在 iter_events 已確認含寫入標記時才會出現；路徑從指令字面抓，
-      # 用相對路徑加 cd 的寫法會漏，那是已知邊界。
-      candidates = [Path(value).expanduser()] if kind == "tool" else list(bash_path_tokens(value))
+      if kind == "tool":
+        candidates = [Path(value).expanduser()]
+      else:
+        candidates = list(bash_path_tokens(value))
+        cd_dirs = [Path(m.group(1).strip("'\"")).expanduser() for m in CD_TOKEN.finditer(value)]
+        candidates.extend(cd_dirs)
+        for target_str in bash_write_targets(value):
+          tp = Path(target_str).expanduser()
+          if tp.is_absolute():
+            candidates.append(tp)
+          else:
+            for base in cd_dirs:
+              candidates.append(base / tp)
       for candidate in candidates:
         if not candidate.exists():
           candidate = candidate.parent

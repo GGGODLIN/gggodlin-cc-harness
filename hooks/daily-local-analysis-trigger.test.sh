@@ -89,6 +89,10 @@ check "ledger-lifecycle source_key 原樣照抄" 1 "$(printf '%s' "$C" | grep -c
 check "ledger-lifecycle 不受產品 repo 排除" 1 "$(printf '%s' "$C" | grep -cF 'ledger-lifecycle 命中不套用產品 repo 排除')"
 check "ledger-lifecycle 走 H/M/L 與 pending-actions" 1 "$(printf '%s' "$C" | grep -cF '照既有 H/M/L 三檔、pending-actions、count 升檔與沉底行處理')"
 check "ledger-lifecycle 不另建區塊" 1 "$(printf '%s' "$C" | grep -cF '不另建區塊')"
+check "session-audit-consume 依實際修改落點分流" 1 "$(printf '%s' "$C" | grep -cF 'session-audit-consume 項目依「實際修改落點」分流')"
+check "session-audit-consume 預寫入 pending-actions" 1 "$(printf '%s' "$C" | grep -cF '已在 commit-cursor 階段預寫入 pending-actions.jsonl')"
+check "session-audit-consume 不得揉成單一編號或省略規則項" 1 "$(printf '%s' "$C" | grep -cF '不得將不同 source_key 揉成單一編號或靜默省略常駐規則改善項')"
+check "session-audit-consume 週六未回覆時每日追問" 1 "$(printf '%s' "$C" | grep -cF '週六未回覆時會在後續每日 reconcile_cmd 自動列出追問')"
 
 echo "== 可選欄（使用者只叫 agent 執行高中低，末尾提醒沒人接）=="
 check "含可選欄標題" 1 "$([ "$(printf '%s' "$C" | grep -cF '## 可選（不回也沒關係）')" -ge 1 ] && echo 1 || echo 0)"
@@ -102,8 +106,11 @@ check "🪦 零使用規則進可選欄並指向 /rules-slim" 1 "$(printf '%s' "
 check "🪦 讀 rules-size 的零使用標題原文" 1 "$(printf '%s' "$C" | grep -cF '## 🪦 零使用規則候選（N）')"
 check "🪦 N 為 0 不列" 1 "$(printf '%s' "$C" | grep -cF 'N 為 0 或報告沒有這段就不列')"
 check "🪦 不自動跑 /rules-slim" 1 "$(printf '%s' "$C" | grep -cF '同樣不自動跑 /rules-slim')"
-check "可選欄收三種" 1 "$(printf '%s' "$C" | grep -cF '目前收三種')"
+check "可選欄收四種" 1 "$(printf '%s' "$C" | grep -cF '目前收四種')"
 check "🪦 零使用段不進三檔不寫 ledger" 1 "$(printf '%s' "$C" | grep -cF '零使用段只進可選欄，不進三檔、不進沉底行、不寫 ledger')"
+check "🔔 久未執行提醒讀最近一份 skill-trigger-health 報告" 1 "$(printf '%s' "$C" | grep -cF '## 🔔 久未執行提醒（N）')"
+check "🔔 久未執行提醒於首次 digest 直接呈現" 1 "$(printf '%s' "$C" | grep -cF '首次 digest 末尾即呈現')"
+check "🔔 濾除週報後已更新 last_skipped_at 或 checked_at／skipped_at 的項目" 1 "$(printf '%s' "$C" | grep -cF 'last_skipped_at')"
 # 反向斷言（2026-10-05 前的寫法）：📏 放 digest 末尾時 6 次提醒 0 次執行，舊理由句不得回來
 check "舊的「digest 末尾唯一保證被讀到」理由已移除" 0 "$(printf '%s' "$C" | grep -cF '放末尾是因為那是 digest 唯一保證被讀到的位置')"
 

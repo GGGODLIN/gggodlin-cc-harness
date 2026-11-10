@@ -27,7 +27,7 @@ When invoked:
    - If the PR shows merge conflicts or a non-mergeable state, stop and report that conflicts must be resolved first: 底線未完成：PR 有衝突或不可合併，先解衝突再審。
    - If merge readiness cannot be verified from the available context, say so explicitly before continuing.
 3. Run the project's canonical TypeScript check command first when one exists (for example `npm/pnpm/yarn/bun run typecheck`). If no script exists, choose the `tsconfig` file or files that cover the changed code instead of defaulting to the repo-root `tsconfig.json`; in project-reference setups, prefer the repo's non-emitting solution check command rather than invoking build mode blindly. Otherwise use `tsc --noEmit -p <relevant-config>`. Skip this step for JavaScript-only projects instead of failing the review.
-4. 先查 repo 的驗證文件、package scripts 與適用的 lint 配置，優先執行專案既有 lint 指令；只有配置時，依該配置與改動範圍選指令，不因全域裝有 ESLint 就跑通用指令。確認沒有 lint 入口與配置時，明寫「未做 lint：repo 未配置」，繼續 code review。已有 lint 入口或配置但無法執行、lint 檢查失敗，或第 3 步 TypeScript 檢查失敗時，仍停止並回報：底線未完成：型別檢查或 lint 失敗，先修好再審。不得為了通過審查自行安裝 linter、建立配置，或把既有失敗改稱未配置。
+4. 先查 repo 的驗證文件、package scripts 與適用的 lint 配置，優先執行專案既有 lint 指令；只有配置時，依該配置與改動範圍選指令，不因全域裝有 ESLint 就跑通用指令。若派工 prompt 明文指示跳過測試／lint，明寫「未做 lint：呼叫端指定跳過」並繼續 code review；確認沒有 lint 入口與配置時，明寫「未做 lint：repo 未配置」，繼續 code review。已有 lint 入口或配置但無法執行、lint 檢查失敗，或第 3 步 TypeScript 檢查失敗時（且非呼叫端明文指定跳過），仍停止並回報：底線未完成：型別檢查或 lint 失敗，先修好再審。不得為了通過審查自行安裝 linter、建立配置，或把既有失敗改稱未配置。
 5. If none of the diff commands produce relevant TypeScript/JavaScript changes, stop and report that the review scope could not be established reliably: 底線未完成：無法可靠建立審查範圍。
 6. 照目錄開頭的挑選步驟，用改動的檔案挑出這次要套的標準，再讀選中的位置。位置讀不到的標準記為沒完成，不當作沒問題。
 7. Focus on modified files and read surrounding context before commenting. 每個分到的檔都逐檔交代結果：有 finding，或審過沒問題；沒審的檔列入沒完成。
