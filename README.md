@@ -49,7 +49,7 @@ It is a reference, not a product. You can install single pieces, but nothing gua
 | **`/review-spec`** | 規格進入實作前的第 1–4 級對抗式審查與 YAGNI（砍過度設計）需求定價，強制隔離作者辯護理由並一次收斂拍板表 | [`commands/review-spec.overview.md`](/commands/review-spec.overview.md) | [`commands/review-spec.md`](/commands/review-spec.md) |
 | **`/advisor`** | 不切換主 session 模型，把單次架構取捨或盲審打包交給 Fable、網頁版 GPT Pro 或 Codex CLI，收回獨立意見與差異對照 | [`commands/advisor.overview.md`](/commands/advisor.overview.md) | [`commands/advisor.md`](/commands/advisor.md) |
 | **`/trial-review`** | 統一盤點 7 天觀察期到期的工具／hook 與累積達門檻的摩擦帳本，用真實行為證據與事件歸因封包決定留、改或撤 | [`folder-level/.claude/commands/trial-review.overview.md`](/folder-level/.claude/commands/trial-review.overview.md) | [`folder-level/.claude/commands/trial-review.md`](/folder-level/.claude/commands/trial-review.md) |
-| **`local-analysis`（`/daily-local`）** | 每日與每週自動掃描 30 個治理頻道（規則退化、摩擦、記憶審計、證據層級抽樣），對帳後產出優先度 Digest | [`install/workflows/local-analysis.js.md`](/install/workflows/local-analysis.js.md) | [`workflows/local-analysis.js`](/workflows/local-analysis.js) |
+| **`local-analysis`（`/daily-local`）** | 每日與每週自動掃描 35 個治理頻道（規則退化、摩擦、記憶審計、證據層級抽樣），對帳後產出優先度 Digest | [`install/workflows/local-analysis.js.md`](/install/workflows/local-analysis.js.md) | [`workflows/local-analysis.js`](/workflows/local-analysis.js) |
 
 ## 元件分類地圖（依採用門檻挑選）
 
@@ -58,14 +58,19 @@ It is a reference, not a product. You can install single pieces, but nothing gua
 1. **零外部依賴、單純擋誤操作或補提醒的入門 Hook**（只需 Bash／Python 3，不需本地模型池或特殊服務）：
    - 防止 `cd && git ...` 污染後續工作目錄：[`install/hooks/cd-cwd-persistence-nudge.sh.md`](/install/hooks/cd-cwd-persistence-nudge.sh.md)
    - 攔截 zsh 下誤用 `$PIPESTATUS`：[`install/hooks/pipestatus-zsh-gate.py.md`](/install/hooks/pipestatus-zsh-gate.py.md)
-   - 連續重跑同一驗證指令時提醒換角度：[`install/hooks/repeat-verify-reminder.sh.md`](/install/hooks/repeat-verify-reminder.sh.md)
+   - 讀超大截圖前自動縮圖省圖片 token：[`install/hooks/read-image-shrink.py.md`](/install/hooks/read-image-shrink.py.md)
+   - 防止常駐規則檔越寫越肥：[`install/hooks/always-on-size-gate.py.md`](/install/hooks/always-on-size-gate.py.md)
+   - 改受控檔與提交前強制核對契約測試三件套：[`install/hooks/contract-test-preflight-gate.sh.md`](/install/hooks/contract-test-preflight-gate.sh.md)、[`install/hooks/contract-test-receipt-gate.sh.md`](/install/hooks/contract-test-receipt-gate.sh.md)、[`install/hooks/agent-contract-validator-gate.sh.md`](/install/hooks/agent-contract-validator-gate.sh.md)
+   - 人控「自動模式」開關保護與啟用規則注入：[`install/hooks/auto-mode-write-guard.py.md`](/install/hooks/auto-mode-write-guard.py.md)、[`install/hooks/auto-mode-inject.py.md`](/install/hooks/auto-mode-inject.py.md)
+   - 背景通知喚醒後維持繁中提醒與連續重跑提醒：[`install/hooks/opus-chinese-nudge.py.md`](/install/hooks/opus-chinese-nudge.py.md)、[`install/hooks/repeat-verify-reminder.sh.md`](/install/hooks/repeat-verify-reminder.sh.md)
    - 修改規則或新增 hook 時提醒對齊治理規範：[`install/hooks/gate-authoring-nudge.sh.md`](/install/hooks/gate-authoring-nudge.sh.md)、[`install/hooks/skill-description-gate.sh.md`](/install/hooks/skill-description-gate.sh.md)
-2. **規劃 → 實作 → 審查工作流組**（適合整組借鑑流程設計）：
+2. **規劃 → 實作 → 審查與獨立進階工作流組**（適合整組借鑑或單挑流程）：
    - 釐清模糊意圖與探索邊界：[`skills/align-intent/`](/skills/align-intent/SKILL.md) → [`skills/grill-me/`](/skills/grill-me/SKILL.md) → [`skills/wayfinder/`](/skills/wayfinder/SKILL.md)
    - 規格撰寫、審查與拆票：[`skills/to-spec/`](/skills/to-spec/SKILL.md) → [`commands/review-spec.md`](/commands/review-spec.md) → [`skills/to-tickets/`](/skills/to-tickets/SKILL.md)
    - 實作、TDD 守門與收尾審查：[`skills/implement/`](/skills/implement/README.md) ＋ [`install/hooks/matt-tdd-gate.sh.md`](/install/hooks/matt-tdd-gate.sh.md) → [`skills/review-implement/`](/skills/review-implement/SKILL.md) → [`commands/pr-review.md`](/commands/pr-review.md)（搭配 [`review-standards/`](/review-standards/catalog.md)）
-3. **宣稱證據與模型路由守門組**（部分需接 [`WIRING.md`](/WIRING.md) 的跨模型後端或判官 API）：
-   - Subagent 路由與高單價模型守門：[`references/subagent-routing.md`](/references/subagent-routing.md)、[`install/hooks/T2-routing-gate.sh.md`](/install/hooks/T2-routing-gate.sh.md)、[`install/hooks/fable-gate.sh.md`](/install/hooks/fable-gate.sh.md)
+   - 三套可獨立採用的進階工作流：全專案深度健檢 [`skills/deep-check/`](/skills/deep-check/SKILL.md)、單指標多輪爬山調優 [`skills/hillclimb/`](/skills/hillclimb/SKILL.md)、無人值守軟體工廠設計 [`skills/software-factory/`](/skills/software-factory/SKILL.md)
+3. **宣稱證據、多代理派工與模型路由守門組**（部分需接 [`WIRING.md`](/WIRING.md) 的跨模型後端或判官 API）：
+   - Subagent 路由、高單價模型與多代理收尾守門：[`references/subagent-routing.md`](/references/subagent-routing.md)、[`install/hooks/T2-routing-gate.sh.md`](/install/hooks/T2-routing-gate.sh.md)、[`install/hooks/fable-gate.sh.md`](/install/hooks/fable-gate.sh.md)、[`install/hooks/herdr-worker-stop-gate.sh.md`](/install/hooks/herdr-worker-stop-gate.sh.md)（Herdr 環境配套）
 4. **四大回饋帳本與跨壓縮守衛**：
    - 跨 session 兩層記憶提醒（背景小模型判官＋手動收尾檢查點）：[`install/hooks/auto-memory-jev.py.md`](/install/hooks/auto-memory-jev.py.md)、[`install/hooks/checkpoint-judge.sh.md`](/install/hooks/checkpoint-judge.sh.md)、[`examples/memory/`](/examples/memory/)
    - 跨 session 歷史對話全文檢索與正規化事件流：[`cc-session-index/README.zh-TW.md`](/cc-session-index/README.zh-TW.md)（可獨立安裝）
