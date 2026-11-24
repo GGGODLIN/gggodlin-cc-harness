@@ -181,10 +181,10 @@ def run_gate(env, payload, root, helper=HELPER):
   return result, rows
 
 
-def hook_payload(session, marker, snapshot, batch, tool_id="tool-1", extra_description=""):
+def hook_payload(session, marker, snapshot, batch, tool_id="tool-1", extra_description="", round_suffix=""):
   home = Path(os.environ["TEST_HOME"])
-  sentinel = home / ".claude" / ".scratch" / f"yagni-c-{batch}-{session}.started"
-  report = home / ".claude" / ".scratch" / f"yagni-c-{batch}-{session}.report.md"
+  sentinel = home / ".claude" / ".scratch" / f"yagni-c-{batch}-{session}{round_suffix}.started"
+  report = home / ".claude" / ".scratch" / f"yagni-c-{batch}-{session}{round_suffix}.report.md"
   return json.dumps({
     "tool_name": "Agent",
     "session_id": session,
@@ -537,6 +537,105 @@ def main():
     code, payload = run(env, "issue", "--session", "s13", "--packet", str(packet13))
     suite.check("malformed foreign state cannot pollute issue JSON", code == 0 and payload.get("allowed") is True)
     malformed.unlink(missing_ok=True)
+
+    # Multi-round non-colliding packet/sentinel/report filenames (-r1, -r2) in the same UUID session.
+    multi_session = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+    multi_project = projects / f"project-{multi_session}"
+    multi_project.mkdir(mode=0o700, parents=True)
+    scratch_dir = home / ".claude" / ".scratch"
+    scratch_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+    multi_transcript = multi_project / f"{multi_session}.jsonl"
+
+    packet_r1 = scratch_dir / f"review-spec-yagni-packet-{multi_session}-r1.md"
+    packet_r1.write_text("round 1 packet\n")
+    packet_r1.chmod(0o600)
+    report_r1 = scratch_dir / f"yagni-c-stories-{multi_session}-r1.report.md"
+    report_r1.write_text("resolved_model: claude-fable\nround 1 report\n")
+    r1_records = [
+      command_record(multi_session, uuid="cmd-r1"),
+      merged_menu_record(multi_session, packet_r1, uuid="menu-r1"),
+      selection_record(multi_session, "a", uuid="sel-r1"),
+    ]
+    write_jsonl(multi_transcript, r1_records)
+    code, issued_r1 = run(env, "issue", "--session", multi_session, "--packet", str(packet_r1))
+    permit_r1 = issued_r1.get("permit_id", "")
+    suite.check("round 1 -r1 packet issues permit", code == 0 and issued_r1.get("allowed") is True, json.dumps(issued_r1))
+
+    code, marker_r1_s = run(env, "marker", "--session", multi_session, "--permit-id", permit_r1, "--batch", "stories")
+    suite.check(
+      "round 1 marker returns -r1 sentinel and report paths",
+      code == 0
+      and str(marker_r1_s.get("sentinel_path", "")).endswith(f"yagni-c-stories-{multi_session}-r1.started")
+      and str(marker_r1_s.get("report_path", "")).endswith(f"yagni-c-stories-{multi_session}-r1.report.md"),
+      json.dumps(marker_r1_s),
+    )
+    r1_snap_path = Path(marker_r1_s.get("snapshot_path", "/nonexistent"))
+    gate_res_r1, audit_r1 = run_gate(
+      env,
+      hook_payload(multi_session, marker_r1_s["marker"], str(r1_snap_path), "stories", tool_id="r1-stories", round_suffix="-r1"),
+      root,
+    )
+    suite.check(
+      "T2 allows round 1 stories with -r1 paths",
+      gate_res_r1.returncode == 0 and gate_res_r1.stdout == "" and audit_r1[-1].get("reason") == "review_spec_yagni_permit:stories",
+    )
+
+    # Round 2 in the SAME session (even when Round 1 decisions batch was left unclosed):
+    packet_r2 = scratch_dir / f"review-spec-yagni-packet-{multi_session}-r2.md"
+    packet_r2.write_text("round 2 packet\n")
+    packet_r2.chmod(0o600)
+    cmd_r2 = command_record(multi_session, uuid="cmd-r2")
+    cmd_r2["timestamp"] = "2026-09-28T12:25:00Z"
+    menu_r2 = merged_menu_record(multi_session, packet_r2, uuid="menu-r2")
+    menu_r2["timestamp"] = "2026-09-28T12:26:00Z"
+    sel_r2 = selection_record(multi_session, "a", uuid="sel-r2")
+    sel_r2["timestamp"] = "2026-09-28T12:27:00Z"
+    write_jsonl(multi_transcript, [*r1_records, cmd_r2, menu_r2, sel_r2])
+
+    code, issued_r2 = run(env, "issue", "--session", multi_session, "--packet", str(packet_r2))
+    permit_r2 = issued_r2.get("permit_id", "")
+    suite.check(
+      "round 2 -r2 packet issues distinct permit and cleans stale unclosed round 1 snapshot",
+      code == 0 and issued_r2.get("allowed") is True and permit_r2 != permit_r1 and not r1_snap_path.exists(),
+      json.dumps(issued_r2),
+    )
+    suite.check(
+      "round 1 packet and report files remain untouched on disk",
+      packet_r1.read_text() == "round 1 packet\n" and "round 1 report" in report_r1.read_text(),
+    )
+
+    code, marker_r2_s = run(env, "marker", "--session", multi_session, "--permit-id", permit_r2, "--batch", "stories")
+    r2_snap = marker_r2_s.get("snapshot_path", "")
+    code_stale_prompt, stale_payload = run(
+      env,
+      "consume",
+      stdin=hook_payload(multi_session, marker_r2_s["marker"], r2_snap, "stories", tool_id="r2-wrong-path", round_suffix="-r1"),
+    )
+    suite.check(
+      "round 2 rejects prompt reusing round 1 -r1 sentinel/report paths",
+      code_stale_prompt == 3 and stale_payload.get("reason") == "prompt-binding-mismatch",
+      json.dumps(stale_payload),
+    )
+    gate_res_r2, audit_r2 = run_gate(
+      env,
+      hook_payload(multi_session, marker_r2_s["marker"], r2_snap, "stories", tool_id="r2-stories", round_suffix="-r2"),
+      root,
+    )
+    suite.check(
+      "T2 allows round 2 stories with -r2 paths",
+      gate_res_r2.returncode == 0 and gate_res_r2.stdout == "" and audit_r2[-1].get("reason") == "review_spec_yagni_permit:stories",
+    )
+
+    for bad_suffix in ("-r0", "-secret-spec"):
+      bad_packet = scratch_dir / f"review-spec-yagni-packet-{multi_session}{bad_suffix}.md"
+      bad_packet.write_text("bad\n")
+      bad_packet.chmod(0o600)
+      code_bad, bad_payload = run(env, "issue", "--session", multi_session, "--packet", str(bad_packet))
+      suite.check(
+        f"non-neutral or zero round suffix {bad_suffix} is rejected",
+        code_bad == 3 and bad_payload.get("reason") == "packet-path-mismatch",
+        json.dumps(bad_payload),
+      )
 
   print(f"RESULT: {suite.passed} passed, {suite.failed} failed")
   raise SystemExit(1 if suite.failed else 0)

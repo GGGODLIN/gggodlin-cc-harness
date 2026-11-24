@@ -42,6 +42,8 @@ Line coverage 對第一種給綠燈——**mutation score 是目前唯一還沒�
 
 Stryker 本身**不需要事先裝**：走下方「零安裝執行路徑（npx）」。repo 若已裝好 `@stryker-mutator/core` + runner 且 `stryker.conf.json` 跑得起來，直接用既有安裝也可以。
 
+如果目標是 Python，就在 Step 1 前讀 `references/python-mutmut.md`：Step 3 改跑 mutmut，Step 4 前多一道存活複驗，其餘步驟照走。
+
 ## 零安裝執行路徑（npx）
 
 不必把 Stryker 寫進 `package.json`。三個 `-p` 缺一不可（下面解釋為什麼）：
@@ -102,7 +104,11 @@ yarn jest <target-test-path>
 
 **Completion criterion**：`mutate` 只列這次相關檔、沒有拉整個 `src/**/*.ts`。
 
-### Step 3. 跑 Stryker
+### Step 3. 跑 Stryker（Python 改跑 mutmut）
+
+如果工作樹中的 socket 令本機執行 Stryker 失敗，請改在隔離環境或雲端沙盒執行。
+
+取回原始報告與補測 diff（如有）後，接回下方 Step 4–5 與 Self-Verify 收尾。
 
 repo 已裝好 Stryker → `npx stryker run` 就夠。**沒裝 → 用「零安裝執行路徑（npx）」那段的完整命令**（三個 `-p`、typescript 要釘精確版號）。
 
@@ -132,6 +138,8 @@ repo 已裝好 Stryker → `npx stryker run` 就夠。**沒裝 → 用「零安�
 npx stryker run
 ```
 
+Python 用 `mutmut run`。
+
 **Completion criterion**：mutation score **有提升**（或所有剩下 survived 都是 B/C 分類、有 comment 記錄）。若分數沒動 = 你補的 assertion 沒真的 kill mutant，回 Step 4 檢查。
 
 ## 判分紀律：不追 100%
@@ -149,7 +157,7 @@ npx stryker run
 
 跑完 workflow 後派 subagent 對表 rubric——**不要自己 review**（自己 review 會給自己過關）。
 
-派 subagent：`Agent tool → subagent_type: skill-verify-auditor`（sonnet+low、tools 僅 Read，定義檔釘死），description 固定含 marker 字串 `skill-verify:mutation-testing`（採用率統計 grep 用，不要改字），prompt 用：
+派 subagent：`Agent tool → subagent_type: skill-verify-auditor`（sonnet+medium、tools 僅 Read，定義檔釘死），description 固定含 marker 字串 `skill-verify:mutation-testing`（採用率統計 grep 用，不要改字），prompt 用：
 
 ```
 Audit mutation-testing skill 執行結果
@@ -157,7 +165,7 @@ Audit mutation-testing skill 執行結果
 Skill 執行資料：
 - Baseline test 檔案跟數量：[填]
 - Mutate 範圍（conf 的 mutate array 或 CLI --mutate）：[填]
-- Stryker mutation score before/after：[填]
+- Mutation score before/after（Stryker 或 mutmut）：[填]
 - Survived mutant 處理清單：[列每個 mutant → A/B/C/D + 原因]
 - A 類新增測試 diff 原文：[貼 git diff；無 A 類填「無 A 類」]
 - B/C 類理由落點原文：[貼原始碼 disable comment 或票檔／活規格／收據段落原文；無 B/C 類填「無 B/C 類」]
@@ -168,18 +176,29 @@ R1. Baseline 全綠：Step 1 有記錄目標 test PASS 且 count 符合預期
 R2. Mutate 範圍收斂：mutate 範圍（conf 的 array 或 CLI 的 --mutate）只列這次改動檔、沒拉整個 src/
 R3. 每個 survived 有分類：清單覆蓋所有 survived mutant、每個標 A/B/C/D 其一（允許全部屬於同一類，不要求四類皆出現）
 R4. B/C 分類有原因與落點原文：每個 B/C mutant 都有一行理由，且上方「B/C 類理由落點原文」已直接貼出原始碼 disable comment 或（repo 未裝 Stryker／慣例不收 comment 時）票檔／活規格／收據中的實際段落原文；僅在清單自稱已寫入、只填路徑或寫「略」而未貼出落點原文（且未宣告 AUDIT_INPUT_MODE: FILE_SNAPSHOT）一律判 FAIL
-R5. Rerun 有實跑：Step 5 有 rerun stryker、score 有變化或明確理由不變
+R5. Rerun 有實跑：Step 5 有 rerun stryker（Python 為 mutmut）、score 有變化或明確理由不變
 R6. 沒偷分數且附測試 diff 原文：A 類補測已在上方「A 類新增測試 diff 原文」貼出實際測試 diff，確認 assertion 補在 test、沒用 test.skip / mock 掩蓋，且等價判定走 R4 的合法落點；有 A 類卻只填路徑、寫「略」或未貼出測試 diff 原文（且未宣告 AUDIT_INPUT_MODE: FILE_SNAPSHOT）一律判 FAIL
 
 無法確認 = FAIL（偏置嚴審）。最後一行輸出 VERDICT: PASS | FAIL
 ```
 
-**本回合這個 skill 只有一次 auditor 額度**：不論結果如何都不得重派，也不得用 SendMessage 續問同一個 auditor。交付末尾固定一行，狀態只能是下列四個之一：
+交付物太長、不全文內嵌時，改走檔案模式：先把收據、存活清單、測試 diff 等材料合成一份快照檔並設成唯讀，派出後內容就不會再變（例如 `cat <收據> <存活清單> <測試 diff> > <scratchpad>/audit-snapshot.md && chmod a-w <scratchpad>/audit-snapshot.md && wc -l <scratchpad>/audit-snapshot.md`），再把這三行放在 prompt 最前面，rubric 照樣全文內嵌：
+
+```
+AUDIT_INPUT_MODE: FILE_SNAPSHOT
+SNAPSHOT_PATH: <唯一一個快照檔的絕對路徑>
+SNAPSHOT_TOTAL_LINES: <快照檔總行數>
+```
+
+稽查員只認一個路徑：列了多個檔或缺任何一行，它一行都不讀、六條全判 FAIL。
+
+**本回合這個 skill 只有一次 auditor 額度**：不論結果如何，本回合都不得重派，也不得用 SendMessage 續問同一個 auditor。交付末尾固定一行，狀態只能是 COMPLIANT／FIXED_AFTER_AUDIT／FAILED／SKIPPED 這四種之一（SKIPPED 依原因分下面最後兩條）：
 
 - `VERDICT: PASS` → 「🔎 self-verify: COMPLIANT」
 - FAIL 且已修正 → 先修再交付，標「🔎 self-verify: FIXED_AFTER_AUDIT — R#（抓到什麼、怎麼修的）」，同句明寫「未經第二次獨立稽查」。注意修法本身仍受 R6 約束：不得用 test.skip／mock 把 FAIL 修綠
 - FAIL 且修不掉 → 標「🔎 self-verify: FAILED — R#（缺口）」，並把該條涵蓋的 mutant 從「已處理」清單移回 survived，不得宣稱 score 已改善
 - Agent error / timeout / 空輸出 / 格式錯誤 → 標「🔎 self-verify: SKIPPED (agent error)」、不靜默跳過
+- 稽查員沒讀到交付物（第一行是 `READ_RANGE: 未讀`，或逐條寫明沒拿到材料）→ 標「🔎 self-verify: SKIPPED (稽查員沒讀到交付物)」，不標 FAILED：它沒看到內容，判不出作業對錯，已做好的分類也不算被推翻。同一回合不重派（hook 會擋）；交付時寫明要上一層（派你的 main）或下一回合照上方檔案模式合成單一快照、重派一次，那一次照四態落定，之後不再重派
 
 ## 常見 survived pattern 快查
 
@@ -207,3 +226,5 @@ R6. 沒偷分數且附測試 diff 原文：A 類補測已在上方「A 類新增
 - `references/survived-decision-tree.md` — Survived mutant A/B/C/D 判定流程
 - `references/changed-files-workflow.md` — 只跑 git-changed 檔的變體工作流
 - `references/disable-syntax.md` — `// Stryker disable` comment 完整規則跟位置限制
+- `references/python-mutmut.md` — Python 目標的 mutmut 跑法、`pytest<9` 釘版與存活複驗
+- `scripts/reapply_mutant_diffs.py` — 把存活 mutant 的 diff 套回乾淨副本重跑測試，分出真假存活

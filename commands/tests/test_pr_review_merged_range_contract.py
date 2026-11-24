@@ -151,11 +151,34 @@ class PrReviewMergedRangeContractTest(unittest.TestCase):
     self.assertIn("不接 Step 8", self.range_prep())
 
 
+  def test_open_pr_can_be_the_range_end_without_a_synthetic_merge(self):
+    step1 = self.section("## Step 1: Parse Input", "## Step 2: Fetch PR Data")
+    self.assertIn("每個 repo 可夾一張還開著的 PR", step1)
+    self.assertIn("`OPEN_PR_MULTIPLE`", step1)
+    self.assertIn("`OPEN_PR_BEHIND_TARGET`", step1)
+    self.assertIn("不拼湊假設的合併版本", step1)
+    step = self.range_prep()
+    for needle in (
+      '"state": "<state>"',
+      '"head_ref": "<headRefName>"',
+      "git -C <checkout> fetch origin <baseRefName> <headRefName>",
+      "`OPEN_PR_HEAD_UNVERIFIED`",
+      "`end.source` 是 `open-pr-head` 時",
+      "`end.target_branch_tip`",
+      "`start.source: open-pr-target-tip`",
+      "PR 再推新 commit 就要重審",
+    ):
+      with self.subTest(needle=needle):
+        self.assertIn(needle, step)
+    report = self.section("## Step 4.8:", "## Step 4.9:")
+    self.assertIn('"version_state": "drifted"', report)
+    self.assertIn("gh pr view <該 PR URL> --json headRefOid", report)
+
   def test_range_preparation_keeps_scope_and_failure_rules(self):
     step = self.range_prep()
     for needle in (
       "下游一律看 `target.kind` 分流",
-      "--json state,baseRefName,headRefOid,author,mergeCommit",
+      "--json state,baseRefName,headRefName,headRefOid,author,mergeCommit",
       "`review_diff.file` 是唯一權威的已裁切 R→T 差異",
       "`--since` 解析失敗也不退回下一層起點",
       "不對它派工，其餘範圍目標照常",

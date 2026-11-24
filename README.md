@@ -166,16 +166,16 @@ It is a reference, not a product. You can install single pieces, but nothing gua
 - [`examples/`](examples/) — 10 個檔案；內含 `friction/`、`memory/`、`tool-upgrade-notes/`、`trials/`、`wiki/`
 - [`folder-level/`](folder-level/) — 17 個檔案；內含 `.claude/`、`CLAUDE.md`
 - [`friction/`](friction/) — 1 個檔案；內含 `PROTOCOL.md`
-- [`hooks/`](hooks/) — 96 個檔案；內含 `T2-routing-gate.sh`、`T2-routing-gate.test.sh`、`agent-contract-gate-permit.sh`、`api-error-auto-continue.py`、`api-error-auto-continue.test.py`、`ask-explainer.py`、`ask-explainer.test.py`、`auto-memory-jev-question.json`…（共 96 項）
-- [`install/`](install/) — 43 個檔案；內含 `cc-session-index/`、`compact-guard/`、`folder-level/`、`hooks/`、`output-styles/`、`workflows/`
+- [`hooks/`](hooks/) — 114 個檔案；內含 `T2-routing-gate.sh`、`T2-routing-gate.test.sh`、`agent-contract-gate-permit.sh`、`agent-contract-validator-gate.sh`、`agent-contract-validator-gate.test.sh`、`always-on-size-gate.py`、`always-on-size-gate.test.py`、`api-error-auto-continue.py`…（共 114 項）
+- [`install/`](install/) — 52 個檔案；內含 `cc-session-index/`、`compact-guard/`、`folder-level/`、`hooks/`、`output-styles/`、`workflows/`
 - [`model-routing.env`](model-routing.env)
 - [`openspec/`](openspec/) — 3 個檔案；內含 `specs/`
 - [`output-styles/`](output-styles/) — 1 個檔案；內含 `Explanatory.md`
 - [`references/`](references/) — 17 個檔案；內含 `claim-evidence-examples.md`、`dispatch-and-verify-examples.md`、`effort-controls.md`、`failure-mode-taxonomy.md`、`final-gate-materiality.md`、`harness-model-sensitivity.md`、`ledger-lifecycle.md`、`perspective-sub-scout.md`…（共 17 項）
 - [`review-standards/`](review-standards/) — 35 個檔案；內含 `ai-generated-changes.md`、`architecture-proposal-lens.md`、`architecture-transformed-code-lens.md`、`catalog.md`、`change-integrity.md`、`code-review-quality.md`、`code-review-security.md`、`design-and-maintainability.md`…（共 35 項）
 - [`rules/`](rules/) — 14 個檔案；內含 `common/`、`typescript/`
-- [`scripts/`](scripts/) — 100 個檔案；內含 `advisor-extract-context.py`、`agent-contract-command/`、`agent-contract-validator.definition.test.sh`、`agent-contract-validator.diagnostics.test.sh`、`agent-contract-validator.frontmatter.test.sh`、`agent-contract-validator.mcp-tools.test.sh`、`agent-contract-validator.mjs`、`agent-contract-validator.name.test.sh`…（共 86 項）
+- [`scripts/`](scripts/) — 96 個檔案；內含 `advisor-extract-context.py`、`agent-contract-command/`、`agent-contract-validator.definition.test.sh`、`agent-contract-validator.diagnostics.test.sh`、`agent-contract-validator.frontmatter.test.sh`、`agent-contract-validator.mcp-tools.test.sh`、`agent-contract-validator.mjs`、`agent-contract-validator.name.test.sh`…（共 77 項）
 - [`settings.json`](settings.json)
-- [`skills/`](skills/) — 215 個檔案；內含 `INVENTORY.md`、`absorb-pack/`、`agent-authoring/`、`agent-dispatch/`、`align-intent/`、`auto-choice/`、`brainstorm/`、`caveman/`…（共 42 項）
+- [`skills/`](skills/) — 223 個檔案；內含 `INVENTORY.md`、`absorb-pack/`、`agent-authoring/`、`agent-dispatch/`、`align-intent/`、`auto-choice/`、`brainstorm/`、`caveman/`…（共 45 項）
 - [`social-info/`](social-info/) — 76 個檔案；內含 `scripts/`、`tests/`
 - [`workflows/`](workflows/) — 8 個檔案；內含 `best-of-n-implement.js`、`failure-mode-daily.sh`、`local-analysis-flow.svg`、`local-analysis.js`、`skill-changes-daily.sh`、`skillevaluator-weekly.sh`、`tests/`

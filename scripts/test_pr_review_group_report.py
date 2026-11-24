@@ -11,10 +11,6 @@ from pathlib import Path
 
 
 SCRIPT = Path(__file__).with_name("pr-review-group-report.py")
-MUTATION_CORE = (
-  Path(__file__).resolve().parents[1]
-  / "skills/bitbucket-pr-mutation/scripts/bitbucket_pr_workflow/core.py"
-)
 SAAS_11 = "github:github.com/acme/saas#11"
 DASH_707 = "github:github.com/acme/dashboard#707"
 
@@ -33,13 +29,6 @@ SET_IDENTITY = canonical_set_identity(TARGETS)
 
 def load_module():
   spec = importlib.util.spec_from_file_location("pr_review_group_report", SCRIPT)
-  module = importlib.util.module_from_spec(spec)
-  spec.loader.exec_module(module)
-  return module
-
-
-def load_mutation_core():
-  spec = importlib.util.spec_from_file_location("bitbucket_pr_workflow_core", MUTATION_CORE)
   module = importlib.util.module_from_spec(spec)
   spec.loader.exec_module(module)
   return module
@@ -75,7 +64,6 @@ def finding(target, file, anchor, root_cause, source="cc", line=1, strict_liabil
 class GroupReportTest(unittest.TestCase):
   def setUp(self):
     self.module = load_module()
-    self.mutation = load_mutation_core()
     self.tmp = tempfile.TemporaryDirectory()
     self.addCleanup(self.tmp.cleanup)
 
@@ -136,7 +124,11 @@ class GroupReportTest(unittest.TestCase):
     for cause in ("missing guard", "guard   missing", "spaced  cause "):
       self.assertEqual(
         self.module.single_pr_finding_uid("src/a.ts", "return value", cause),
-        self.mutation.make_finding_uid("src/a.ts", "return value", cause),
+        "d89f3e4c04c3c406541b"
+        if cause == "missing guard"
+        else hashlib.sha256(
+          "\0".join(("src/a.ts", "return value", " ".join(cause.split()))).encode("utf-8")
+        ).hexdigest()[:20],
       )
     self.assertEqual(
       self.module.single_pr_finding_uid("src/a.ts", "return value", "missing guard"),
@@ -655,6 +647,19 @@ class RangeReportTest(unittest.TestCase):
     self.assertIn(f"{SAAS_RANGE}=prs:#11,#12|entry-files:1|net-diff:yes", scope_line)
     self.assertNotIn("sha256", scope_line)
 
+  def test_range_header_names_an_open_pr_head_used_as_the_end(self):
+    open_end = range_target(DASH_RANGE, "acme/dashboard", [707, 708], DASH_R, DASH_T)
+    open_end["end"] = {"sha": DASH_T, "ref": "refs/remotes/origin/feat/x", "source": "open-pr-head",
+                       "pr": "708", "target_branch_tip": "c" * 40}
+    payload = range_payload(targets=[range_target(SAAS_RANGE, "acme/saas", [11, 12], SAAS_R, SAAS_T), open_end])
+    reconciled = run_cli("reconcile", payload)
+    ends = {target["target_identity"]: target["end"] for target in reconciled["targets"]}
+    self.assertEqual(ends[DASH_RANGE]["source"], "open-pr-head")
+    self.assertEqual(ends[SAAS_RANGE].get("source", "target-branch"), "target-branch")
+    header = run_cli("render", payload).split("\n## ")[0]
+    self.assertIn(f"{DASH_RANGE}=R:{DASH_R}|T:{DASH_T}|T-ref:refs/remotes/origin/feat/x（未合併 PR #708 的 head）", header)
+    self.assertIn(f"{SAAS_RANGE}=R:{SAAS_R}|T:{SAAS_T}|T-ref:refs/remotes/origin/stage\n", header)
+
   def test_every_range_finding_renders_three_attribution_columns_listing_every_pr(self):
     payload = range_payload(findings=[
       finding(SAAS_RANGE, "src/a.ts", "return value", "guard runs after the write", line=40,
@@ -778,6 +783,140 @@ class RangeReportTest(unittest.TestCase):
     self.assertIn(dash_uid, continuity)
     self.assertIn("STILL_OPEN", continuity)
     self.assertIn("net-diff:no", rendered.split("\n## ")[0])
+
+
+class GroupReportBoundaryHardeningTest(unittest.TestCase):
+  def _load_projection(self):
+    proj_path = Path(__file__).with_name("pr-review-report-projection.py")
+    spec = importlib.util.spec_from_file_location("pr_review_report_projection", proj_path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+  def test_multiline_fields_and_code_fenced_comments_render_valid_schema3_projection(self):
+    proj = self._load_projection()
+    code_comment = "Use a null guard:\n```ts\nif (value != null) {\n  return value;\n}\n```"
+    rendered = run_cli("render", {
+      "set_identity": SET_IDENTITY,
+      "targets": TARGETS,
+      "findings": [
+        {
+          **finding(SAAS_11, "src/a.ts", "return value", "missing guard\nacross lines",
+                    source="cc", line=10, suggestion="Must Fix", action="auto-fix",
+                    action_reason="clear fix\nno tradeoff",
+                    title="Guard missing\non return",
+                    comment=code_comment),
+        }
+      ],
+    })
+    projected = proj.project_group_report(rendered, "set-test-review.audit.md", require_schema=True)
+    self.assertEqual(proj.extract_actionable_comment_payloads(rendered), [code_comment])
+    self.assertEqual(proj.extract_actionable_comment_payloads(projected), [code_comment])
+
+  def test_whitespace_only_comment_falls_back_to_root_cause(self):
+    proj = self._load_projection()
+    rendered = run_cli("render", {
+      "set_identity": SET_IDENTITY,
+      "targets": TARGETS,
+      "findings": [
+        finding(SAAS_11, "src/a.ts", "return value", "missing guard",
+                source="cc", line=5, suggestion="Should Fix", action="ask-user",
+                action_reason="needs review", comment="   \n\t  "),
+      ],
+    })
+    projected = proj.project_group_report(rendered, "set-test-review.audit.md", require_schema=True)
+    self.assertEqual(proj.extract_actionable_comment_payloads(projected), ["missing guard"])
+
+  def test_same_finding_uid_with_offset_lines_deduplicates_location_rows_for_projection(self):
+    proj = self._load_projection()
+    payload = {
+      "set_identity": SET_IDENTITY,
+      "targets": TARGETS,
+      "findings": [
+        finding(SAAS_11, "src/a.ts", "return value", "missing guard", source="cc", line=None,
+                suggestion="Must Fix", action="auto-fix", action_reason="clear"),
+        finding(SAAS_11, "src/a.ts", "return value", "missing guard", source="gemini", line=12,
+                suggestion="Must Fix", action="ask-user", action_reason="check"),
+      ],
+    }
+    reconciled = run_cli("reconcile", payload)
+    self.assertEqual(len(reconciled["groups"]), 1)
+    locations = reconciled["groups"][0]["locations"]
+    self.assertEqual(len(locations), 1)
+    self.assertEqual(locations[0]["line"], 12)
+    rendered = run_cli("render", payload)
+    projected = proj.project_group_report(rendered, "set-test-review.audit.md", require_schema=True)
+    self.assertIn("missing guard", projected)
+
+  def test_whitespace_fields_non_dict_inputs_blank_evidence_and_bool_pr_rejected(self):
+    for mode in ("reconcile", "render", "cleanup"):
+      for raw in ("[]", "null", '"bad"'):
+        proc = subprocess.run(
+          [sys.executable, str(SCRIPT), mode],
+          input=raw,
+          capture_output=True,
+          text=True,
+        )
+        self.assertNotIn("Traceback", proc.stderr)
+        self.assertEqual(proc.returncode, 1)
+        self.assertEqual(json.loads(proc.stdout)["status"], "ERROR")
+
+    reconciled = run_cli("reconcile", {
+      "set_identity": SET_IDENTITY,
+      "targets": TARGETS,
+      "findings": [
+        "not-a-dict",
+        {"target_identity": SAAS_11, "file": "   ", "root_cause": "real bug"},
+        {"target_identity": SAAS_11, "file": "src/a.ts", "root_cause": "  \n  "},
+      ],
+      "prior_report": {
+        "set_identity": SET_IDENTITY,
+        "findings": [
+          {"target_identity": SAAS_11, "file": "src/a.ts", "anchor": "x",
+           "root_cause": "old bug", "action": "auto-fix", "finding_uid": "a" * 20},
+        ],
+      },
+      "recheck_responses": {
+        "a" * 20: {"status": "FIXED", "evidence": "   \t  "},
+      },
+    })
+    self.assertEqual(reconciled["groups"], [])
+    self.assertEqual(len(reconciled["refused"]), 3)
+    self.assertEqual(reconciled["history"]["rows"][0]["status"], "STALE")
+
+    bool_pr = subprocess.run(
+      [sys.executable, str(SCRIPT), "reconcile"],
+      input=json.dumps({
+        "targets": [{
+          "kind": "range",
+          "target_identity": SAAS_RANGE,
+          "target_branch": "stage",
+          "start": {"sha": SAAS_R, "source": "since", "detail": "x"},
+          "end": {"sha": SAAS_T, "ref": "refs/remotes/origin/stage"},
+          "related_prs": [{"pr": True}],
+          "entry_files": [],
+        }],
+        "findings": [],
+      }),
+      capture_output=True,
+      text=True,
+    )
+    self.assertEqual(bool_pr.returncode, 1)
+    self.assertEqual(json.loads(bool_pr.stdout)["status"], "ERROR")
+
+  def test_mismatched_set_identity_is_rejected_by_reconcile(self):
+    wrong_id = "sha256:" + ("0" * 64)
+    self.assertNotEqual(wrong_id, SET_IDENTITY)
+    proc = subprocess.run(
+      [sys.executable, str(SCRIPT), "reconcile"],
+      input=json.dumps({"set_identity": wrong_id, "targets": TARGETS, "findings": []}),
+      capture_output=True,
+      text=True,
+    )
+    self.assertEqual(proc.returncode, 1)
+    data = json.loads(proc.stdout)
+    self.assertEqual(data["status"], "ERROR")
+    self.assertIn("canonical target identities", data["reason_codes"][0])
 
 
 if __name__ == "__main__":

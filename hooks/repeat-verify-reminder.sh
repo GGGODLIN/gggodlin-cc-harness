@@ -25,9 +25,20 @@ STALE_SECS = 48 * 3600
 def load_state(path):
   try:
     with open(path) as f:
-      return json.load(f)
+      data = json.load(f)
   except (OSError, json.JSONDecodeError):
     return {"mut": 0, "cmds": {}}
+  if not isinstance(data, dict):
+    return {"mut": 0, "cmds": {}}
+  mut = data.get("mut", 0)
+  if not isinstance(mut, int) or isinstance(mut, bool):
+    mut = 0
+  cmds = data.get("cmds")
+  if not isinstance(cmds, dict):
+    cmds = {}
+  data["mut"] = mut
+  data["cmds"] = cmds
+  return data
 
 
 def prune(now):
@@ -197,8 +208,11 @@ def process(payload, state_path):
   if tool in MUTATE_TOOLS:
     state["mut"] += 1
   elif tool == "Bash":
-    cmd = (payload.get("tool_input") or {}).get("command", "").strip()
-    response = payload.get("tool_response") or {}
+    ti = payload.get("tool_input")
+    raw_cmd = ti.get("command", "") if isinstance(ti, dict) else ""
+    cmd = raw_cmd.strip() if isinstance(raw_cmd, str) else ""
+    raw_resp = payload.get("tool_response")
+    response = raw_resp if isinstance(raw_resp, dict) else {}
     task = response.get("backgroundTaskId")
     if (payload.get("hook_event_name") == "PostToolUse" and response.get("interrupted") is False
         and isinstance(task, str) and re.fullmatch(r'[A-Za-z0-9_-]+', task) and is_dev_lane(payload, cmd)):
@@ -259,8 +273,10 @@ def main():
     payload = json.load(sys.stdin)
   except json.JSONDecodeError:
     return
+  if not isinstance(payload, dict):
+    return
   session = payload.get("session_id", "")
-  if not session:
+  if not isinstance(session, str) or not session:
     return
   os.makedirs(STATE_DIR, exist_ok=True)
   state_key = hashlib.sha256(session.encode()).hexdigest()

@@ -36,6 +36,7 @@ proxy 會漏掉「驗過但沒寫」的情況，也會誤收「抄了漂亮數�
 """
 
 import argparse
+import datetime
 import json
 import re
 import sys
@@ -47,18 +48,28 @@ PROJECTS = HOME / ".claude" / "projects"
 
 SIGNALS = {
     "pit": (re.compile(r"踩過的坑|踩坑|反例|失敗模式"), "踩坑段"),
-    "num": (re.compile(r"\d+\s*(?:次|筆|個|案|/\d+)|\d+%"), "量化數字"),
-    "test": (re.compile(r"實測|實跑|fixture|回歸|驗證輸出|probe|測試通過"), "實測提及"),
-    "date": (re.compile(r"20\d\d-\d\d-\d\d"), "具體日期"),
+    "num": (re.compile(r"\d+\s*(?:次|筆|個|案)|(?<![\d/])\d+\s*/\d+(?![\d/])|\d+%"), "量化數字"),
+    "test": (re.compile(r"實測|實跑|fixture|回歸|驗證輸出|probe|測試通過", re.IGNORECASE), "實測提及"),
+    "date": (re.compile(r"(?<!\d)20\d\d-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])(?!\d)"), "具體日期"),
 }
 
 STRONG, WEAK, BARE = 3, 1, 0
 
 
+def _has_valid_date(rx, text):
+    for m in rx.finditer(text):
+        try:
+            datetime.date.fromisoformat(m.group(0))
+            return True
+        except ValueError:
+            continue
+    return False
+
+
 def doc_signals(text):
     hit = {}
     for key, (rx, _) in SIGNALS.items():
-        hit[key] = bool(rx.search(text))
+        hit[key] = _has_valid_date(rx, text) if key == "date" else bool(rx.search(text))
     return hit
 
 
@@ -85,14 +96,23 @@ def invoke_counts():
                         d = json.loads(line)
                     except Exception:
                         continue
-                    if d.get("type") != "assistant":
+                    if not isinstance(d, dict) or d.get("type") != "assistant":
                         continue
-                    for b in ((d.get("message") or {}).get("content") or []):
+                    msg = d.get("message")
+                    if not isinstance(msg, dict):
+                        continue
+                    content = msg.get("content")
+                    if not isinstance(content, list):
+                        continue
+                    for b in content:
                         if not isinstance(b, dict) or b.get("type") != "tool_use":
                             continue
                         if b.get("name") != "Skill":
                             continue
-                        s = (b.get("input") or {}).get("skill")
+                        inp = b.get("input")
+                        if not isinstance(inp, dict):
+                            continue
+                        s = inp.get("skill")
                         if isinstance(s, str):
                             counts[s.split(":")[-1]] += 1
         except OSError:
@@ -100,22 +120,101 @@ def invoke_counts():
     return counts
 
 
+_FENCE_RE = re.compile(r"^\s*(```+|~~~+)")
+_SEP_CELL_RE = re.compile(r"^:?-{1,}:?$")
+_MD_LINK_RE = re.compile(r"\[([^\]]+)\]\([^)]*\)")
+
+
+def _split_md_table_row(line):
+    stripped = line.strip()
+    if "|" not in stripped:
+        return None
+    if stripped.startswith("|"):
+        stripped = stripped[1:]
+    if stripped.endswith("|"):
+        bs = 0
+        idx = len(stripped) - 2
+        while idx >= 0 and stripped[idx] == "\\":
+            bs += 1
+            idx -= 1
+        if bs % 2 == 0:
+            stripped = stripped[:-1]
+    cells = []
+    buf = []
+    i = 0
+    n = len(stripped)
+    while i < n:
+        ch = stripped[i]
+        if ch == "\\" and i + 1 < n and stripped[i + 1] == "|":
+            buf.append("|")
+            i += 2
+            continue
+        if ch == "|":
+            cells.append("".join(buf).strip())
+            buf = []
+            i += 1
+            continue
+        buf.append(ch)
+        i += 1
+    cells.append("".join(buf).strip())
+    return cells
+
+
+def _is_separator_row(cells):
+    return bool(cells) and all(_SEP_CELL_RE.match(c) for c in cells)
+
+
+def _extract_skill_name(cell):
+    cleaned = _MD_LINK_RE.sub(r"\1", cell).strip()
+    if not cleaned:
+        return ""
+    token = cleaned.split()[0]
+    return token.strip("`*_")
+
+
 def origins(skills_dir):
     """從 INVENTORY.md 讀 Origin 欄。cloned skill 沒有『踩過的坑』段是因為那是使用者自己的
     寫作慣例、不是沒驗證——不分 origin 就會系統性冤枉 clone 來的 skill。"""
     inv = skills_dir / "INVENTORY.md"
     out = {}
-    if not inv.exists():
+    if not inv.is_file():
         return out
-    for line in inv.read_text(errors="ignore").splitlines():
-        if not line.startswith("| "):
+    try:
+        text = inv.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return out
+    in_fence = None
+    table_cols = None
+    for line in text.splitlines():
+        fence = _FENCE_RE.match(line)
+        if fence:
+            marker = fence.group(1)[0]
+            if in_fence is None:
+                in_fence = marker
+                table_cols = None
+            elif in_fence == marker:
+                in_fence = None
             continue
-        cells = [c.strip() for c in line.split("|")]
-        if len(cells) < 3:
+        if in_fence is not None:
             continue
-        name = cells[1].strip("`* ").split(" ")[0]
-        origin = cells[2].lower()
-        if not name or set(name) <= set("-: "):
+        cells = _split_md_table_row(line)
+        if cells is None:
+            table_cols = None
+            continue
+        if _is_separator_row(cells):
+            continue
+        lowered = [c.strip("`*_ ").lower() for c in cells]
+        if "skill" in lowered and "origin" in lowered:
+            table_cols = (lowered.index("skill"), lowered.index("origin"))
+            continue
+        if table_cols is None:
+            continue
+        skill_idx, origin_idx = table_cols
+        if len(cells) <= max(skill_idx, origin_idx):
+            continue
+        name = _extract_skill_name(cells[skill_idx])
+        origin = cells[origin_idx].strip().lower()
+        if not name or not origin or set(name) <= set("-: "):
             continue
         if name.lower() in ("skill", "audit", "name", "origin"):
             continue
@@ -125,21 +224,28 @@ def origins(skills_dir):
 
 def collect(skills_dir):
     out = []
-    for d in sorted(skills_dir.iterdir()):
+    if not skills_dir.is_dir():
+        return out
+    try:
+        entries = sorted(skills_dir.iterdir())
+    except OSError:
+        return out
+    for d in entries:
         if not d.is_dir():
             continue
         f = d / "SKILL.md"
-        if not f.exists():
+        if not f.is_file():
             continue
         try:
-            t = f.read_text(errors="ignore")
+            raw = f.read_bytes()
         except OSError:
             continue
+        t = raw.decode("utf-8", errors="ignore")
         hit = doc_signals(t)
         out.append(
             {
                 "skill": d.name,
-                "bytes": len(t),
+                "bytes": len(raw),
                 "signals": hit,
                 "signal_count": sum(hit.values()),
                 "evidence": grade(hit),
@@ -155,6 +261,9 @@ def main():
     args = ap.parse_args()
 
     sd = Path(args.skills_dir)
+    if not sd.is_dir():
+        print(f"skills directory not found or not a directory: {sd}", file=sys.stderr)
+        return 2
     rows = collect(sd)
     counts = invoke_counts()
     orig = origins(sd)
@@ -211,10 +320,15 @@ def main():
     name_only = set()
     for sp in ("~/.claude/settings.json", "~/.claude-team/settings.json"):
         try:
-            ov = json.loads(Path(sp).expanduser().read_text()).get("skillOverrides", {})
-            name_only.update(k for k, v in ov.items() if v == "name-only")
-        except (OSError, json.JSONDecodeError):
+            cfg = json.loads(Path(sp).expanduser().read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError):
             continue
+        if not isinstance(cfg, dict):
+            continue
+        ov = cfg.get("skillOverrides")
+        if not isinstance(ov, dict):
+            continue
+        name_only.update(k for k, v in ov.items() if v == "name-only")
 
     print(f"### ⚪ 外部 skill 零使用（共 {len(other)} 個外部/未知 origin）")
     print("判準只看使用量——外部 skill 的證據訊號不適用。零使用代表庫存成本（context 注入 + 上游追蹤）沒回報。")

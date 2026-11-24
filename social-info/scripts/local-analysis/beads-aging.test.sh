@@ -128,21 +128,88 @@ QUIET="$TMP/quiet.md"
 ARGS_LOG="$TMP/quiet.log" FAKE_DATA_DIR="$DATA" python3 "$SCRIPT" --date 2026-07-31 --out "$QUIET" --root "$ROOT/quiet" --bd-bin "$FAKE" >/dev/null 2>&1
 check "無候選輸出 SILENT" test "$(cat "$QUIET")" = '__SILENT__'
 
-MALFORMED_ERR="$TMP/malformed.err"
-ARGS_LOG="$TMP/malformed.log" FAKE_DATA_DIR="$DATA" python3 "$SCRIPT" --date 2026-07-31 --out "$TMP/malformed.md" --root "$ROOT/malformed" --bd-bin "$FAKE" >/dev/null 2>"$MALFORMED_ERR"
+MALFORMED_OUT="$TMP/malformed.md"
+ARGS_LOG="$TMP/malformed.log" FAKE_DATA_DIR="$DATA" python3 "$SCRIPT" --date 2026-07-31 --out "$MALFORMED_OUT" --root "$ROOT/malformed" --bd-bin "$FAKE" >/dev/null 2>"$TMP/malformed.err"
 MALFORMED_STATUS=$?
-check "畸形 issue 明確失敗" test "$MALFORMED_STATUS" = 1
-check "畸形 issue 錯誤含 repo 與 index" bash -c "grep -qF '$ROOT/malformed' '$MALFORMED_ERR' && grep -qF 'issue 0' '$MALFORMED_ERR'"
+check "畸形 issue 寫入失敗段不中斷整體掃描" test "$MALFORMED_STATUS" = 0
+check "畸形 issue 報告含 repo 與 index" bash -c "grep -qF '掃描失敗 repo' '$MALFORMED_OUT' && grep -qF '$ROOT/malformed' '$MALFORMED_OUT' && grep -qF 'issue 0' '$MALFORMED_OUT'"
 
 LINK_OUT="$TMP/linked.md"
 ARGS_LOG="$TMP/linked.log" FAKE_DATA_DIR="$DATA" python3 "$SCRIPT" --date 2026-07-31 --out "$LINK_OUT" --root "$LINK_ROOT" --bd-bin "$FAKE" >/dev/null 2>&1
 check "symlink 專案會被掃到" grep -qF 'linked-overdue' "$LINK_OUT"
 
-SLOW_ERR="$TMP/slow.err"
-ARGS_LOG="$TMP/slow.log" FAKE_DATA_DIR="$DATA" python3 "$SCRIPT" --date 2026-07-31 --out "$TMP/slow.md" --root "$ROOT/slow" --bd-bin "$SLOW" --bd-timeout 0.1 >/dev/null 2>"$SLOW_ERR"
+SLOW_OUT="$TMP/slow.md"
+ARGS_LOG="$TMP/slow.log" FAKE_DATA_DIR="$DATA" python3 "$SCRIPT" --date 2026-07-31 --out "$SLOW_OUT" --root "$ROOT/slow" --bd-bin "$SLOW" --bd-timeout 0.1 >/dev/null 2>"$TMP/slow.err"
 SLOW_STATUS=$?
-check "bd timeout 非 0 退出" test "$SLOW_STATUS" = 1
-check "bd timeout 錯誤含 repo" bash -c "grep -qF '$ROOT/slow' '$SLOW_ERR' && grep -qi 'timed out' '$SLOW_ERR'"
+check "bd timeout 寫入失敗段並 0 退出" test "$SLOW_STATUS" = 0
+check "bd timeout 報告含 repo 與 timed out" bash -c "grep -qF '掃描失敗 repo' '$SLOW_OUT' && grep -qF '$ROOT/slow' '$SLOW_OUT' && grep -qi 'timed out' '$SLOW_OUT'"
+
+BADJSON_ROOT="$TMP/badjson-root"
+mkdir -p "$BADJSON_ROOT/bad-json/.beads" "$BADJSON_ROOT/bad-date/.beads" "$BADJSON_ROOT/empty-due-at/.beads"
+FAKE_EDGE="$TMP/bd-edge"
+cat > "$FAKE_EDGE" <<'EOF'
+#!/bin/bash
+repo=""
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "-C" ]; then
+    repo="$2"
+    shift 2
+    continue
+  fi
+  shift
+done
+name=$(basename "$repo")
+case "$name" in
+  bad-json) printf '{not valid json\n' ;;
+  bad-date) printf '[{"id":"bd1","title":"bad date","status":"open","priority":1,"updated_at":"not-a-date"}]\n' ;;
+  empty-due-at) printf '[{"id":"ed1","title":"fallback due","status":"open","priority":2,"updated_at":"2026-07-30T00:00:00Z","due_at":"","due":"2026-07-20T00:00:00Z"}]\n' ;;
+  *) python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1]))))' "$FAKE_DATA_DIR/$name.json" ;;
+esac
+EOF
+chmod +x "$FAKE_EDGE"
+
+EDGE_JSON_OUT="$TMP/edge-json.md"
+FAKE_DATA_DIR="$DATA" python3 "$SCRIPT" --date 2026-07-31 --out "$EDGE_JSON_OUT" --root "$ROOT/project-b" --root "$BADJSON_ROOT/bad-json" --bd-bin "$FAKE_EDGE" >/dev/null 2>"$TMP/edge-json.err"
+EDGE_JSON_RC=$?
+check "bd 畸形 JSON 隔離失敗不中斷健康 repo" test "$EDGE_JSON_RC" = 0
+check "bd 畸形 JSON 報告含健康候選與失敗段" bash -c "grep -qF 'b-overdue' '$EDGE_JSON_OUT' && grep -qF 'bad-json' '$EDGE_JSON_OUT'"
+
+EDGE_DATE_OUT="$TMP/edge-date.md"
+FAKE_DATA_DIR="$DATA" python3 "$SCRIPT" --date 2026-07-31 --out "$EDGE_DATE_OUT" --root "$ROOT/project-b" --root "$BADJSON_ROOT/bad-date" --bd-bin "$FAKE_EDGE" >/dev/null 2>"$TMP/edge-date.err"
+EDGE_DATE_RC=$?
+check "無效日期 issue 隔離失敗不中斷健康 repo" test "$EDGE_DATE_RC" = 0
+check "無效日期 issue 報告含健康候選與失敗段" bash -c "grep -qF 'b-overdue' '$EDGE_DATE_OUT' && grep -qF 'bad-date' '$EDGE_DATE_OUT'"
+check "無效日期的失敗段指出 issue ID 與欄位" grep -qE 'issue bd1 .*has invalid updated_at' "$EDGE_DATE_OUT"
+
+python3 "$SCRIPT" --date 2026-07-31 --out "$TMP/nan.md" --root "$TMP/empty-root" --bd-bin "$FAKE" --bd-timeout nan >/dev/null 2>&1
+NAN_RC=$?
+check "--bd-timeout nan 拒絕執行" test "$NAN_RC" != 0
+
+python3 "$SCRIPT" --date 2026-07-31 --out "$TMP/inf.md" --root "$TMP/empty-root" --bd-bin "$FAKE" --bd-timeout inf >/dev/null 2>&1
+INF_RC=$?
+check "--bd-timeout inf 拒絕執行" test "$INF_RC" != 0
+
+EMPTY_DUE_OUT="$TMP/empty-due.md"
+FAKE_DATA_DIR="$DATA" python3 "$SCRIPT" --date 2026-07-31 --out "$EMPTY_DUE_OUT" --root "$BADJSON_ROOT/empty-due-at" --bd-bin "$FAKE_EDGE" >/dev/null 2>&1
+check "空字串 due_at 應退回使用 due 欄位" grep -qF 'ed1' "$EMPTY_DUE_OUT"
+
+BOUNDARY_ROOT="$TMP/boundary-root"
+mkdir -p "$BOUNDARY_ROOT/exact-bounds/.beads"
+cat > "$DATA/exact-bounds.json" <<'EOF'
+[
+  {"id":"due-day-7","title":"exact 7 days due","status":"open","priority":2,"updated_at":"2026-07-30T00:00:00Z","due_at":"2026-08-07"},
+  {"id":"stale-day-30","title":"exact 30 days stale","status":"open","priority":2,"updated_at":"2026-07-01T00:00:00+08:00"}
+]
+EOF
+BOUND_OUT="$TMP/exact-bounds.md"
+ARGS_LOG="$TMP/bound.log" FAKE_DATA_DIR="$DATA" python3 "$SCRIPT" --date 2026-07-31 --out "$BOUND_OUT" --root "$BOUNDARY_ROOT/exact-bounds" --bd-bin "$FAKE" --limit 10 >/dev/null 2>&1
+check "剛好 7 天內到期邊界入選" grep -qF 'due-day-7' "$BOUND_OUT"
+check "剛好 30 天未更新邊界入選" grep -qF 'stale-day-30' "$BOUND_OUT"
+
+mkdir -p "$BOUNDARY_ROOT/year-end/.beads"
+printf '%s\n' '[{"id":"due-at-max","title":"due at date.max","priority":2,"updated_at":"9999-12-30","due_at":"9999-12-31"}]' > "$DATA/year-end.json"
+ARGS_LOG="$TMP/year-end.log" FAKE_DATA_DIR="$DATA" python3 "$SCRIPT" --date 9999-12-30 --out "$TMP/year-end.md" --root "$BOUNDARY_ROOT/year-end" --bd-bin "$FAKE" >/dev/null
+check "接近最晚曆日仍能分類隔日到期議題" bash -c 'grep -qF "due-at-max" "$1" && grep -qF "reason: 1 天內到期" "$1"' _ "$TMP/year-end.md"
 
 printf '\n%s PASS / %s FAIL\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

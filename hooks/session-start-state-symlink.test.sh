@@ -2,7 +2,8 @@
 # 本檔在契約測試底下：bash ~/.claude/hooks/session-start-state-symlink.test.sh
 set -euo pipefail
 
-HOOK="$HOME/.claude/hooks/session-start-state.sh"
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+HOOK="$SCRIPT_DIR/session-start-state.sh"
 [ -x "$HOOK" ] || {
   printf 'FAIL state hook is missing or not executable\n'
   exit 1

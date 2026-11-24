@@ -41,8 +41,15 @@ if [ -n "$DATE" ] && [ -f "$MANIFEST" ]; then
 fi
 
 SCAN_MANIFEST="$TMP/scan-manifest"
-if [ ! -d "$PROJECTS_DIR" ] || ! find "$PROJECTS_DIR" -maxdepth 2 -type f -name '*.jsonl' -print0 > "$SCAN_MANIFEST"; then
+if [ ! -d "$PROJECTS_DIR" ]; then
   exit 1
+fi
+FIND_ERR="$TMP/find.err"
+if ! find "$PROJECTS_DIR" -maxdepth 2 -type f -name '*.jsonl' -print0 > "$SCAN_MANIFEST" 2>"$FIND_ERR"; then
+  if grep -qv 'No such file or directory' "$FIND_ERR"; then
+    cat "$FIND_ERR" >&2
+    exit 1
+  fi
 fi
 
 if [ -n "$DATE" ] && [ -f "$LEDGER" ]; then
@@ -102,8 +109,10 @@ while IFS= read -r -d '' file; do
   case "$file" in
     */subagents/*|*widget-log*) continue ;;
   esac
+  [ -f "$file" ] || continue
   invoke_file="$TMP/invokes"
-  if ! jq -r 'select(.message.content != null) as $row | $row.message.content | if type == "array" then .[] else empty end | select(.type == "tool_use" and .name == "Skill" and (.input.skill // "") == "research-before-answer") | $row.timestamp // empty' "$file" > "$invoke_file"; then
+  if ! jq -r 'select(.message.content != null) as $row | $row.message.content | if type == "array" then .[] else empty end | select(.type == "tool_use" and .name == "Skill" and (.input.skill // "") == "research-before-answer") | $row.timestamp // empty' "$file" > "$invoke_file" 2>/dev/null; then
+    [ ! -f "$file" ] && continue
     exit 1
   fi
   invoke_timestamp=""

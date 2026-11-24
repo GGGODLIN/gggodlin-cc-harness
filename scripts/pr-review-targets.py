@@ -44,7 +44,7 @@ REVIEW_DIFF_OPTIONS = (
   "--no-color", "--no-ext-diff", "--no-textconv", "--src-prefix=a/", "--dst-prefix=b/", "-M",
 )
 RELATED_PR_FIELDS = (
-  "target_identity", "pr", "author", "base_ref", "merge_commit", "merge_first_parent", "head",
+  "target_identity", "pr", "state", "author", "base_ref", "merge_commit", "merge_first_parent", "head",
 )
 DEFAULT_REPORTS_ROOT = Path(__file__).resolve().parent.parent / "pr-review-reports"
 REPORT_PR_LINE = re.compile(r"^\*\*PR\*\*:.*\((https?://[^)\s]+)\)", re.MULTILINE)
@@ -107,6 +107,8 @@ def platform_for_host(host):
 
 
 def parse_input(item, current_repo):
+  if not isinstance(item, dict):
+    return None, "AMBIGUOUS_INPUT"
   raw = str(item.get("raw") or "").strip()
   for pattern, host in ((GITHUB_URL, "github.com"), (BITBUCKET_URL, "bitbucket.org")):
     match = pattern.match(raw)
@@ -119,7 +121,7 @@ def parse_input(item, current_repo):
         "pr": pr,
       }, None
   if BARE_NUMBER.match(raw):
-    if not item.get("named_in_conversation") or not current_repo:
+    if not item.get("named_in_conversation") or not isinstance(current_repo, dict):
       return None, "AMBIGUOUS_INPUT"
     identity = remote_identity(current_repo.get("remote"))
     if identity is None:
@@ -150,7 +152,7 @@ def normalize_inputs(payload):
       reason_codes.append(code)
 
   items = payload.get("inputs")
-  if not items:
+  if not isinstance(items, list) or not items:
     note("EMPTY_INPUT")
     return [], reason_codes
   current_repo = payload.get("current_repo")
@@ -178,6 +180,9 @@ def normalize_inputs(payload):
   return parsed_items, reason_codes
 
 
+VENDORED_DIR_NAMES = {segment.rstrip("/") for segment in VENDORED_SEGMENTS}
+
+
 def source_files(changed_files):
   result = []
   for value in changed_files or []:
@@ -187,7 +192,7 @@ def source_files(changed_files):
       continue
     if lowered.endswith(GENERATED_SUFFIXES):
       continue
-    if any(segment in lowered for segment in VENDORED_SEGMENTS):
+    if any(part in VENDORED_DIR_NAMES for part in lowered.split("/")[:-1]):
       continue
     if lowered.endswith(DOC_SUFFIXES):
       continue
@@ -218,6 +223,17 @@ def materials_root_for(state_root, target, run_id, total):
 
 def safe_slug(value):
   return bool(SAFE_SLUG.match(str(value or ""))) and ".." not in str(value)
+
+
+def safe_ref_name(ref):
+  text = str(ref or "")
+  if not text or text.startswith("-") or text.startswith("/") or text.endswith("/"):
+    return False
+  if ".." in text or "@{" in text or "\\" in text:
+    return False
+  if any(ord(ch) <= 32 or ord(ch) == 127 for ch in text):
+    return False
+  return True
 
 
 def response_problem(parsed, response):
@@ -290,8 +306,8 @@ def adjudicate_target(payload, parsed, response, repos):
     ("head", str(response.get("head_ref") or ""), head),
     ("base", str(response.get("base_ref") or ""), base),
   ):
-    if not ref:
-      return failure("TARGET_VERSION_UNRESOLVED", f"{label} ref missing from platform response")
+    if not safe_ref_name(ref):
+      return failure("TARGET_VERSION_UNRESOLVED", f"{label} ref missing or invalid in platform response")
     resolved = git_ok(checkout, "rev-parse", f"refs/remotes/origin/{ref}")
     if resolved is None:
       return failure("TARGET_VERSION_UNRESOLVED", f"origin/{ref} not present in checkout")
@@ -299,6 +315,28 @@ def adjudicate_target(payload, parsed, response, repos):
       return failure("TARGET_VERSION_MISMATCH", f"origin/{ref} is {resolved}, platform reports {sha}")
     if git_ok(checkout, "cat-file", "-e", f"{sha}^{{commit}}") is None:
       return failure("TARGET_VERSION_UNRESOLVED", f"{sha} is not a commit in the checkout")
+
+  raw_diff_lines = response.get("diff_lines")
+  if raw_diff_lines is None:
+    diff_lines = 0
+  elif isinstance(raw_diff_lines, bool):
+    return failure("TARGET_METADATA_INVALID", "diff_lines must be a non-negative integer")
+  else:
+    try:
+      diff_lines = int(raw_diff_lines)
+    except (ValueError, TypeError):
+      return failure("TARGET_METADATA_INVALID", "diff_lines must be a non-negative integer")
+    if diff_lines < 0:
+      return failure("TARGET_METADATA_INVALID", "diff_lines must be a non-negative integer")
+
+  raw_specs = response.get("specs")
+  if raw_specs is not None and not isinstance(raw_specs, list):
+    return failure("TARGET_METADATA_INVALID", "specs must be a list of objects")
+  specs = []
+  for spec in raw_specs or []:
+    if not isinstance(spec, dict) or not str(spec.get("path") or "").strip():
+      return failure("TARGET_METADATA_INVALID", "each spec entry must be an object with a path")
+    specs.append({"path": str(spec["path"]), "content": str(spec.get("content") or "")})
 
   trunk, trunk_source, rules = resolve_rules(payload, checkout, remote)
   authored_diff_base = git_ok(checkout, "merge-base", f"refs/remotes/origin/{trunk}", head) or base
@@ -318,11 +356,8 @@ def adjudicate_target(payload, parsed, response, repos):
     "authored_diff_base": authored_diff_base,
     "checkout": str(checkout),
     "changed_files": [str(path) for path in response.get("changed_files") or []],
-    "diff_lines": int(response.get("diff_lines") or 0),
-    "specs": [
-      {"path": str(spec.get("path")), "content": str(spec.get("content") or "")}
-      for spec in response.get("specs") or []
-    ],
+    "diff_lines": diff_lines,
+    "specs": specs,
     "rules": rules,
   }, None
 
@@ -399,6 +434,26 @@ def adjudicate_merged_pr(parsed, response, repos):
 
   merge = str(response.get("merge_commit") or "")
   head = str(response.get("head") or "")
+  if str(response.get("state") or "").upper() == "OPEN":
+    # An open PR can only stand in for "the target branch after it merges" when its head already
+    # contains the branch tip; build_range checks that against the pinned tip, so here we only bind
+    # the head to a real commit and keep its branch name for that check.
+    if not COMMIT_SHA.match(head) or git_ok(checkout, "cat-file", "-e", f"{head}^{{commit}}") is None:
+      return failure("OPEN_PR_HEAD_UNVERIFIED", f"open PR head {head or '(none)'} is not a commit in the checkout")
+    return {
+      "target_identity": identity,
+      "pr": parsed["pr"],
+      "state": "open",
+      "author": str(response.get("author") or ""),
+      "base_ref": str(response.get("base_ref") or ""),
+      "merge_commit": "",
+      "merge_first_parent": "",
+      "head": head,
+      "head_ref": str(response.get("head_ref") or ""),
+      "landed_files": [],
+      "checkout": str(checkout),
+      "remote": remote,
+    }, None
   if not COMMIT_SHA.match(merge):
     return failure("MERGE_COMMIT_UNAVAILABLE", "platform reports no merge commit SHA")
   if git_ok(checkout, "cat-file", "-e", f"{merge}^{{commit}}") is None:
@@ -414,6 +469,7 @@ def adjudicate_merged_pr(parsed, response, repos):
   return {
     "target_identity": identity,
     "pr": parsed["pr"],
+    "state": "merged",
     "author": str(response.get("author") or ""),
     "base_ref": str(response.get("base_ref") or ""),
     "merge_commit": merge,
@@ -428,25 +484,32 @@ def adjudicate_merged_pr(parsed, response, repos):
 def since_by_repo(values, repos):
   values = [str(value).strip() for value in values or [] if str(value).strip()]
   if not values:
-    return {repo: None for repo in repos}, []
+    return {repo: None for repo in repos}, [], []
   mapping = {}
+  conflicting_keys = set()
   bare = []
   for value in values:
     repo, separator, sha = value.rpartition("=")
     if separator:
-      mapping[repo.lower()] = sha
+      key = repo.lower()
+      if key in mapping and mapping[key] != sha:
+        conflicting_keys.add(key)
+      mapping[key] = sha
     else:
       bare.append(value)
   resolved = {}
   failures = []
+  conflicts = []
   for repo in repos:
-    if repo.lower() in mapping:
+    if repo.lower() in conflicting_keys:
+      conflicts.append(repo)
+    elif repo.lower() in mapping:
       resolved[repo] = mapping[repo.lower()]
     elif len(repos) == 1 and len(bare) == 1:
       resolved[repo] = bare[0]
     else:
       failures.append(repo)
-  return resolved, failures
+  return resolved, failures, conflicts
 
 
 def order_merges(checkout, records):
@@ -502,13 +565,16 @@ def bound_report_paths(values):
   return {str(Path(str(value)).expanduser().resolve()) for value in values or [] if str(value).strip()}
 
 
-def choose_start(checkout, since_value, ordered, roots, candidates=(), bound=frozenset()):
+def choose_start(checkout, since_value, ordered, roots, candidates=(), bound=frozenset(), open_tip=None):
   if since_value is not None:
     sha = git_ok(checkout, "rev-parse", "--verify", "--quiet", f"{since_value}^{{commit}}")
     if not SINCE_VALUE.match(since_value) or not sha:
       return None, ("SINCE_UNRESOLVED", f"--since {since_value} does not resolve to a commit SHA")
     return {"sha": sha, "source": "since", "detail": f"--since {since_value}"}, None
   chosen = [candidate for candidate in candidates if candidate["path"] in bound]
+  if len(chosen) > 1:
+    return None, ("START_REPORT_AMBIGUOUS",
+                  f"{len(chosen)} bound prior reports match this repo; bind at most one")
   if chosen:
     report = chosen[0]
     return {
@@ -516,6 +582,12 @@ def choose_start(checkout, since_value, ordered, roots, candidates=(), bound=fro
       "source": "prior-report",
       "report": report["path"],
       "detail": f"bound prior report {report['path']}",
+    }, None
+  if not ordered and open_tip:
+    return {
+      "sha": open_tip,
+      "source": "open-pr-target-tip",
+      "detail": "target branch tip the open PR head already contains",
     }, None
   if roots != 1:
     return None, ("MERGE_ORDER_AMBIGUOUS",
@@ -542,27 +614,64 @@ def build_range(payload, key, records, since_value, candidates=()):
   branch = branches[0]
   identity = range_identity(key, branch)
   checkout = Path(records[0]["checkout"])
-  end = git_ok(checkout, "rev-parse", "--verify", "--quiet", f"refs/remotes/origin/{branch}^{{commit}}")
-  if not end:
+  opened = [record for record in records if record["state"] == "open"]
+  merged = [record for record in records if record["state"] != "open"]
+  if len(opened) > 1:
+    return failure("OPEN_PR_MULTIPLE",
+                   f"at most one open PR per repo can be the range end, got {[r['pr'] for r in opened]}",
+                   identity)
+  if not safe_ref_name(branch):
+    return failure("TARGET_BRANCH_UNRESOLVED", f"invalid target branch name: {branch}", identity)
+  tip = git_ok(checkout, "rev-parse", "--verify", "--quiet", f"refs/remotes/origin/{branch}^{{commit}}")
+  if not tip:
     return failure("TARGET_BRANCH_UNRESOLVED", f"origin/{branch} not present in checkout", identity)
-  for record in records:
-    reached = is_ancestor(checkout, record["merge_commit"], end)
+  for record in merged:
+    reached = is_ancestor(checkout, record["merge_commit"], tip)
     if reached is None:
       return failure("ANCESTRY_CHECK_FAILED",
-                     f"cannot check {record['merge_commit']} against origin/{branch} {end}",
+                     f"cannot check {record['merge_commit']} against origin/{branch} {tip}",
                      identity, record["pr"])
     if not reached:
       return failure("MERGE_NOT_IN_TARGET",
-                     f"{record['merge_commit']} is not an ancestor of origin/{branch} {end}",
+                     f"{record['merge_commit']} is not an ancestor of origin/{branch} {tip}",
                      identity, record["pr"])
-  order, problem = order_merges(checkout, records)
+  end = tip
+  end_info = {"sha": tip, "ref": f"refs/remotes/origin/{branch}", "source": "target-branch"}
+  if opened:
+    record = opened[0]
+    head_ref = f"refs/remotes/origin/{record['head_ref']}"
+    if not safe_ref_name(record["head_ref"]) or git_ok(checkout, "rev-parse", "--verify", "--quiet",
+                                                       f"{head_ref}^{{commit}}") != record["head"]:
+      return failure("OPEN_PR_HEAD_UNVERIFIED",
+                     f"{head_ref} does not resolve to the platform head {record['head']}; fetch the PR branch",
+                     identity, record["pr"])
+    reached = is_ancestor(checkout, tip, record["head"])
+    if reached is None:
+      return failure("ANCESTRY_CHECK_FAILED",
+                     f"cannot check origin/{branch} {tip} against open PR head {record['head']}",
+                     identity, record["pr"])
+    if not reached:
+      # No synthetic merge: a head behind the tip is not what will land, so it cannot be T.
+      return failure("OPEN_PR_BEHIND_TARGET",
+                     f"open PR head {record['head']} does not contain origin/{branch} {tip}; "
+                     "update the PR branch or wait for the merge",
+                     identity, record["pr"])
+    record["landed_files"] = name_status(checkout, tip, record["head"])
+    if record["landed_files"] is None:
+      return failure("RANGE_DIFF_FAILED", f"cannot diff {tip} {record['head']}", identity, record["pr"])
+    end = record["head"]
+    end_info = {"sha": end, "ref": head_ref, "source": "open-pr-head", "pr": record["pr"],
+                "target_branch_tip": tip}
+  order, problem = order_merges(checkout, merged)
   if problem:
     return failure(*problem, identity)
   ordered, roots = order
   start, problem = choose_start(checkout, since_value, ordered, roots, candidates,
-                                bound_report_paths(payload.get("start_report")))
+                                bound_report_paths(payload.get("start_report")),
+                                open_tip=tip if opened else None)
   if problem:
     return failure(*problem, identity)
+  ordered = [*ordered, *opened]
 
   landed = set()
   for record in ordered:
@@ -597,7 +706,7 @@ def build_range(payload, key, records, since_value, candidates=()):
     "target_branch": branch,
     "start": start,
     "start_candidates": list(candidates),
-    "end": {"sha": end, "ref": f"refs/remotes/origin/{branch}"},
+    "end": end_info,
     "related_prs": [
       {field: record[field] for field in RELATED_PR_FIELDS}
       for record in ordered
@@ -917,9 +1026,15 @@ def prepare_merged(payload, parsed_items, result, state_path, run_id):
     write_state(state_path, result)
     return result
 
-  since, unmapped = since_by_repo(payload.get("since"), [key[2] for key in groups])
+  since, unmapped, conflicting = since_by_repo(payload.get("since"), [key[2] for key in groups])
   for key in groups:
-    if key[2] in unmapped:
+    if key[2] in conflicting:
+      result["failures"].append({
+        "target_identity": range_identity(key), "pr": None, "destination_repo": key[2],
+        "reason_code": "SINCE_CONFLICTING",
+        "detail": f"conflicting --since values provided for {key[2]}",
+      })
+    elif key[2] in unmapped:
       result["failures"].append({
         "target_identity": range_identity(key), "pr": None, "destination_repo": key[2],
         "reason_code": "SINCE_REPO_MAPPING_REQUIRED",
@@ -1032,20 +1147,32 @@ def cancel(payload):
     return {"cancelled": False, "removed": [], "left_to_step7": [],
             "reason_codes": ["STATE_RUN_ID_MISMATCH"]}
 
-  materials_base = (state_file.parent / MATERIALS_DIRNAME / run_id)
+  materials_root = state_file.parent / MATERIALS_DIRNAME
+  lexical_base = materials_root / run_id
+  if materials_root.is_symlink() or lexical_base.is_symlink():
+    return {"cancelled": False, "removed": [], "left_to_step7": [],
+            "reason_codes": ["STATE_MATERIALS_OUT_OF_SCOPE"]}
   try:
-    materials_base = materials_base.resolve(strict=False)
+    resolved_materials_root = materials_root.resolve(strict=False)
+    materials_base = lexical_base.resolve(strict=False)
   except (OSError, RuntimeError):
     return {"cancelled": False, "removed": [], "left_to_step7": [],
             "reason_codes": ["STATE_RUN_ID_MISMATCH"]}
+  if materials_base.parent != resolved_materials_root:
+    return {"cancelled": False, "removed": [], "left_to_step7": [],
+            "reason_codes": ["STATE_MATERIALS_OUT_OF_SCOPE"]}
 
   planned = []
   for target in state.get("targets") or []:
     recorded = (target.get("materials") or {}).get("root")
     if not recorded:
       continue
+    lexical_target = Path(str(recorded)).expanduser()
+    if lexical_target.is_symlink():
+      return {"cancelled": False, "removed": [], "left_to_step7": [],
+              "reason_codes": ["STATE_MATERIALS_OUT_OF_SCOPE"]}
     try:
-      root = Path(str(recorded)).expanduser().resolve(strict=False)
+      root = lexical_target.resolve(strict=False)
     except (OSError, RuntimeError):
       return {"cancelled": False, "removed": [], "left_to_step7": [],
               "reason_codes": ["STATE_MATERIALS_OUT_OF_SCOPE"]}
@@ -1069,6 +1196,8 @@ def cancel(payload):
   state["targets"] = []
   state["division_of_labor"] = []
   state["material_manifest"] = {"shared": {}, "targets": {}}
+  if not isinstance(state.get("capacity"), dict):
+    state["capacity"] = {}
   state["capacity"]["review_set"] = aggregate_capacity_report([])
   state["capacity"]["unresolved"] = []
   state["capacity"]["waiting_seats"] = []
@@ -1089,6 +1218,10 @@ def main(argv=None):
   try:
     payload = json.load(sys.stdin)
   except (json.JSONDecodeError, OSError, UnicodeDecodeError):
+    json.dump({"status": "ERROR", "reason_codes": ["INVALID_INPUT_JSON"]}, sys.stdout)
+    sys.stdout.write("\n")
+    return 1
+  if not isinstance(payload, dict):
     json.dump({"status": "ERROR", "reason_codes": ["INVALID_INPUT_JSON"]}, sys.stdout)
     sys.stdout.write("\n")
     return 1

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { createInterface } from "node:readline";
+import { normalizeTimestamp } from "./text.mjs";
 
 const hasText = (text) => typeof text === "string" && text.trim().length > 0;
 const isObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
@@ -112,7 +113,7 @@ const collectClaudeRecord = (record, recordIndex, collected, assistantGroups) =>
     collected.push({
       id: record.uuid ?? record.message.id ?? record.requestId ?? `claude:${recordIndex}`,
       role: "user",
-      timestamp: record.timestamp ?? null,
+      timestamp: normalizeTimestamp(record.timestamp),
       text: userText,
       sourceIndex: recordIndex
     });
@@ -138,7 +139,7 @@ const collectClaudeRecord = (record, recordIndex, collected, assistantGroups) =>
   const entry = {
     id,
     role: "assistant",
-    timestamp: record.timestamp ?? null,
+    timestamp: normalizeTimestamp(record.timestamp),
     texts: [...texts],
     sourceIndex: recordIndex
   };
@@ -156,7 +157,7 @@ const collectCodexRecord = (record, recordIndex, collected) => {
     collected.push({
       id: payload.id ?? record.id ?? `codex:user:${recordIndex}`,
       role: "user",
-      timestamp: record.timestamp ?? payload.timestamp ?? null,
+      timestamp: normalizeTimestamp(record.timestamp) ?? normalizeTimestamp(payload.timestamp),
       text: payload.message,
       sourceIndex: recordIndex
     });
@@ -178,7 +179,7 @@ const collectCodexRecord = (record, recordIndex, collected) => {
   collected.push({
     id: payload.id ?? record.id ?? `codex:${recordIndex}`,
     role: "assistant",
-    timestamp: record.timestamp ?? payload.timestamp ?? null,
+    timestamp: normalizeTimestamp(record.timestamp) ?? normalizeTimestamp(payload.timestamp),
     text: texts.join("\n\n"),
     sourceIndex: recordIndex
   });
@@ -235,6 +236,9 @@ export const extractMessages = async ({ vendor, transcriptPath }) => {
     try {
       const record = JSON.parse(line);
       observeClassification(classification, record);
+      if (!isObject(record)) {
+        continue;
+      }
       if (vendor === "claude") {
         collectClaudeRecord(record, recordIndex, collected, assistantGroups);
       } else {

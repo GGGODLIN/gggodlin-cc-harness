@@ -103,7 +103,7 @@ Fable seat 使用 `model: "fable"` 與 `<fable-ok> <review-implement-selection:v
 
 Main 收到本輪全部 reviewer 結果後，逐條查相關 evidence，再決定 finding。合成只使用本輪 selected seats 的 output，按 `<model, axis>` 保留來源；未選 seat 不補成缺席、不寫成完成。source／requirements evidence 每條都查；只有 behavioral claim 才跑 regression test；只有 safety／risk claim 才查 threat model。先去重再逐條依授權缺口分流，保留每個來源 ID 與 evidence。
 
-- Scope finding 用 `S1`、`S2`…；每條附 session path、event／turn ID、verbatim top-level user quote 與 implementation file:line，並標 `CONFIRMED` 或 `PLAUSIBLE`。直接 evidence 證明 reviewer 誤讀時才 dismiss；`CONFIRMED` scope finding block completion，`PLAUSIBLE` scope finding 上呈使用者。
+- Scope finding 用 `S1`、`S2`…；每條附 session path、event／turn ID、verbatim top-level user quote 與 implementation file:line，並標 `CONFIRMED` 或 `PLAUSIBLE`。直接 evidence 證明 reviewer 誤讀時 dismiss；`CONFIRMED` scope finding block completion；`PLAUSIBLE` scope finding 按授權缺口與信心分流：留在已批准目標內、不新增對外介面或承諾、且不改既有 acceptance 與風險承擔的高信心內部細節，由 Main 查證後自決 `accept`（轉 repair obligation 移除）或 `dispute`（保留並記下 evidence 與理由），只有涉及未批准的需求縮減、新承諾、範圍擴張、風險承擔改變，或低信心無法確認授權的 `PLAUSIBLE` scope finding 才上呈使用者。
 - YAGNI finding 用 `Y1`、`Y2`…；每條附 diff hunk、較小替代方案與仍滿足的 acceptance IDs。是否上呈只看授權缺口，不看 finding 數量、reviewer 異議或可撤回性。留在已批准授權內、且不改既有 acceptance 的條目，Main 查證後自決 `accept` 或 `dispute`，並記下 evidence 與理由；沒有實益就 `dispute`。`accept` 轉成 repair obligation；`dispute` 留在本輪 disposition，不因 reviewer 不同意就上呈。提案若是未批准的需求縮減、新承諾、範圍擴張或風險承擔改變，才標使用者待決策；只暫停依賴該決定的工作，已批准且不相依的工作繼續。
 - 去重後的列數只影響呈現：列數多時先給完整 overview，仍逐條做上面的授權分流。不因列數 >5 停止自動處理，也不隱藏、刪除或合併到使用者看不到的 finding。
 

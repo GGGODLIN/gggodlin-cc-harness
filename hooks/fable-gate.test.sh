@@ -19,7 +19,8 @@ WORKFLOW_TRANSCRIPT="$WORKFLOW_DIR/transcript.jsonl"
 UNWRITABLE="$TMP/unwritable"
 CONCURRENT_AUDIT="$TMP/concurrent-audit.jsonl"
 CONCURRENT_TRACE="$TMP/concurrent-trace.log"
-CACHE_DIR=/tmp/cc-widget-cache
+export CC_WIDGET_CACHE_DIR="$TMP/widget-cache"
+CACHE_DIR="$CC_WIDGET_CACHE_DIR"
 CACHE_SONNET_SID="t2-test-$$-cache-sonnet"
 CACHE_FABLE_SID="t2-test-$$-cache-fable"
 CACHE_SONNET="$CACHE_DIR/model-${CACHE_SONNET_SID}.txt"
@@ -28,7 +29,7 @@ FAILURES=0
 PASSES=0
 
 cleanup() {
-  rm -f "$CACHE_SONNET" "$CACHE_FABLE"
+  rm -rf "$CACHE_DIR"
   rm -f "$WORKFLOW_TRANSCRIPT"
   rmdir "$WORKFLOW_DIR" 2>/dev/null
   rmdir "$TMP/workflows" 2>/dev/null
@@ -118,6 +119,7 @@ printf '' > "$ENFORCE_SENTINEL"
 
 make_t2_copy "$T2_AUDIT" "$T2_TRACE"
 export FABLE_GATE_T2_HOOK_PATH="$T2_COPY"
+export T2_AGENT_DIR="$SCRIPT_DIR/../agents"
 
 # fable main + 無 token → 原 no-token deny（T2 在 fable 下不再 bypass、照常執行）
 INPUT=$(make_input "t2-test-$$-f1" "$FABLE_TRANSCRIPT" "inspect" "no token" "general-purpose")

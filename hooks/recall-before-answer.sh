@@ -16,12 +16,31 @@
 set -uo pipefail
 
 INPUT=$(cat)
-PROMPT=$(printf '%s' "$INPUT" | jq -r 'if (.prompt? | type) == "string" then .prompt else "" end' 2>/dev/null) || exit 0
-SESSION_ID=$(printf '%s' "$INPUT" | jq -r 'if (.session_id? | type) == "string" then .session_id else "" end' 2>/dev/null) || exit 0
-SOURCE=$(printf '%s' "$INPUT" | jq -r 'if (.source? | type) == "string" then .source else "" end' 2>/dev/null) || exit 0
-PROMPT_SOURCE=$(printf '%s' "$INPUT" | jq -r 'if (.promptSource? | type) == "string" then .promptSource elif (.prompt_source? | type) == "string" then .prompt_source else "" end' 2>/dev/null) || exit 0
-ORIGIN_KIND=$(printf '%s' "$INPUT" | jq -r 'if (.origin.kind? | type) == "string" then .origin.kind else "" end' 2>/dev/null) || exit 0
-COMMAND_NAME=$(printf '%s' "$INPUT" | jq -r 'if (.command_name? | type) == "string" then .command_name elif (.commandName? | type) == "string" then .commandName else "" end' 2>/dev/null) || exit 0
+PROMPT=""
+SESSION_ID=""
+SOURCE=""
+PROMPT_SOURCE=""
+ORIGIN_KIND=""
+COMMAND_NAME=""
+if ! {
+  IFS= read -r -d '' PROMPT
+  IFS= read -r -d '' SESSION_ID
+  IFS= read -r -d '' SOURCE
+  IFS= read -r -d '' PROMPT_SOURCE
+  IFS= read -r -d '' ORIGIN_KIND
+  IFS= read -r -d '' COMMAND_NAME
+} < <(printf '%s' "$INPUT" | jq -j '
+  if type == "object" then
+    (if (.prompt? | type) == "string" then .prompt else "" end), "\u0000",
+    (if (.session_id? | type) == "string" then .session_id else "" end), "\u0000",
+    (if (.source? | type) == "string" then .source else "" end), "\u0000",
+    (if (.promptSource? | type) == "string" then .promptSource elif (.prompt_source? | type) == "string" then .prompt_source else "" end), "\u0000",
+    (if (.origin? | type) == "object" and (.origin.kind? | type) == "string" then .origin.kind else "" end), "\u0000",
+    (if (.command_name? | type) == "string" then .command_name elif (.commandName? | type) == "string" then .commandName else "" end), "\u0000"
+  else empty end
+' 2>/dev/null); then
+  exit 0
+fi
 
 case "$PROMPT" in
   /*|*"[SYSTEM NOTIFICATION"*|*"<task-notification>"*|*"<system-reminder>"*|*"<command-name>"*) exit 0 ;;
@@ -37,9 +56,10 @@ case "$ORIGIN_KIND" in
 esac
 [ -n "$COMMAND_NAME" ] && exit 0
 
-STATE_DIR="${RECALL_BEFORE_ANSWER_STATE_DIR:-$HOME/.claude/hooks/state}"
-RECALL_DISABLED="${RECALL_BEFORE_ANSWER_DISABLED_SENTINEL:-$STATE_DIR/recall-before-answer.disabled}"
-INTERVIEW_DISABLED="${INTERVIEW_MODE_DISABLED_SENTINEL:-$STATE_DIR/interview-hook.disabled}"
+HOME_DIR="${HOME:-}"
+STATE_DIR="${RECALL_BEFORE_ANSWER_STATE_DIR:-${HOME_DIR:+$HOME_DIR/.claude/hooks/state}}"
+RECALL_DISABLED="${RECALL_BEFORE_ANSWER_DISABLED_SENTINEL:-${STATE_DIR:+$STATE_DIR/recall-before-answer.disabled}}"
+INTERVIEW_DISABLED="${INTERVIEW_MODE_DISABLED_SENTINEL:-${STATE_DIR:+$STATE_DIR/interview-hook.disabled}}"
 RECALL_PATTERN='我記得|之前|上次|上一輪|翻一下|翻出|翻翻|查一下|重撈|撈到|撈過|好像有|應該有|處理過|做過|試過|測過|評估過|研究過|討論過|問過|裝過|用過|看過|跑過|有沒有做|眼熟|研究紀錄|自創|不是有|當初|當年|當時|原本|印象|以前|先前|過去|一開始|那次|那時|昨天|前幾天'
 RECALL_STRIP_PHRASES='好像有點 做過濾 檢查一下 調查一下 用過幾 所以 那之前'
 INTERVIEW_ENTER_PATTERN='訪談|一題一題|一項一項|訪談式'
@@ -80,13 +100,14 @@ fi
 
 CONTEXT=""
 if [ "$INTERVIEW_ACTIVE" -eq 1 ]; then
-  CONTEXT='訪談模式：一次只問一題、附來龍去脈與建議答案、等答案再問下一題、不代答'
+  CONTEXT='訪談模式：一次只問一題、自帶白話（先附來龍去脈＋一個具體例子或前後差異，禁拿內部代號／檔名／參數當選項標題）與建議答案、等答案再問下一題、不代答'
 fi
 
 if [ "$RECALL_ENABLED" -eq 1 ]; then
   RECALL_SCAN=$PROMPT
   for strip_phrase in $RECALL_STRIP_PHRASES; do
-    RECALL_SCAN=${RECALL_SCAN//$strip_phrase/}
+    # Replace with a space instead of empty string so stripping doesn't glue flanking chars into a false match (e.g. 跑所以過 -> 跑過).
+    RECALL_SCAN=${RECALL_SCAN//$strip_phrase/ }
   done
   HIT=$(printf '%s' "$RECALL_SCAN" | grep -oE "$RECALL_PATTERN" | head -n 1 || true)
   if [ -n "$HIT" ]; then

@@ -32,7 +32,7 @@ import urllib.request
 from pathlib import Path
 
 
-def gpt_model(key, table=Path('~/.claude/config/gpt-models.env').expanduser()):
+def gpt_model(key, table=Path(__file__).resolve().parents[1] / 'config/gpt-models.env'):
   # 型號只在共用版本表維護；讀不到就回 None 讓呼叫端報錯，不偷偷退回某個寫死的舊型號。
   try:
     lines = table.read_text().splitlines()
@@ -422,7 +422,7 @@ def main():
   ap.add_argument('--deadline', type=float, default=DEADLINE)
   a = ap.parse_args()
   if not a.model:
-    print(json.dumps({'error': 'GPT 版本表讀不到 GPT_SOL（~/.claude/config/gpt-models.env）；或用 --model 指定'}), file=sys.stderr)
+    print(json.dumps({'error': 'GPT 版本表讀不到 GPT_SOL（config/gpt-models.env）；或用 --model 指定'}), file=sys.stderr)
     return 1
 
   run = a.run

@@ -16,6 +16,22 @@
 - 放在 `~/.claude/scripts/`（除非是純 Claude Code 環境工具，例如 hook / cmux 整合）
 - 放 `/tmp/` 或當前 cwd 內 inline
 
+**如果新建的是自製工具**，在它的 `CLAUDE.md` 開頭放這段（檔案不存在就建立）：
+
+```
+## 程式碼所有權
+
+You are the owner and long-term maintainer of this codebase, and its design is up to you.
+
+看到重複程式碼或旁邊的問題可以直接整理。結尾回報要列出所有改動，小改動也要列。
+```
+
+下列幾類不放：這句會讓 agent 多做沒被要求的改動，這幾類改壞了沒人先發現，或會波及別處。
+- 替使用者對外做事或無人值守跑的（打卡、發訊息、自動發版）
+- 在 session 流量路徑上的（relay、proxy、gateway）
+- 實驗、評測、試用、黑客松交件
+- fork 或有上游 remote 的
+
 ## 例外
 
 - **純 Claude Code 環境擴展**（hook / skill / cmux 工具）→ `~/.claude/scripts/` 或 plugins 系統
@@ -29,7 +45,7 @@
 
 ## Vibe coding 模式：git / GitHub 操作授權
 
-`~/Desktop/projects/` 下面的所有專案都是**個人 vibe coding 專案**，原則上 agent 可以自由操作 git / github，不用每步 confirm。**本段是全域 `~/.claude/CLAUDE.md`「Git 工作流程」個人 repo 條的細則展開，不是 override**——全域已把個人 repo 的 commit / push / 開 PR 設為自動，本段只補這棵樹下的細節。
+`~/Desktop/projects/` 下面的所有專案都是**個人 vibe coding 專案**，原則上 agent 可以自由操作 git / github，不用每步 confirm。**本段是全域 `~/.claude/rules/common/git-workflow.md` 個人 repo 條的細則展開，不是 override**——全域已把個人 repo 的 commit / push / 開 PR 設為自動，本段只補這棵樹下的細節。
 
 ### 預設可自動執行（不用 confirm）
 
@@ -58,7 +74,6 @@
 - Conventional commits（feat / fix / docs / chore / refactor / test）
 - 每個 commit 一個邏輯單元，不要把無關改動塞同一個
 - 完成一段工作就 commit，別累積巨大 WIP
-- Co-Authored-By trailer 保留
 
 ## Vibe coding 模式：做完的標準
 

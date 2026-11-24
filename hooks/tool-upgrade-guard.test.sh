@@ -1,7 +1,8 @@
 #!/bin/bash
 set -u
-HOOK="$HOME/.claude/hooks/tool-upgrade-guard.py"
-T=$(mktemp -d /tmp/tool-upgrade-guard.XXXXXX)
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+HOOK="$SCRIPT_DIR/tool-upgrade-guard.py"
+T=$(mktemp -d "${TMPDIR:-/tmp}/tool-upgrade-guard.XXXXXX")
 trap 'rc=$?; rm -rf "$T"; exit $rc' EXIT
 REG="$T/notes.json"; PIN="$T/pin.py"; OFF="$T/off"
 OLD=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa

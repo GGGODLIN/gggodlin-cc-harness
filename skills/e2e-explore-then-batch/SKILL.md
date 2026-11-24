@@ -1,6 +1,6 @@
 ---
 name: e2e-explore-then-batch
-description: Use when e2e-route 已選派 Playwright 普通探索固化、e2e-contract 正式交入 Playwright 契約子集，或使用者手動點名 /e2e-explore-then-batch；包含擴案例與既有契約重跑。Do not use for 從自然語言自行選用（即使已選 Playwright 也先 e2e-route）、未確認契約直接執行、已選 TesterArmy、只修普通紅燈（systematic-debugging）、單元或純 API 測試、一次性驗收、網頁抓取、工具研究或 skill 設計。
+description: Use when e2e-route 已選派 Playwright 普通探索固化、e2e-contract 正式交入 Playwright 契約子集，或使用者手動點名 /e2e-explore-then-batch；包含擴案例與既有契約重跑。Do not use for 從自然語言自行選用（即使已選 Playwright 也先 e2e-route）、未確認契約直接執行、已選 TesterArmy、只修普通紅燈（debugging）、單元或純 API 測試、一次性驗收、網頁抓取、工具研究或 skill 設計。
 ---
 
 <!-- 本檔在契約測試底下：node --test skills/tests/ticket-08-skill-structure.test.mjs；python3 ~/.claude/commands/tests/test_skill_verify_one_shot_callers.py -->

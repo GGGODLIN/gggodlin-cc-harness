@@ -1,6 +1,6 @@
 ---
 name: gate-authoring
-description: Use when 使用者要「寫 / 改 / 加一個 hook」「設計 gate / detector / tripwire」「動 settings.json hooks 段」——涵蓋全域 ~/.claude/hooks/、任一 repo 專案級 .claude/hooks/、任何 settings.json / settings.local.json 的 hooks 註冊，以及自動化 loop 控制面設計。Do not use for：一般 settings 權限 / env var 調整（update-config）、trial 到期 review（trial-review）、既有 hook 行為 debug（systematic-debugging）。
+description: Use when 使用者要「寫 / 改 / 加一個 hook」「設計 gate / detector / tripwire」「動 settings.json hooks 段」——涵蓋全域 ~/.claude/hooks/、任一 repo 專案級 .claude/hooks/、任何 settings.json / settings.local.json 的 hooks 註冊，以及自動化 loop 控制面設計。Do not use for：一般 settings 權限 / env var 調整（update-config）、trial 到期 review（trial-review）、既有 hook 行為 debug（debugging）。
 ---
 
 <!-- 本檔在契約測試底下：bash ~/.claude/skills/gate-authoring/scripts/tests/readable-time-fixtures.test.sh -->
@@ -11,9 +11,14 @@ description: Use when 使用者要「寫 / 改 / 加一個 hook」「設計 gate
 
 ## Checklist（設計 / 修改 gate 時逐項過）
 
-### 0. 先寫 threat model，再寫規則
+### 0. 先過真實傷害檢核，再寫 threat model 與規則
 
-第一段先寫這支 gate 對誰有效、對誰明文不保證，因為它決定後面每一條規則要做多細：
+動手新建 hook 或加嚴既有 gate 前，先讀 `~/.claude/references/mechanism-iteration-materiality.md`（H1–H4 紅線與 N1–N4 放行條件）：
+
+- **AI 主動提案**：僅命中 N1–N4 且未命中任何 H1–H4 紅線時，不得標示為推薦新增 hook 或加嚴 gate，仍照列條目與理由於原提案清單（不另加停點）。
+- **使用者當面點名新增 hook 或加嚴既有 gate**：若實查僅命中 N1–N4（零 H1–H4 紅線），先簡短提醒兩句引用對應條目（N1–N4）與理由，請求**單次確認**後再動工；若命中任一 H1–H4 紅線則直接沿原流程推進，不增加額外確認停點。
+
+接著寫 threat model（第一段先寫這支 gate 對誰有效、對誰明文不保證，因為它決定後面每一條規則要做多細）：
 
 - **防漂移**（誠實但健忘的 agent 順手改了不該改的）→ 攔到常見入口就夠，不必窮盡語法
 - **防主動規避**（agent 刻意繞）→ 只有 agent 結構上做不到的事才算數（需要人在場的憑證、事前外部 permit）；字串比對一律不算
@@ -61,6 +66,8 @@ threat model 寫在文件最後當免責聲明沒有用——它的作用是在�
 - **自身生命週期**：第 1 條的 bootstrap / update / recovery 三條路徑各跑一件——把 gate 自己、它的 helper、它的測試檔當成待處理的內容送進去，確認走得通。前三件驗的是「輸入分類對不對」，這件驗的是「這支 gate 裝得上去、改得動、關得掉」，兩者抓的是不同類的死法
 
 四件可存 hook 旁的 `*.test.sh` 或 fixture 檔常駐，下次改動重跑。完成判準：四件都實跑過且結果符合預期，不是「看起來沒問題」。
+
+**加嚴再跑歷史回放**：如果這次改動新增或擴大 `~/.claude/hooks/` 底下 PreToolUse hook 的 deny／ask 條件，而且 hook 只看 `tool_input` 就下判決，就在 commit 前跑 `python3 ~/.claude/scripts/hook-replay.py --hook <檔名> --old HEAD --new WORKTREE`（已 commit 的改動用 `--old <commit>^ --new <commit>`；還沒註冊進 settings 的新 hook 加 `--tools <工具名>`）。它在 macOS sandbox-exec 裡（只准寫本次暫存目錄與 `/dev/null`、禁所有網路與 socket）把近 14 天的真實 tool call 餵新舊兩版，判決差異與出錯輸入再照各版 settings 註冊指令逐筆複核。讀它印出的完整結果 JSON 的 `changed_items`（含 allow／ask／deny 三態的新舊判決；終端只列變嚴的 `STRICTER` 前幾條），逐條（量大就抽樣）對照 hook 意圖判是不是誤擋，誤擋先補成 known-good 案例再修規則。這份 JSON 含歷史輸入原文，權限 0600，不要轉貼到外部。為什麼：手挑的 fixture 蓋不到真實寫法——實務上多次加嚴即使附了 fixture 仍可能帶誤擋。判決還依賴 git、票、permit、session 狀態、transcript 或網路回應的 hook 不適用；工具以 exit 3 印「不適用：…」時（預檢被擋、matcher 沒有 Bash／Read 可預檢、抽樣不一致超過 5%、偵測到停用開關、沒有歷史輸入）照實寫不適用，只有確認 hook 只看 tool_input 才加 `--no-preflight` 重跑。沒有判決改變不等於沒有誤擋風險，只代表近 14 天沒有例子；`fidelity_errors` 不為 0 時先看 `fidelity_error_samples`，那些輸入沒有判決可比；印出「同範圍還改了…」警告時，結論只涵蓋 hook 主檔。完成判準：`changed_items` 逐條或抽樣判讀過，或寫明不適用的原因。
 
 會寫檔的 gate 再加兩件**必測**（2026-08-25 自 Leonxlnx/unlazy tests 吸收）：
 
@@ -124,7 +131,8 @@ gate 或驗收項若靠跑指令判 PASS：成功條件必須是 **exit 0 且輸
 - 觀察期 KPI 設計 → 讀 memory `_index_hook_experiment_discipline`（含 trivial-diff 停滯警報條）
 - 摩擦盤點：本次設計／修改過程有無預見或撞到的摩擦 → append 所屬機制的 `friction-log.md`，無主的落 `~/.claude/friction/workflow-general.md`（格式與門檻見 `~/.claude/friction/PROTOCOL.md`）；無摩擦不留紀錄
 - 帳本盤點：本次 authoring 有無引入會被 append、供未來 agent 讀的檔案或目錄 → 登記 registry 或標明純 log；無則不留紀錄
-- Codex 已於 2026-09-20 停用：新掛或改 matcher 的 hook 不進 `~/.codex/hooks/cc-hooks.json`，也不補 Codex 端測試
+- 如果本次實際改動會改 harness 或改到 3 個以上檔案，就在交回報前讀 `~/.claude/references/advisor-checkpoint.md` 的「4. 改檔入口」段判斷是否同時命中未覆蓋新風險；只有命中並發問時才在使用者回覆前暫停交結案，未命中時不問、直接交回報
+- 預設新掛或改 matcher 的 hook 不自動寫進 `~/.codex/hooks/cc-hooks.json`、不補 Codex 端測試；使用者明確要求同步時才寫進去
 
 ## 踩過的坑
 

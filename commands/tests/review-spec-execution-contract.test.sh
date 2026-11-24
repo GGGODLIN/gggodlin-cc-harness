@@ -4,12 +4,13 @@ set -u
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 COMMAND="${REVIEW_SPEC_COMMAND_PATH:-$ROOT/commands/review-spec.md}"
 MODEL_ROUTING="${MODEL_ROUTING_PATH:-$ROOT/model-routing.env}"
+SSOT_REFERENCE="${SSOT_REFERENCE_PATH:-$ROOT/references/review-spec-ssot.md}"
 PASS=0
 FAIL=0
 
 assert_grep() {
-  local label=$1 pattern=$2
-  if grep -qE "$pattern" "$COMMAND"; then
+  local label=$1 pattern=$2 target=${3:-$COMMAND}
+  if command grep -qE -- "$pattern" "$target"; then
     printf 'PASS: %s\n' "$label"
     PASS=$((PASS + 1))
   else
@@ -76,6 +77,26 @@ assert_yagni_grep() {
 assert_t4_grep() {
   local label=$1 pattern=$2
   if awk '/^## Tier 4 /{in_t4=1} /^## 標準 Tier 1–4 共用收斂/{in_t4=0} in_t4' "$COMMAND" | grep -qE "$pattern"; then
+    printf 'PASS: %s\n' "$label"
+    PASS=$((PASS + 1))
+  else
+    printf 'FAIL: %s\n' "$label"
+    FAIL=$((FAIL + 1))
+  fi
+}
+
+assert_t4_gemini_grep() {
+  local label=$1 pattern=$2
+  if awk '
+    /^## / { tier4 = ($0 ~ /^## Tier 4 /); gemini = 0 }
+    /^### / { gemini = tier4 && ($0 == "### Gemini 開席與收席") }
+    gemini {
+      line = line $0
+      if (sub(/\\$/, "", line)) next
+      print line
+      line = ""
+    }
+  ' "$COMMAND" | command grep -qE -- "$pattern"; then
     printf 'PASS: %s\n' "$label"
     PASS=$((PASS + 1))
   else
@@ -154,13 +175,19 @@ assert_grep "Tier 3 stops unstarted seats after capacity rejection" '容量拒�
 assert_grep "Tier 4 uses detached rollout polling" 'subshell \+ nohup detach \+ rollout jsonl poll'
 assert_not_grep "Tier 4 no longer uses current-conversation read" 'web-cli chatgpt read'
 assert_not_grep "Tier 4 no longer forces foreground Codex" 'main session 前景跑|task --fresh.*不加.*--background'
-assert_grep "review-spec reads shared model routing" 'model-routing\.env'
-assert_grep "review-spec uses strict model routing helper" 'scripts/model-routing\.sh.*GEMINI_FLASH_MODEL'
 assert_not_grep "review-spec never sources routing data as shell" 'source .*model-routing\.env'
-assert_grep "review-spec uses shared Gemini Flash model" 'agy --model "\$GEMINI_FLASH_MODEL"'
-assert_not_grep "hardcoded agy Flash display model is absent" 'agy --model "Gemini [^"]*Flash[^"]*"'
-assert_not_grep "hardcoded agy Flash canonical id is absent" 'agy --model "gemini-[^"]*flash[^"]*"'
-assert_routing_grep "shared routing pins Gemini 3.8 Flash" '^GEMINI_FLASH_MODEL=gemini-3\.8-flash-high$'
+assert_t4_grep "Flash maps selection to a catalog seat" 'b\. Gemini Flash.*review-spec-gemini-flash'
+assert_t4_grep "Flash sends the unchanged no-lookup prompt and full spec" '原樣.*禁外查 adversarial 評審 prompt \+ spec 全文.*BRIEF_FILE'
+assert_t4_gemini_grep "Tier 4 Gemini opens the selected seat and writes its receipt" '^[[:blank:]]+python3 "\$SEAT_SCRIPTS/open-seat\.py" "\$SEAT_ID" "\$BRIEF_FILE" "\$PWD"[[:blank:]]+--log-dir "\$SEAT_LOG_DIR" > "\$SEAT_LOG_DIR/receipt\.json"'
+assert_t4_gemini_grep "Tier 4 Gemini waits with hc wait and reads reply with worker-turns.py --turn" '^2\. .*hc wait .*worker-turns\.py.*--turn'
+assert_t4_gemini_grep "Tier 4 Gemini reads the answer only on delivered done reply and keeps its output format" '^3\. 如果回件讀取器回 `delivered=true`（首行「做完了」），取 `\.reply` 當原 findings 回覆並沿用同一格式。'
+assert_t4_grep "Pro catalog seat starts only on explicit opt-in" 'review-spec-gemini-pro.*opt-in、預設不跑.*僅使用者點名才開'
+assert_t4_gemini_grep "Tier 4 Gemini keeps zero-tools launch lock and closes seat" '零工具.*hc kill.*hc rm'
+assert_t4_gemini_grep "Tier 4 Gemini marks launch, execution, and read failures without headless dispatch or auto-retry" '^4\. 如果席位開不起來、執行出錯、逾時或回件未交付，就保留原因並標該軸 `FAILED`，不自動重送、不改跑 `agy` 或其他無頭指令。$'
+assert_t4_gemini_grep "Tier 4 Gemini preserves both report labels" '\[agy-Flash\]`／`\[agy-Pro\]'
+assert_section_not_grep "Tier 4 Gemini has no headless fallback or fallback model lookup" '^### Gemini 開席與收席' '^## ' 'agy (--|-p)|agy_fallback_model|既有 `agy` 一次|GEMINI_(PRO|FLASH)_MODEL|ccp-gemini-(pro|flash) -p'
+assert_not_grep "review-spec drops legacy Gemini 3.1 Pro" 'Gemini 3\.1 Pro'
+assert_routing_grep "shared routing pins Magpie Flash role group" '^GEMINI_FLASH_MAGPIE_MODEL=group/gemini-flash:high$'
 assert_grep "Tier 3 binds vendor Opus and Fable mappings" 'ANTHROPIC_DEFAULT_OPUS_MODEL.*ANTHROPIC_DEFAULT_FABLE_MODEL'
 assert_grep "Tier 3 rejects identical vendor role mappings" '兩者必須非空且不同'
 assert_not_grep "Tier 3 no longer rejects every vendor session" '非空值直接停止'
@@ -173,10 +200,16 @@ assert_grep "Tier 3 verifier keeps explicit pair shortcut" '.*--pair <slug>:<opu
 assert_grep "Tier 3 completion follows selected seats" '單席只驗該席，只有選定配對才要求兩席都完成'
 assert_grep "Tier 3 reports incomplete selected seats" '選定席位未完成'
 assert_grep "Tier 3 does not count unselected seats" '不得拿舊記錄、單支、偽造 receipt 或未選席位冒充完成'
-assert_grep "architecture spec surfaces intent diagram choice" '架構意圖圖.*a\. 生成.*b\. 跳過'
+assert_grep "spec surfaces the pre-work plan page choice" '開工前計畫頁（改動清單＋圖）：a\. 生成.*b\. 跳過'
+assert_grep "plan page choice requires recommend-generate judgment" '判斷先看圖確實有助於核對架構意圖（推薦生成）.*才在最後一輪拍板表追加'
 assert_grep "intent nudge keys on boundary changes" 'boundary.*cross-boundary edge'
+assert_grep "routine UI or API surface changes and skip recommendations stay quiet" '單純新增、修改或刪除畫面、互動流程、API、資料欄位.*或你判斷不需要生成.*不問'
+assert_grep "plan JSON requires per-change reason and previous value" '`change`（`added`／`changed`／`removed`）、`item`、`why`，`changed` 另須 `before`'
+assert_grep "plan JSON carries open questions and bounded diagrams" '`questions\[\]`.*`diagrams\[\]` 放 1–4 張 SeeCode 規格.*`architecture-delta` 與 `swimlane`'
+# 產圖端已改為 SeeCode；移除舊指令避免 agent 退回舊路徑。
+assert_not_grep "intent no longer routes through the Archify wrapper" 'archify-safe\.mjs intent'
 assert_grep "intent skip or silence does not block implementation" '選 b 或不回答.*不阻塞'
-assert_grep "pre-generation skip invokes neither gate" '0 次 Archify.*0 次 Plannotator'
+assert_grep "pre-generation skip invokes neither gate" '0 次產圖.*0 次 Plannotator'
 assert_grep "intent launch requires receipt validation" '只有.*wrapper.*成功.*receipt validation.*才.*plannotator-review\.mjs intent'
 assert_grep "intent adapter launches as one background task" 'Bash\(run_in_background=true\).*plannotator-review\.mjs intent'
 assert_grep "intent adapter task binds its source receipt" 'adapterTaskId.*wrapper receipt identity'
@@ -226,8 +259,8 @@ assert_yagni_grep "zero demote requires concrete proof" '0.*demote.*逐條.*具�
 assert_yagni_grep "c seat uses batched sentinel contract" 'c 席走 deterministic 分批契約.*sentinel.*60 秒.*invalid'
 assert_yagni_grep "c seat asks the model tier before dispatch" '派工前先問模型級別'
 assert_yagni_grep "c seat tier menu resolves both actual values" 'fable 級 →.*opus 級 →'
-assert_yagni_grep "seat and model are asked as one merged menu" '席位＋模型合併成一題.*只回一個字母'
-assert_yagni_grep "Fable permit reads the Fable letters from the menu itself" '代表 fable 的字母'
+assert_yagni_grep "c seat resolves slot env overrides regardless of CC_VENDOR" '無論 `CC_VENDOR` 是否為空，一律先檢查環境變數 `ANTHROPIC_DEFAULT_FABLE_MODEL` 與 `ANTHROPIC_DEFAULT_OPUS_MODEL`'
+assert_yagni_grep "seat and model use flat free-mix menu" '平鋪席位選單.*單選任一席（含單跑 web GPT Pro）或自由組合'
 assert_yagni_grep "to-spec menu f counts as the YAGNI entry" 'review-spec-entry-menu:v1'
 assert_yagni_not_grep "the separate seat question is gone" '「派工擇一：YAGNI 席位（單選）— a. 只派 c 席 b. c 席 ＋ web GPT Pro 席'
 assert_yagni_grep "c seat flags a free-pool opus mapping" 'free 池'
@@ -236,26 +269,32 @@ assert_yagni_grep "resolved model is recorded, not an acceptance gate" 'resolved
 assert_yagni_grep "only a silent downgrade from the fable tier invalidates" '選了 fable 級卻跑出別的級別'
 assert_yagni_grep "any model inside the free pool counts as a match" 'free.*池內任何一顆都算相符'
 assert_yagni_not_grep "c seat no longer hardcodes the fable tier" '派工必帶 `model: "fable"`'
-assert_yagni_grep "silent model selection falls back to policy-compliant opus" 'AFK 或無回應走 opus 級'
-assert_yagni_grep "Fable menu names the packet path" '<review-spec-yagni-model-menu:v1 packet=<packet 絕對路徑>>'
-assert_yagni_grep "Fable selection issues a trusted permit" 'review-spec-yagni-permit.py issue --session'
-assert_yagni_grep "each Fable batch gets one permit marker" 'review-spec-yagni-permit.py marker --session.*--batch <stories\|decisions>'
-assert_yagni_grep "YAGNI Fable uses the dedicated marker" '<review-spec-yagni:v1'
-assert_yagni_grep "generic Fable marker is forbidden on YAGNI permits" 'description \*\*只放\*\*.*不加 generic `<fable-ok>`'
-assert_yagni_grep "Fable cleanup keeps the existing helper" 'review-spec-yagni-permit.py close --session'
-assert_yagni_not_grep "accepted dispatch alone never triggers cleanup" '兩個 Agent call 都被 gate 接受後，執行'
-assert_yagni_grep "accepted dispatch connects to deferred cleanup" '完成後接步驟 3 的交件核對與 3.1「Fable permit 收尾」'
-assert_yagni_grep "cleanup waits for terminal batches and checked results" '兩批都已完成、失敗或取消，且 main 已核對交件結果後'
-assert_yagni_grep "failed and cancelled results are preserved before cleanup" '失敗／取消先記錄結果，缺表不算審查通過'
-assert_yagni_grep "cleanup does not replay old reviews" '不重跑舊審查'
-assert_order "backstop precedes the cleanup command" '**main backstop（每席都做）**' 'review-spec-yagni-permit.py close --session'
-assert_yagni_grep "Fable permit completion requires two consumes and close" 'stories／decisions 各一筆 permit consume audit、close 成功'
+assert_yagni_grep "silent model selection falls back to policy-compliant opus" 'AFK、無回應或未明選選項 1（原生 Fable）一律走 opus 級'
+assert_yagni_grep "YAGNI native Fable uses lightweight fable-ok marker after explicit user pick" 'description.*`<fable-ok> yagni-c:<stories\|decisions>`'
+assert_yagni_grep "YAGNI native Fable skips strict permit helper" '不再呼叫 `review-spec-yagni-permit\.py`'
+assert_yagni_not_grep "YAGNI no longer requires strict model menu tag" '<review-spec-yagni-model-menu:v1'
+assert_yagni_not_grep "YAGNI no longer runs permit issue command" 'review-spec-yagni-permit\.py issue --session'
+assert_yagni_not_grep "YAGNI no longer runs permit close command" 'review-spec-yagni-permit\.py close --session'
+assert_grep "Tier 3 documents untrusted-spec trusted path requirement" 'untrusted-spec.*搬回 `\$HOME` 底下'
 assert_yagni_grep "native seat starts with real request" '真正 request.*不是.*auth status'
 assert_grep "standard review has shared root closeout" '^## 標準 Tier 1–4 共用收斂：root / first_nail'
 assert_grep "synthesis follows selected seats" '所有選定席位完成.*synthesize'
 assert_grep "polarity only applies to selected pair" '只有兩個對立席位都被選定時才適用'
 assert_grep "shared closeout defines load-bearing root" 'root.*唯一承重問題'
 assert_grep "shared closeout defines cheapest falsification" 'first_nail.*最便宜.*證偽'
+assert_section_grep "SSoT pointer is in shared convergence" '^## 標準 Tier 1–4 共用收斂' '^## YAGNI 軸' 'SSoT 選配入口.*跨事件順序.*review-spec-ssot\.md'
+assert_order "SSoT route is considered before convergence is surfaced" '**SSoT 選配入口。**' '單一 root 時，主報告先用兩行交付'
+assert_grep "SSoT keeps ordinary and declined reviews on the original route" '普通檢查已足夠.*沿原 first_nail.*未選用或已拒絕模型時不啟動'
+assert_grep "SSoT reuses completed evidence" '已完成的同題結果直接回收，不重跑'
+assert_grep "SSoT selected-method authorization is reused" '同題已明選 SSoT.*沿用既定範圍，不重問' "$SSOT_REFERENCE"
+assert_grep "SSoT has a concrete local runner" '入口是 `~/.claude/scripts/ssot-review-run\.sh`' "$SSOT_REFERENCE"
+assert_grep "SSoT check carries explicit exploration limits" 'check.*--samples <N> --steps <K> --seed <S> --deadline <seconds>' "$SSOT_REFERENCE"
+assert_grep "SSoT records actual scoped coverage" '實際檢查的契約與 witness.*未涵蓋' "$SSOT_REFERENCE"
+assert_grep "SSoT distinguishes sampled checks from enumeration" 'MAYBE.*有界抽樣.*不能冒充.*模型窮舉' "$SSOT_REFERENCE"
+assert_grep "SSoT maps model concepts back to actual interfaces" '模型的身分、版本、輪次.*欄位同名.*實作' "$SSOT_REFERENCE"
+assert_grep "SSoT hands findings back without creating tickets" 'review-spec.*不因此自建 ticket' "$SSOT_REFERENCE"
+assert_grep "SSoT does not install from a review" '不在 review 裡自行安裝' "$SSOT_REFERENCE"
+assert_grep "SSoT returns to the existing review" '回共用收斂的呈現步驟' "$SSOT_REFERENCE"
 assert_yagni_not_grep "YAGNI section does not invoke first_nail" 'first_nail'
 assert_grep "shared closeout explicitly excludes YAGNI axis" 'YAGNI 軸已有分母檢查與最簡版舉證，暫不套本段'
 assert_grep "validation integrity explicitly excludes YAGNI axis" 'YAGNI 軸不套本項'
@@ -323,6 +362,39 @@ assert_grep "Tier 3 also dispatches independent Comprehension Opus seat" '獨立
 assert_grep "wrong paraphrase with 0 findings still counts as misread" '即使該席回傳 0 條 finding 也必驗.*錯誤重述本身即自動構成一條成立的 `題目誤讀（misread）` finding'
 assert_grep "forbids excusing wrong paraphrase due to missing chat history" '嚴禁以「它只是沒看過前面對話／它自己讀錯」為由拒絕修改 spec'
 assert_grep "triage misread checks Comprehension paraphrase first" '題目誤讀.*先核對「獨立新人理解席 Comprehension」開頭寫出的兩段白話重述'
+
+# YAGNI 第三方 Fable（Herdr）分支
+YAGNI_MENU_START='^1[.] [*][*]席位（預設單席 c'
+YAGNI_MENU_END='^   - a[.] headless 原生 Claude'
+THIRD_PARTY_START='^     [*][*]第三方 Fable（Herdr）分支'
+THIRD_PARTY_END='^   - d[.] 這次不跑'
+
+assert_section_grep "High-tier quota near limit recommends the menu option and waits for explicit choice" \
+  "$YAGNI_MENU_START" "$YAGNI_MENU_END" '原生高階模型週額接近上限.*選項 3.*推薦.*等使用者明選'
+assert_section_grep "third-party menu uses the catalog quota source" \
+  "$YAGNI_MENU_START" "$YAGNI_MENU_END" 'open-seat\.py --list.*third-party-fable.*quota_source'
+assert_section_not_grep "quota alone never jumps to third-party dispatch" \
+  "$YAGNI_MENU_START" "$THIRD_PARTY_END" '週額接近上限.*(直接跳到|時走本分支)'
+assert_section_grep "explicit third-party selection opens the read-only seat without another consent" \
+  "$THIRD_PARTY_START" "$THIRD_PARTY_END" '平鋪選單選到選項 3.*單席交接（新路）.*不另問派工同意'
+assert_section_grep "selected YAGNI seat opens by catalog id" \
+  "$THIRD_PARTY_START" "$THIRD_PARTY_END" 'open-seat\.py third-party-fable <brief-file> <cwd> --log-dir'
+assert_section_grep "YAGNI collects third-party reply via v2 worker-turns and closes seat" \
+  "$THIRD_PARTY_START" "$THIRD_PARTY_END" 'worker-turns\.py --harness claude --session <session_id> --cwd <cwd> --turn 1.*hc kill <terminal>.*hc rm <terminal>'
+assert_section_grep "read-only brief forbids files and asks for done header plus both full tables in final" \
+  "$THIRD_PARTY_START" "$THIRD_PARTY_END" '不寫任何檔.*第一行只寫 `做完了`.*stories.*decisions.*完整逐條表.*分隔'
+assert_section_grep "main writes both round reports from the complete returned reply" \
+  "$THIRD_PARTY_START" "$THIRD_PARTY_END" 'main.*`reply`.*拆成.*Write.*yagni-c-stories-<session-id>-r<round>\.report\.md.*yagni-c-decisions-<session-id>-r<round>\.report\.md'
+assert_section_grep "main records model from local session transcript" \
+  "$THIRD_PARTY_START" "$THIRD_PARTY_END" 'resolved_model:.*session 紀錄檔.*message\.model'
+assert_section_grep "failed delivery invalidates c without resending or switching models" \
+  "$THIRD_PARTY_START" "$THIRD_PARTY_END" 'delivered.*非 true.*c 席 invalid.*不重送、不換模型'
+assert_section_not_grep "third-party branch contains no copied model or legacy finish-seat commands" \
+  "$THIRD_PARTY_START" "$THIRD_PARTY_END" 'group/claude-fable-|start-worker\.sh|finish-seat\.py|magpie-native usage|--inline-brief'
+assert_section_grep "YAGNI Herdr Fable checks Herdr identity and skips permit" \
+  "$THIRD_PARTY_START" "$THIRD_PARTY_END" '缺少 Herdr 身分時明報.*本分支\*\*不呼叫\*\* `review-spec-yagni-permit\.py`'
+assert_section_grep "third-party reports pass step 3 before step 4" \
+  "$THIRD_PARTY_START" "$THIRD_PARTY_END" '步驟 3.*條目枚舉.*反方下限.*通過後接步驟 4'
 
 printf '%s\n' '----'
 printf 'PASS=%s FAIL=%s\n' "$PASS" "$FAIL"

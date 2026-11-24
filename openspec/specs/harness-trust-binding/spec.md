@@ -53,7 +53,7 @@ Every receipt, manifest or envelope written by harness tooling (archify-safe, pl
 
 ### Requirement: Identity-key hashes are preserved and not extended
 
-Hashes used purely as data keys (dedup item id and title key, session-audit fingerprint and identity, deep-research evidence_id, taskoutput-dedup key, skill-verify-once key, watchdogs catalog change_id, repeat-verify-reminder command key, review set identity per ADR 0001) SHALL remain unchanged.
+Hashes used purely as data keys (dedup item id and title key, session-audit fingerprint and identity, deep-research evidence_id, taskoutput-dedup key, skill-verify-once key, watchdogs catalog change_id, repeat-verify-reminder command key, review set identity per ADR 0001, `hooks/advisor-human-reminder.py` state filename / question dedup fingerprint / event-id fallback, `hooks/auto-memory-jev.py` session pseudonym / turn id / dedup fingerprint / state filename, `hooks/claude-config-lag-reminder.py` `status_fingerprint` dedup key, `hooks/dispatch-obligation-nudge.py` session-id parity randomized split, `hooks/contract-test-preflight-gate.sh` / `hooks/obu-subagent-isolation.py` / `hooks/opus-chinese-stop.py` path and session filename keys [approved data-key exception], `~/Desktop/projects/.claude/hooks/trial-review.sh` `.notified` friction-sweep item dedupe key [approved dedupe-key exception], and `~/.claude/hooks/halfway-stop-shadow.py` `sha()` data keys for `session_hash` / `turn_id` / `session-*.json` state filename [approved data-key exception]) SHALL remain unchanged.
 
 #### Scenario: Dedup key untouched
 - **WHEN** the cleanup touches a file that computes a dedup item id

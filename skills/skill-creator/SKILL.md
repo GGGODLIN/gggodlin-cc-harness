@@ -1,6 +1,6 @@
 ---
 name: skill-creator
-description: "Guide for creating effective skills. This skill should be used when users want to create a new skill (or update an existing skill) that extends Claude's capabilities with specialized knowledge, workflows, or tool integrations. Chinese triggers include: 固化 / 記錄下來 / 流程化 / 做個 skill / 做個 slash / 做個 command. Do not use for one-off solutions, standard practices already well-documented elsewhere, project-specific conventions (those belong in CLAUDE.md), or mechanical constraints enforceable by regex/validation (automate those instead)."
+description: "Guide for creating effective skills. This skill should be used when users want to create a new skill (or update an existing skill) that extends Claude's capabilities with specialized knowledge, workflows, or tool integrations. Chinese triggers include: 固化 / 記錄下來 / 流程化 / 做個 skill / 做個 slash / 做個 command. Do not use for one-off solutions, standard practices already well-documented elsewhere, project-specific conventions (those belong in CLAUDE.md), project-level live verification skills (use create-verify), or mechanical constraints enforceable by regex/validation (automate those instead)."
 license: Complete terms in LICENSE.txt
 ---
 <!-- Modified from the original work at https://github.com/anthropics/skills/tree/main/skills/skill-creator (Apache-2.0, copyright Anthropic, PBC). See THIRD_PARTY_NOTICES.md. -->
@@ -339,6 +339,8 @@ Text changes need behavior evidence because a static contract can confirm wordin
 
 Any failure is fixed and the three checks run again. Done when all three pass with their output recorded; no RED, GREEN or REFACTOR runner is dispatched.
 
+如果受測檔案屬於 session 開頭載入並快取的常駐設定（例如 `CLAUDE.md`、`rules/` 下的規則檔），同場派出的 `Agent` subagent 仍會繼承開場快照而看不到本場的刪除或修改；此時 RED、GREEN 與 REFACTOR 的正式重跑一律改開全新獨立工作階段（依終端機路由開 Herdr 唯讀席位，或僅在使用者當輪明確點名時跑 `claude -p`，不自行偷跑無頭指令、不拿同場 `Agent` subagent 代替），且必須確認受測版本已落在該工作階段實際讀取的常駐載入路徑上；若改動仍在隔離 worktree 尚未落到常駐載入路徑，同場指名讀檔的測試只能當過渡參考，等落到實際載入路徑後再補跑正式驗證。
+
 1. **RED** — Before changing skill text, have a fresh agent run the scenario against the pre-change skill and record the observed behavior. If wording was already changed, restore the pre-change version and discard the untested wording before collecting this baseline. The RED scenario must be 同型 with the production call path: same prompt text, same input shape, and the agent judges on its own. 設計 fixture 前，先找出會在受測規則之前處理輸入的條件；只在合成資料中滿足未受測的前置條件，不把待驗規則或答案寫進 fixture，也不繞過真實權限。若 runner 因另一條前置規則而未到達受測決策點，記為無效 baseline，修正 fixture 後再跑 RED。 If RED does not turn red, estimate the original failure rate and the statistical power of this n, and record the run as an 無效 baseline — never treat "no red" as evidence the change is already fixed. Then stop the loop: do not run GREEN or REFACTOR on a failure no run has shown. Report 「無法證明有問題」 with the run, the estimate and the fixture, and let the user decide whether to change the text anyway, collect more evidence, or drop it. A RED that missed only because its fixture leaked the answer or stopped before the decision point is fixed and re-run once; that is not a second chance for a scenario that simply did not fail. When the file under test is one this same task just created, it is already live in the agent's skill／command list: a RED runner can find it and follow it, which yields a second GREEN rather than a baseline. Close both routes in the RED prompt — the file's directory and the Skill／slash-command invocation path — and treat a run whose trace shows the runner read the file under test as an 無效 baseline, the same as a run that never turned red. 節錄式 runner 只收到手貼內容時，證據副檔必須先寫明節錄邊界；它只對節錄內行為有判讀效力，節錄外偏差一律標 `out-of-scope`、不得當成 finding。若無效 baseline 的原因是 production worker 不可實例化，而非樣本量不足，直接標「行為驗證不可得」並停止補跑；把落地保證改放在 caller 對 sentinel／artifact 產物的確定性檢查，文字強化只記為未驗證。行為驗證碰到 Self-Verify「一次 auditor」硬限制時，不得另開例外來繞過；同型 production auditor 結構上叫不到時，使用最接近的合法 runner，明寫 worker mismatch 與證據降級。
 2. **GREEN** — Give the same scenario to another fresh agent using the changed skill. Compare behavior, not just quoted instructions; the scenario should show the intended correction. 如果本次新增或修改 CLI 用法，就在驗收文字前，用該環境的 --help 或原始碼逐項核對子指令、旗標與列舉值；只查本次改動，不掃全庫。記下實際查詢與輸出；這只證明用法有效，不替代實際執行的行為證據。 When the scenario requires filesystem, settings, process, or another external action, require 外部可觀察 evidence: a tool receipt and the expected sentinel／artifact. `tool_uses=0` or a missing expected artifact makes the run `invalid`; agent final 自述不算行為證據. Replace it with a fresh runner that can execute and leave the required evidence. Frame every runner as a 行為單元測試: state that it must not start the command's full infrastructure, and give an explicit output shape plus a line cap (for example ≤30 lines) so the runner cannot expand into unbounded work.
 3. **REFACTOR** — Add a new pressure or loophole scenario that could pass while evading the intent. After the fix, rerun the original scenario and every regression scenario, then keep only wording that survives all of them.
@@ -360,7 +362,7 @@ Static validation, including grep or a contract test, does not replace behaviora
 
 ### 寫 skill 三判準
 
-1. **先過濾**——只固化「領域性解題流程」，純基礎對話能力（追問 / 清單 / 推薦）不做成 skill
+1. **先過濾**——只固化「領域性解題流程」，純基礎對話能力（追問 / 清單 / 推薦）不做成 skill；提議新增規則或固化前先對照 `~/.claude/references/mechanism-iteration-materiality.md`（H1–H4／N1–N4）並檢查是否僅對單一對話偶發錯誤過擬合（需跨 ≥2 個獨立場景或屬不可逆高風險邊界）：AI 主動提案若僅命中 N1–N4（零 H1–H4）不得標為推薦新增規則或約束，但須照列理由且不新增停點；使用者當面點名替 skill 新增長期行為約束且實查僅命中 N1–N4（零 H1–H4）時，先簡短提醒兩句引用條目並請求**單次確認**後再動工，命中 H1–H4 紅線需求與一般非約束性微調不另設確認停點；能做成確定性檢查腳本／hook 或放入按需載入的 skill／reference 時優先走該處，不塞入 always-on `CLAUDE.md`／`rules/common/`
 2. **描述段寫「為何這做法有效 / 關鍵轉折」**而非步驟流水帳；同時 description 只寫觸發條件、絕不摘要流程（摘要會讓 Claude 照 description 走捷徑跳過讀 body）
 3. **踩過的坑寫進該 skill 的 `LESSONS.md`（body 只留由它改出來的規則本身）**；每條一行、規則落地後就刪掉敘事，段落不得只增不減（手動，不做自動評分）
 4. **全大寫命令是黃旗**：發現自己在寫 ALWAYS / NEVER / 「必須」式剛性命令，通常代表沒把理由講清楚——改成解釋「為什麼」，模型理解理由比被命令更可靠（源自官方新版 "explain the why"）
@@ -371,7 +373,7 @@ Static validation, including grep or a contract test, does not replace behaviora
    - **低中頻**嗎？（< 10 invoke/週。每次多派一個 subagent 是真實成本，高頻 skill 要先設計 sampling 才能加——research-before-answer 836 次/30 天就是被這條擋下的）
    - **rubric 寫得出 3+ 條可判項**嗎？（每條要能寫成「PASS/FAIL + 一句證據引述」；寫不出來 = 這 skill 的品質不是 verify 對表能保的）
    - **出過判定漂移的可判項要配一對 anchor**（2026-08-29 加；機制借自 NeoLabHQ/context-engineering-kit 的 meta-judge，GPL 故改寫不抄原文）：在該條下附最短的「明顯 FAIL」與「明顯 PASS」兩段實例，兩段只差被判的那一件事；審查員對著 anchor 放位置，不按比例或分數帶。為什麼：只寫判準時，審查員每次自己決定「哪些算」，同一份稿兩輪答案不同（rba 信心標記 2026-08-29 實證：無 anchor 兩輪各抓 2／1 處，加 anchor 後 2/2 抓全 5–6 處）。rubric 變長是真實成本，所以先只加在已漂移的那條，不全面補
-   - 加的時候照活範本抄結構：`~/.claude/commands/save-session.md` Step 4.5——dispatch 規格（marker 字串 `skill-verify:<skill名>` **放 description**、`subagent_type: skill-verify-auditor`——sonnet+low、tools 僅 Read，定義檔釘死）/ adversarial rubric prompt（偏置找違規、無法確認就 FAIL）/ 固定 VERDICT 行 / 下方四態收尾。放置位置遵守下方接線判準：output 產出步驟之後、呈現步驟之前，前一步末尾加指針
+   - 加的時候照活範本抄結構：`~/.claude/commands/save-session.md` Step 4.5——dispatch 規格（marker 字串 `skill-verify:<skill名>` **放 description**、`subagent_type: skill-verify-auditor`——sonnet+medium、tools 僅 Read，定義檔釘死）/ adversarial rubric prompt（偏置找違規、無法確認就 FAIL）/ 固定 VERDICT 行 / 下方四態收尾。放置位置遵守下方接線判準：output 產出步驟之後、呈現步驟之前，前一步末尾加指針
    - **一個回合、一個 skill、一次 auditor**（2026-09-22 加，配合 `hooks/skill-verify-once-gate.py` hard gate）。marker 一定放 description：gate 從那裡取 skill 名決定額度 key，prompt-only 是舊寫法、已不是正式接線。Self-Verify 段必須寫明「不得重派 auditor、也不得用 SendMessage 續問同一個 auditor」，並把收尾寫成四個可判定的分支，各自落在下列 canonical token 之一（caller 自己的行格式與 emoji 不必統一，token 要統一）：
      - `COMPLIANT` — 全 PASS／N-A
      - `FIXED_AFTER_AUDIT` — 有 FAIL 且已修正；同句明寫「未經第二次獨立稽查」
@@ -379,9 +381,11 @@ Static validation, including grep or a contract test, does not replace behaviora
      - `SKIPPED (<reason>)` — timeout／空輸出／格式錯誤／agent error，如實揭露未完成稽查
      為什麼不留 retry：prose 寫的「第二次仍 FAIL 才停」在 production 被違反過，模型把「修完再驗一次」讀成可以一直驗。額度改由 hook 機械攔截，skill 文字只負責說清楚四態怎麼落。四態之外**不要**自創第五種狀態；auditor rubric 自己的 verdict 值（例如 `NEEDS_HUMAN_REVIEW`）是 rubric 層的字彙，要在 skill 裡明寫它併進哪一態。deterministic test、lint、build 這類不是 auditor 的檢查不受此限，照樣可以重跑
    - 結論的適用邊界：trial 驗證的是「流程末端一次性動作」的採用率；「always-on 隨時要記得的規則」是另一種體質、有低採用前科（[[feedback_always_on_rule_adherence_empirical_low]]），不要拿這個結論外推
-8. **建 / 改完同步 update `~/.claude/skills/INVENTORY.md`**（2026-06-20 加；對接 daily-local skill-desc-quality channel）：
-   - 新 global skill → Global table append row、Audit=`yes`
-   - 新 project-scoped skill → 對應 `## Project: <name>` section append row（section 不存在則新建）
+8. **建 / 改完同步 update `~/.claude/skills/INVENTORY.md` 與對應詳檔**（2026-06-20 加、2026-11-18 拆雙層；對接 daily-local skill-desc-quality channel）：
+   - **薄主表＋詳檔雙層結構**：`INVENTORY.md` 主表保留所有列的前 6 欄（Project 區段前 4 欄）原字串供 parser 讀取，**備註欄限 ≤180 字元的一句核心定位／釘版或移除理由＋詳檔連結**；完整改版史、RED/GREEN/REFACTOR 驗證紀錄與借鑑細節寫入 `~/.claude/skills/inventory/<cluster>.md` 對應 `### <skill>` 段落（不把長流水帳塞進主表備註欄）
+   - **局部讀取紀律**：更新 `INVENTORY.md` 或詳檔前，先用 `command grep -n "<skill-name>"` 定位行號，再用 `Read` 的 `offset`／`limit` 局部讀取目標區段後 `Edit`，禁止整檔讀入
+   - 新 global skill → Global table append row、Audit=`yes`，長備註進對應 `skills/inventory/<cluster>.md`
+   - 新 project-scoped skill → 對應 `## Project: <name>` section append row（section 不存在則新建），長備註進 `skills/inventory/projects.md`
    - 開始改 cloned skill 的 description → 該 row Audit 從 `no` 改 `yes (patched)`、備註欄加「user patched description (YYYY-MM-DD)、reason: ...」
    - 停止 patch / 同步上游 → 該 row Audit 從 `yes (patched)` 改回 `no`、備註欄加「reverted to upstream sync (YYYY-MM-DD)」
    - 退役 / 刪除 skill → row 加刪除線、備註欄記「YYYY-MM-DD 已移除、reason: ...」
@@ -411,7 +415,7 @@ Static validation, including grep or a contract test, does not replace behaviora
 13. **同段不混 instruction altitude**（2026-07-12 加；源自同 repo context-fundamentals）——高海拔原則式（「保持簡潔」）與低海拔硬規則式（「≤120 字元」）不要交錯擠同段：混層 = conflicting signals，模型會把原則過度執行成硬規則、或把硬規則打折成建議。例外（好模式不算混層）：硬規則緊跟它所量化的原則（原則 → 自己的量化下限）。寫/改 skill 段落時自查一輪；CLAUDE.md / rules 等 config 同判準（見 memory `_index_config_authoring_discipline`）
 
 14. **環境即權威、文件只 cache 查不到的**（2026-08-06 加；源自 mattpocock/skills writing-for-agents v1.2）——package.json scripts / config 檔 / 目錄佈局 / `--help` 輸出本身就是權威來源，文件重述它們 = 一次 lookup 的 cache，只在 lookup 昂貴時才值得寫（且會 stale）。該 cache 的是 agent 用查的查不到的東西：不成文慣例、選擇背後的理由、config 不會招認的 gotcha。限定：「理由」的落點仍照三層分工（always-on 留指令不留原因、path-scoped 克制、完整理由歸 memory）——本條管「要不要寫」，不改變「寫到哪」
-三判準跑完（含官方 Step 1-6 的 authoring 本體）→ 依上方「RED → GREEN → REFACTOR：行為驗證」跑完本輪（機械替換改跑同段的三項程式檢查），再接下方「診斷：6 種失敗模式」段逐條自檢一輪 → 摩擦盤點、帳本盤點後收工。Collie 手機面板不用手動同步：fork 的 bridge 直接讀 Claude Code 會載入的 skill 與 command 檔（Collie ADR 9009）。摩擦盤點：本次 authoring 有無預見或撞到的摩擦 → append 被改 skill 的 `friction-log.md`，無主的落 `~/.claude/friction/workflow-general.md`；建新 skill 時順手評估要不要給它配 `friction-log.md`（規則與門檻見 `~/.claude/friction/PROTOCOL.md`）；無摩擦不留紀錄。帳本盤點：本次 authoring 有無引入會被 append、供未來 agent 讀的檔案或目錄 → 登記 registry 或標明純 log；無則不留紀錄。這兩步都是 authoring 動線的最後一段、不是參考資料。Codex 已於 2026-09-20 停用，不補 `~/.codex` 端入口。
+三判準跑完（含官方 Step 1-6 的 authoring 本體）→ 依上方「RED → GREEN → REFACTOR：行為驗證」跑完本輪（機械替換改跑同段的三項程式檢查），再接下方「診斷：6 種失敗模式」段逐條自檢一輪 → 摩擦盤點、帳本盤點後收工。摩擦盤點：本次 authoring 有無預見或撞到的摩擦 → append 被改 skill 的 `friction-log.md`，無主的落 `~/.claude/friction/workflow-general.md`；建新 skill 時順手評估要不要給它配 `friction-log.md`（規則與門檻見 `~/.claude/friction/PROTOCOL.md`）；無摩擦不留紀錄。帳本盤點：本次 authoring 有無引入會被 append、供未來 agent 讀的檔案或目錄 → 登記 registry 或標明純 log；無則不留紀錄。這兩步都是 authoring 動線的最後一段、不是參考資料。如果本次實際改動會改 harness 或改到 3 個以上檔案，就在交回報前讀 `~/.claude/references/advisor-checkpoint.md` 的「4. 改檔入口」段判斷是否同時命中未覆蓋新風險；只有命中並發問時才在使用者回覆前暫停交結案，未命中時不問、直接交回報。預設不自動補 `~/.codex` 端入口；使用者明確要求時才補。
 
 ### 診斷：skill 寫作 / debug 時對照 6 種失敗模式
 

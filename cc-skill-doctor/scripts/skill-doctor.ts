@@ -4,11 +4,14 @@ import { join, basename } from 'node:path'
 import { homedir } from 'node:os'
 
 const HOME = homedir()
-const SETTINGS_PATH = join(HOME, '.claude/settings.json')
-const USER_SKILLS_ROOT = join(HOME, '.claude/skills')
-const PLUGIN_CACHE_ROOT = join(HOME, '.claude/plugins/cache')
-const PLUGIN_MARKETPLACES_ROOT = join(HOME, '.claude/plugins/marketplaces')
-const PROJECTS_ROOT = join(HOME, '.claude/projects')
+const ENV_CONFIG_DIR = process.env.CLAUDE_CONFIG_DIR?.trim() || undefined
+const CONFIG_DIR = ENV_CONFIG_DIR ?? join(HOME, '.claude')
+const SETTINGS_PATH = join(CONFIG_DIR, 'settings.json')
+const USER_SKILLS_ROOT = join(CONFIG_DIR, 'skills')
+const PLUGIN_CACHE_ROOT = join(CONFIG_DIR, 'plugins/cache')
+const PLUGIN_MARKETPLACES_ROOT = join(CONFIG_DIR, 'plugins/marketplaces')
+const PROJECTS_ROOT = join(CONFIG_DIR, 'projects')
+const USER_COMMANDS_ROOT = join(CONFIG_DIR, 'commands')
 
 type Origin = 'user' | 'plugin-active' | 'plugin-marketplace-inactive'
 
@@ -27,53 +30,164 @@ interface Skill {
   lastInvoke?: string
 }
 
-const args = process.argv.slice(2)
-const getArg = (k: string): string | undefined => {
-  const i = args.indexOf(k)
-  return i >= 0 ? args[i + 1] : undefined
+function parseIntArg(flag: string, value: string | undefined, min: number): number {
+  if (value === undefined || !/^\d+$/.test(value)) {
+    console.error(`Invalid value for ${flag}: ${value ?? '(missing)'}`)
+    process.exit(1)
+  }
+  const n = Number(value)
+  if (!Number.isSafeInteger(n) || n < min) {
+    console.error(`${flag} must be an integer >= ${min}, got ${value}`)
+    process.exit(1)
+  }
+  return n
 }
-const argMonths = parseInt(getArg('--months') ?? '3', 10)
-const argDescThreshold = parseInt(getArg('--desc-bloat-chars') ?? '300', 10)
+
+const args = process.argv.slice(2)
+let argMonths = 3
+let argDescThreshold = 300
 // 480000 = the smallest context window this machine's sessions run with (2026-09-22 user decision);
 // a session with a larger window only has more headroom, so the smallest one is the binding case.
-const argContextTokens = parseInt(getArg('--context-tokens') ?? '480000', 10)
-const argShowInactive = args.includes('--show-inactive')
-const argJson = args.includes('--json')
+let argContextTokens = 480000
+let argShowInactive = false
+let argJson = false
+
+for (let i = 0; i < args.length; i++) {
+  const a = args[i]
+  if (a === '--months') {
+    argMonths = parseIntArg(a, args[++i], 1)
+  } else if (a === '--desc-bloat-chars') {
+    argDescThreshold = parseIntArg(a, args[++i], 0)
+  } else if (a === '--context-tokens') {
+    argContextTokens = parseIntArg(a, args[++i], 1)
+  } else if (a === '--show-inactive') {
+    argShowInactive = true
+  } else if (a === '--json') {
+    argJson = true
+  } else {
+    console.error(`Unknown argument: ${a}`)
+    process.exit(1)
+  }
+}
 
 const tokens = (s: string) => Math.ceil(Buffer.byteLength(s, 'utf8') / 4)
 
-function parseFrontmatter(content: string): Record<string, string> | null {
-  if (!content.startsWith('---')) return null
-  const end = content.indexOf('\n---', 4)
-  if (end < 0) return null
-  const fm = content.slice(4, end)
-  const out: Record<string, string> = {}
-  let key = ''
-  let buf: string[] = []
-  for (const line of fm.split('\n')) {
-    const m = line.match(/^(\w[\w-]*):\s*(.*)$/)
-    if (m) {
-      if (key) out[key] = buf.join('\n').trim()
-      key = m[1]
-      buf = [m[2]]
-    } else if (key) {
-      buf.push(line)
+interface FmEntry {
+  mode: 'plain' | 'literal' | 'folded'
+  lines: string[]
+}
+
+function finalizeFmEntry(entry: FmEntry): string {
+  if (entry.mode === 'plain') {
+    const joined = entry.lines.map(l => l.trim()).filter(Boolean).join(' ').trim()
+    if (/^"(.*)"$/s.test(joined)) return joined.replace(/^"(.*)"$/s, '$1')
+    if (/^'(.*)'$/s.test(joined)) return joined.replace(/^'(.*)'$/s, '$1')
+    return joined
+  }
+
+  const nonEmpty = entry.lines.filter(l => l.trim().length > 0)
+  const minIndent = nonEmpty.length > 0
+    ? Math.min(...nonEmpty.map(l => l.match(/^[ \t]*/)?.[0].length ?? 0))
+    : 0
+  const dedented = entry.lines.map(l => (l.length >= minIndent ? l.slice(minIndent) : ''))
+
+  if (entry.mode === 'literal') {
+    return dedented.join('\n').trim()
+  }
+
+  const paragraphs: string[] = []
+  let current: string[] = []
+  for (const l of dedented) {
+    if (l.trim() === '') {
+      if (current.length > 0) {
+        paragraphs.push(current.join(' '))
+        current = []
+      }
+    } else {
+      current.push(l.trim())
     }
   }
-  if (key) out[key] = buf.join('\n').trim()
-  for (const k of Object.keys(out)) {
-    out[k] = out[k].replace(/^"(.+)"$/s, '$1').replace(/^'(.+)'$/s, '$1')
+  if (current.length > 0) paragraphs.push(current.join(' '))
+  return paragraphs.join('\n').trim()
+}
+
+function parseFrontmatter(content: string): Record<string, string> | null {
+  const normalized = content.replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n')
+  const openMatch = normalized.match(/^---[ \t]*\n/)
+  if (!openMatch) return null
+  const rest = normalized.slice(openMatch[0].length)
+  const closeMatch = rest.match(/^---[ \t]*(?:\n|$)/m)
+  if (!closeMatch || closeMatch.index === undefined) return null
+  const fm = rest.slice(0, closeMatch.index)
+  const out: Record<string, string> = {}
+  let key = ''
+  let current: FmEntry | null = null
+  for (const line of fm.split('\n')) {
+    const m = line.match(/^(\w[\w-]*):(?:[ \t]+(.*)|[ \t]*)$/)
+    if (m) {
+      if (key && current) out[key] = finalizeFmEntry(current)
+      key = m[1]
+      const rawVal = (m[2] ?? '').trimEnd()
+      const blockMatch = rawVal.match(/^([|>])([+-]?\d*|\d*[+-]?)(?:[ \t]+#.*)?$/)
+      if (blockMatch) {
+        current = { mode: blockMatch[1] === '|' ? 'literal' : 'folded', lines: [] }
+      } else {
+        current = { mode: 'plain', lines: rawVal === '' ? [] : [rawVal] }
+      }
+    } else if (key && current) {
+      if (current.mode === 'plain' && /^[ \t]*#/.test(line)) continue
+      current.lines.push(line)
+    }
   }
+  if (key && current) out[key] = finalizeFmEntry(current)
   return out
 }
 
-const settings = JSON.parse(readFileSync(SETTINGS_PATH, 'utf8'))
+function loadSettings(): Record<string, any> {
+  if (!existsSync(SETTINGS_PATH)) return {}
+  let raw: string
+  try {
+    raw = readFileSync(SETTINGS_PATH, 'utf8')
+  } catch (err: unknown) {
+    console.error(`Failed to read ${SETTINGS_PATH}: ${err instanceof Error ? err.message : String(err)}`)
+    process.exit(1)
+  }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch (err: unknown) {
+    console.error(`Invalid JSON in ${SETTINGS_PATH}: ${err instanceof Error ? err.message : String(err)}`)
+    process.exit(1)
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    console.error(`Invalid ${SETTINGS_PATH}: expected a JSON object`)
+    process.exit(1)
+  }
+  return parsed as Record<string, any>
+}
+
+const settings = loadSettings()
+const rawEnabledPlugins = settings.enabledPlugins
 const enabledPlugins = new Set<string>(
-  Object.entries(settings.enabledPlugins ?? {}).filter(([, v]) => v === true).map(([k]) => k),
+  rawEnabledPlugins && typeof rawEnabledPlugins === 'object' && !Array.isArray(rawEnabledPlugins)
+    ? Object.entries(rawEnabledPlugins).filter(([, v]) => v === true).map(([k]) => k)
+    : [],
 )
 const budgetFraction: number = settings.skillListingBudgetFraction ?? 0.04
+if (typeof budgetFraction !== 'number' || !Number.isFinite(budgetFraction) || budgetFraction <= 0) {
+  console.error(`Invalid skillListingBudgetFraction in ${SETTINGS_PATH}: expected finite number > 0`)
+  process.exit(1)
+}
 const maxDescChars: number = settings.skillListingMaxDescChars ?? 3072
-const skillOverrides: Record<string, string> = settings.skillOverrides ?? {}
+if (typeof maxDescChars !== 'number' || !Number.isFinite(maxDescChars) || maxDescChars < 0) {
+  console.error(`Invalid skillListingMaxDescChars in ${SETTINGS_PATH}: expected finite number >= 0`)
+  process.exit(1)
+}
+const rawOverrides = settings.skillOverrides
+const skillOverrides: Record<string, string> =
+  rawOverrides && typeof rawOverrides === 'object' && !Array.isArray(rawOverrides)
+    ? (rawOverrides as Record<string, string>)
+    : {}
 
 // Mirrors design-router's discover grep, but matched against the DESCRIPTION only
 // (the description is what surfaces for auto-triggering; matching full body over-flags
@@ -82,42 +196,63 @@ const DESIGN_SIGNATURE = /anti-slop|landing.*portfolio|distinctive.*frontend|des
 const DRIFT_EXCLUDE = new Set<string>(['design-router', 'docs'])
 
 function scanRoot(rootPath: string, origin: Origin, pluginIdResolver?: (skillPath: string) => string | undefined): Skill[] {
-  if (!existsSync(rootPath)) return []
+  try {
+    if (!statSync(rootPath).isDirectory()) return []
+  } catch {
+    return []
+  }
   const out: Skill[] = []
+  const ancestors = new Set<string>()
   const walk = (dir: string, depth: number): void => {
     if (depth > 6) return
-    let entries: string[]
-    try { entries = readdirSync(dir) } catch { return }
-    for (const e of entries) {
-      if (e.startsWith('.')) continue
-      const p = join(dir, e)
-      let st
-      try { st = statSync(p) } catch { continue }
-      if (!st.isDirectory()) continue
-      const skillFile = join(p, 'SKILL.md')
-      if (existsSync(skillFile)) {
-        try {
-          const content = readFileSync(skillFile, 'utf8')
-          const fm = parseFrontmatter(content)
-          const name = fm?.name ?? basename(p)
-          const description = fm?.description ?? ''
-          const rp = realpathSync(skillFile)
-          out.push({
-            name,
-            description,
-            bodyTokens: tokens(content),
-            descTokens: tokens(description),
-            descChars: description.length,
-            path: skillFile,
-            realpath: rp,
-            origin,
-            isDesignSkill: DESIGN_SIGNATURE.test(description),
-            pluginId: pluginIdResolver?.(skillFile),
-            invokes: 0,
-          })
-        } catch {}
+    let dirRp: string
+    try {
+      dirRp = realpathSync(dir)
+    } catch {
+      return
+    }
+    if (ancestors.has(dirRp)) return
+    ancestors.add(dirRp)
+    try {
+      let entries: string[]
+      try { entries = readdirSync(dir) } catch { return }
+      for (const e of entries) {
+        if (e.startsWith('.')) continue
+        const p = join(dir, e)
+        let st
+        try { st = statSync(p) } catch { continue }
+        if (!st.isDirectory()) continue
+        let pRp: string
+        try { pRp = realpathSync(p) } catch { continue }
+        if (ancestors.has(pRp)) continue
+        const skillFile = join(p, 'SKILL.md')
+        if (existsSync(skillFile)) {
+          try {
+            const content = readFileSync(skillFile, 'utf8')
+            const fm = parseFrontmatter(content)
+            const rawName = (fm?.name ?? '').trim()
+            const name = rawName !== '' ? rawName : basename(p)
+            const description = fm?.description ?? ''
+            const rp = realpathSync(skillFile)
+            out.push({
+              name,
+              description,
+              bodyTokens: tokens(content),
+              descTokens: tokens(description),
+              descChars: description.length,
+              path: skillFile,
+              realpath: rp,
+              origin,
+              isDesignSkill: DESIGN_SIGNATURE.test(description),
+              pluginId: pluginIdResolver?.(skillFile),
+              invokes: 0,
+            })
+          } catch {}
+        }
+        walk(p, depth + 1)
       }
-      walk(p, depth + 1)
+    } finally {
+      ancestors.delete(dirRp)
     }
   }
   walk(rootPath, 0)
@@ -131,16 +266,26 @@ const userSkillsRaw = scanRoot(USER_SKILLS_ROOT, 'user')
 // every copy double-books the budget (2026-09-22: two acme accounts → 8 skills counted twice).
 const SYNCED_DIR_RE = /\/skills\/synced\/([0-9a-f-]+)_([0-9a-f-]+)\//
 const currentAccountUuid: string | undefined = (() => {
-  const configDir = process.env.CLAUDE_CONFIG_DIR ?? join(HOME, '.claude')
-  try {
-    return JSON.parse(readFileSync(join(configDir, '.claude.json'), 'utf8')).oauthAccount?.accountUuid
-  } catch { return undefined }
+  const candidates = ENV_CONFIG_DIR
+    ? [join(CONFIG_DIR, '.claude.json')]
+    : [join(HOME, '.claude.json'), join(CONFIG_DIR, '.claude.json')]
+  for (const candidate of candidates) {
+    try {
+      const uuid = JSON.parse(readFileSync(candidate, 'utf8')).oauthAccount?.accountUuid
+      if (typeof uuid === 'string' && uuid.length > 0) return uuid
+    } catch {}
+  }
+  return undefined
 })()
 const syncedDirs = [...new Set(userSkillsRaw.map(s => SYNCED_DIR_RE.exec(s.path)?.[0]).filter((d): d is string => !!d))]
 const keptSyncedDir: string | undefined = syncedDirs.length <= 1
   ? syncedDirs[0]
   : syncedDirs.find(d => currentAccountUuid !== undefined && d.endsWith(`_${currentAccountUuid}/`))
-    ?? syncedDirs.sort((a, b) => statSync(join(USER_SKILLS_ROOT, 'synced', basename(b))).mtimeMs - statSync(join(USER_SKILLS_ROOT, 'synced', basename(a))).mtimeMs)[0]
+    ?? syncedDirs.sort((a, b) => {
+      const ma = (() => { try { return statSync(join(USER_SKILLS_ROOT, 'synced', basename(a))).mtimeMs } catch { return 0 } })()
+      const mb = (() => { try { return statSync(join(USER_SKILLS_ROOT, 'synced', basename(b))).mtimeMs } catch { return 0 } })()
+      return mb - ma
+    })[0]
 const userSkills = userSkillsRaw.filter(s => {
   const dir = SYNCED_DIR_RE.exec(s.path)?.[0]
   return dir === undefined || dir === keptSyncedDir
@@ -148,43 +293,69 @@ const userSkills = userSkillsRaw.filter(s => {
 const syncedDropped = userSkillsRaw.length - userSkills.length
 
 const cacheSkills: Skill[] = []
-if (existsSync(PLUGIN_CACHE_ROOT)) {
-  for (const mp of readdirSync(PLUGIN_CACHE_ROOT)) {
-    if (mp.endsWith('.bak')) continue
-    const mpPath = join(PLUGIN_CACHE_ROOT, mp)
-    let st
-    try { st = statSync(mpPath) } catch { continue }
-    if (!st.isDirectory()) continue
-    for (const plugin of readdirSync(mpPath)) {
-      const pluginPath = join(mpPath, plugin)
-      let pst
-      try { pst = statSync(pluginPath) } catch { continue }
-      if (!pst.isDirectory()) continue
-      const versions = readdirSync(pluginPath)
-        .map(v => ({ v, path: join(pluginPath, v) }))
-        .filter(x => { try { return statSync(x.path).isDirectory() } catch { return false } })
-        .sort((a, b) => statSync(b.path).mtimeMs - statSync(a.path).mtimeMs)
-      const latest = versions[0]
-      if (!latest) continue
-      const pluginId = `${plugin}@${mp}`
-      const active = enabledPlugins.has(pluginId)
-      const skills = scanRoot(latest.path, active ? 'plugin-active' : 'plugin-marketplace-inactive', () => pluginId)
-      cacheSkills.push(...skills)
+let cacheMarketplaces: string[] = []
+try {
+  if (statSync(PLUGIN_CACHE_ROOT).isDirectory()) {
+    cacheMarketplaces = readdirSync(PLUGIN_CACHE_ROOT)
+  }
+} catch {}
+for (const mp of cacheMarketplaces) {
+  if (mp.endsWith('.bak')) continue
+  const mpPath = join(PLUGIN_CACHE_ROOT, mp)
+  let plugins: string[]
+  try {
+    if (!statSync(mpPath).isDirectory()) continue
+    plugins = readdirSync(mpPath)
+  } catch {
+    continue
+  }
+  for (const plugin of plugins) {
+    const pluginPath = join(mpPath, plugin)
+    let versionNames: string[]
+    try {
+      if (!statSync(pluginPath).isDirectory()) continue
+      versionNames = readdirSync(pluginPath)
+    } catch {
+      continue
     }
+    const versions = versionNames
+      .map(v => {
+        const vp = join(pluginPath, v)
+        try {
+          const vst = statSync(vp)
+          return vst.isDirectory() ? { v, path: vp, mtimeMs: vst.mtimeMs } : null
+        } catch {
+          return null
+        }
+      })
+      .filter((x): x is { v: string; path: string; mtimeMs: number } => x !== null)
+      .sort((a, b) => b.mtimeMs - a.mtimeMs)
+    const latest = versions[0]
+    if (!latest) continue
+    const pluginId = `${plugin}@${mp}`
+    const active = enabledPlugins.has(pluginId)
+    const skills = scanRoot(latest.path, active ? 'plugin-active' : 'plugin-marketplace-inactive', () => pluginId)
+    cacheSkills.push(...skills)
   }
 }
 
 const marketplaceSkills: Skill[] = []
-if (existsSync(PLUGIN_MARKETPLACES_ROOT)) {
-  for (const mp of readdirSync(PLUGIN_MARKETPLACES_ROOT)) {
-    if (mp.endsWith('.bak')) continue
-    const mpPath = join(PLUGIN_MARKETPLACES_ROOT, mp)
-    let st
-    try { st = statSync(mpPath) } catch { continue }
-    if (!st.isDirectory()) continue
-    const skills = scanRoot(mpPath, 'plugin-marketplace-inactive', () => mp)
-    marketplaceSkills.push(...skills)
+let marketplaceEntries: string[] = []
+try {
+  if (statSync(PLUGIN_MARKETPLACES_ROOT).isDirectory()) {
+    marketplaceEntries = readdirSync(PLUGIN_MARKETPLACES_ROOT)
   }
+} catch {}
+for (const mp of marketplaceEntries) {
+  if (mp.endsWith('.bak')) continue
+  const mpPath = join(PLUGIN_MARKETPLACES_ROOT, mp)
+  try {
+    if (!statSync(mpPath).isDirectory()) continue
+  } catch {
+    continue
+  }
+  const skills = scanRoot(mpPath, 'plugin-marketplace-inactive', () => mp)
+  marketplaceSkills.push(...skills)
 }
 
 const allRaw = [...userSkills, ...cacheSkills, ...marketplaceSkills]
@@ -198,22 +369,59 @@ for (const s of allRaw) {
 
 const cutoff = Date.now() - argMonths * 30 * 24 * 3600 * 1000
 const invokeRe = /"name":"Skill","input":\{"skill":"([^"]+)"/g
-const nameLookup = new Map<string, Skill[]>()
+const bareLookup = new Map<string, Skill[]>()
+const qualifiedLookup = new Map<string, Skill[]>()
+const addLookup = (map: Map<string, Skill[]>, key: string, skill: Skill): void => {
+  let arr = map.get(key)
+  if (!arr) {
+    arr = []
+    map.set(key, arr)
+  }
+  if (!arr.includes(skill)) arr.push(skill)
+}
+
 for (const s of all) {
-  const lower = s.name.toLowerCase()
-  if (!nameLookup.has(lower)) nameLookup.set(lower, [])
-  nameLookup.get(lower)!.push(s)
+  addLookup(bareLookup, s.name.toLowerCase(), s)
+  if (s.pluginId) {
+    addLookup(qualifiedLookup, `${s.pluginId}:${s.name}`.toLowerCase(), s)
+    const pluginShort = s.pluginId.split('@')[0]
+    if (pluginShort) addLookup(qualifiedLookup, `${pluginShort}:${s.name}`.toLowerCase(), s)
+  }
+}
+
+function resolveInvokedSkills(raw: string): Skill[] {
+  const lower = raw.toLowerCase()
+  if (raw.includes(':')) {
+    const qMatches = qualifiedLookup.get(lower)
+    if (qMatches && qMatches.length > 0) {
+      const activeQ = qMatches.filter(s => s.origin === 'plugin-active')
+      return activeQ.length > 0 ? activeQ : qMatches
+    }
+    const exactBare = bareLookup.get(lower)
+    return exactBare ?? []
+  }
+  const bMatches = bareLookup.get(lower) ?? []
+  const activeB = bMatches.filter(s => s.origin === 'user' || s.origin === 'plugin-active')
+  return activeB.length > 0 ? activeB : bMatches
 }
 
 function scanProjects(): void {
-  if (!existsSync(PROJECTS_ROOT)) return
-  for (const proj of readdirSync(PROJECTS_ROOT)) {
+  let projects: string[] = []
+  try {
+    if (!statSync(PROJECTS_ROOT).isDirectory()) return
+    projects = readdirSync(PROJECTS_ROOT)
+  } catch {
+    return
+  }
+  for (const proj of projects) {
     const projPath = join(PROJECTS_ROOT, proj)
-    let pst
-    try { pst = statSync(projPath) } catch { continue }
-    if (!pst.isDirectory()) continue
     let files: string[]
-    try { files = readdirSync(projPath) } catch { continue }
+    try {
+      if (!statSync(projPath).isDirectory()) continue
+      files = readdirSync(projPath)
+    } catch {
+      continue
+    }
     for (const f of files) {
       if (!f.endsWith('.jsonl')) continue
       const fp = join(projPath, f)
@@ -222,11 +430,10 @@ function scanProjects(): void {
       if (fst.mtimeMs < cutoff) continue
       let content: string
       try { content = readFileSync(fp, 'utf8') } catch { continue }
+      invokeRe.lastIndex = 0
       let m: RegExpExecArray | null
       while ((m = invokeRe.exec(content)) !== null) {
-        const raw = m[1]
-        const stripped = raw.includes(':') ? raw.split(':').pop()! : raw
-        const matches = nameLookup.get(raw.toLowerCase()) ?? nameLookup.get(stripped.toLowerCase()) ?? []
+        const matches = resolveInvokedSkills(m[1])
         for (const s of matches) {
           s.invokes++
           const iso = new Date(fst.mtimeMs).toISOString().slice(0, 10)
@@ -257,28 +464,37 @@ const unused = activeSkills.filter(s => s.invokes === 0)
 // name.length + 2; entries are joined by one separator char. Commands (~/.claude/commands/*.md)
 // are part of the same listing. Bundled built-in skills live inside the binary and are not
 // counted here, so the real total is a few thousand chars higher than reported.
-const USER_COMMANDS_ROOT = join(HOME, '.claude/commands')
-const commandEntries: { name: string; descChars: number }[] = existsSync(USER_COMMANDS_ROOT)
-  ? readdirSync(USER_COMMANDS_ROOT).filter(f => f.endsWith('.md')).map(f => {
-      const fm = parseFrontmatter(readFileSync(join(USER_COMMANDS_ROOT, f), 'utf8'))
-      return { name: f.slice(0, -3), descChars: (fm?.description ?? '').length }
-    })
-  : []
+const commandEntries: { name: string; descChars: number }[] = []
+try {
+  if (statSync(USER_COMMANDS_ROOT).isDirectory()) {
+    for (const f of readdirSync(USER_COMMANDS_ROOT)) {
+      if (!f.endsWith('.md')) continue
+      const fullPath = join(USER_COMMANDS_ROOT, f)
+      try {
+        if (!statSync(fullPath).isFile()) continue
+        const fm = parseFrontmatter(readFileSync(fullPath, 'utf8'))
+        commandEntries.push({ name: f.slice(0, -3), descChars: (fm?.description ?? '').length })
+      } catch {}
+    }
+  }
+} catch {}
 const isNameOnly = (name: string) => skillOverrides[name] === 'name-only' || skillOverrides[name.split(':').pop() ?? name] === 'name-only'
 const entryChars = (name: string, descChars: number) =>
   isNameOnly(name) ? name.length + 2 : name.length + 4 + Math.min(descChars, maxDescChars)
+const listingName = (s: Skill) =>
+  s.origin === 'plugin-active' && s.pluginId ? `${s.pluginId}:${s.name}` : s.name
 const listingEntries = [
-  ...activeSkills.map(s => ({ name: s.origin === 'plugin-active' && s.pluginId ? `${s.pluginId}:${s.name}` : s.name, descChars: s.descChars })),
+  ...activeSkills.map(s => ({ name: listingName(s), descChars: s.descChars })),
   ...commandEntries,
 ]
 const activeDescChars = listingEntries.reduce((acc, e) => acc + entryChars(e.name, e.descChars), 0) + Math.max(0, listingEntries.length - 1)
 const activeDescTokens = activeSkills.reduce(
-  (acc, s) => acc + (isNameOnly(s.name) ? 0 : s.descTokens),
+  (acc, s) => acc + (isNameOnly(listingName(s)) ? 0 : s.descTokens),
   0,
 )
 const BYTES_PER_TOKEN = 4
 const budgetCap = Math.floor(argContextTokens * BYTES_PER_TOKEN * budgetFraction)
-const budgetUsedPct = (activeDescChars / budgetCap) * 100
+const budgetUsedPct = budgetCap > 0 ? (activeDescChars / budgetCap) * 100 : 0
 
 const byOrigin = new Map<string, number>()
 for (const s of all) byOrigin.set(s.origin, (byOrigin.get(s.origin) ?? 0) + 1)
@@ -379,9 +595,11 @@ console.log(lines.join('\n'))
 if (argJson) {
   console.log('\n---JSON---')
   console.log(JSON.stringify({
+    activeDescChars,
     activeDescTokens,
     budgetCap,
-    overBudget: activeDescTokens > budgetCap,
+    budgetUsedPct,
+    overBudget: activeDescChars > budgetCap,
     counts: Object.fromEntries(byOrigin),
     duplicates: duplicates.map(([n, v]) => ({ name: n, copies: v.map(s => s.path) })),
     unused: unused.map(s => ({ name: s.name, origin: s.origin, descTokens: s.descTokens })),

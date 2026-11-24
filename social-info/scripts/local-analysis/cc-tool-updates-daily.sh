@@ -134,11 +134,40 @@ def npm_global_roots():
         return [r for r in override.split(os.pathsep) if os.path.isdir(r)]
     import glob
     roots = ["/opt/homebrew/lib/node_modules", "/usr/local/lib/node_modules"]
-    nvm = glob.glob(os.path.expanduser("~/.nvm/versions/node/v*"))
-    if nvm:
-        newest = max(nvm, key=lambda p: _vkey(os.path.basename(p)))
-        roots.append(os.path.join(newest, "lib/node_modules"))
+    nvm_dir = os.environ.get("CCTOOL_NVM_VERSIONS_DIR") or os.path.expanduser("~/.nvm/versions/node")
+    nvm = sorted(glob.glob(os.path.join(nvm_dir, "v*")), key=lambda p: _vkey(os.path.basename(p)), reverse=True)
+    for vdir in nvm:
+        roots.append(os.path.join(vdir, "lib/node_modules"))
     return [r for r in roots if os.path.isdir(r)]
+
+def resolve_nvm_shim_target(executable, bin_name):
+    try:
+        if os.path.islink(executable) or not os.path.isfile(executable):
+            return None
+        with open(executable, encoding="utf-8", errors="replace") as fh:
+            head = [fh.readline() for _ in range(4)]
+    except OSError:
+        return None
+    if len(head) < 2 or head[1].strip() != "# Managed-By: sync-nvm-global-bins":
+        return None
+    import glob
+    nvm_dir = os.environ.get("CCTOOL_NVM_VERSIONS_DIR") or os.path.expanduser("~/.nvm/versions/node")
+    nvm = sorted(glob.glob(os.path.join(nvm_dir, "v*")), key=lambda p: _vkey(os.path.basename(p)), reverse=True)
+    for vdir in nvm:
+        cand = os.path.join(vdir, "bin", bin_name)
+        if not (os.path.isfile(cand) or os.path.islink(cand)):
+            continue
+        real = os.path.realpath(cand)
+        if not os.path.isfile(real):
+            continue
+        try:
+            with open(real, "rb") as fh:
+                if b"postinstall script was not run" in fh.read(256):
+                    continue
+        except OSError:
+            continue
+        return real
+    return None
 
 def npm_g_installed():
     found = {}
@@ -184,7 +213,7 @@ def npm_g_installed():
                 executable = shutil.which(bin_name)
                 if not executable:
                     continue
-                executable_real = os.path.realpath(executable)
+                executable_real = resolve_nvm_shim_target(executable, bin_name) or os.path.realpath(executable)
                 target_real = os.path.realpath(os.path.join(install["package_dir"], target))
                 if executable_real == target_real or executable_real.startswith(package_root):
                     key = (install["root"], install["package_dir"])
@@ -346,12 +375,13 @@ def brew_latest(formula):
     except Exception:
         return None
 
-PIN_VERSION = "2.1.246"
-PIN_REPO = "anthropics/claude-code"
-PIN_ISSUES = ["90299", "90537"]
+# 2.1.246 sticky prompt 釘版已於 #90299 結案且本機解除釘版後退役；預設清空避免每日假警報，保留環境變數入口供日後釘版與測試使用。
+PIN_VERSION = os.environ.get("CCTOOL_PIN_VERSION", "").strip()
+PIN_REPO = os.environ.get("CCTOOL_PIN_REPO", "anthropics/claude-code").strip()
+PIN_ISSUES = [x.strip() for x in os.environ.get("CCTOOL_PIN_ISSUES", "").split(",") if x.strip()]
 
 def pin_check():
-    if os.environ.get("CCTOOL_PIN_CHECK") == "0":
+    if os.environ.get("CCTOOL_PIN_CHECK") == "0" or not PIN_VERSION or not PIN_ISSUES:
         return None
     states = []
     for num in PIN_ISSUES:
@@ -365,8 +395,8 @@ def pin_check():
         return {"error": "cannot list candidate releases"}
     candidates = [t for t in releases.split() if _vkey(norm(t)) > _vkey(PIN_VERSION)]
     try:
-        s = run(["gh", "api", f"repos/{PIN_REPO}/contents/CHANGELOG.md", "--jq", ".content"])
-        changelog = base64.b64decode(s).decode("utf-8", "replace") if s else None
+        # GitHub Contents API 對 >1MB 檔案在預設 JSON 回應中 .content 為空字串；改要 raw 正文避免 CHANGELOG 增長後靜默失效。
+        changelog = run(["gh", "api", "-H", "Accept: application/vnd.github.raw", f"repos/{PIN_REPO}/contents/CHANGELOG.md"], timeout=30)
     except Exception:
         changelog = None
     if not changelog:

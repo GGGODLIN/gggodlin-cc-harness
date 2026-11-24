@@ -54,7 +54,7 @@ c. **README**：`gh api repos/<owner>/<repo>/readme --jq '.content' | base64 -d`
 
 Dispatch 規格：
 
-- `Agent` tool、`subagent_type: skill-verify-auditor`（sonnet+low、tools 僅 Read，定義檔釘死）
+- `Agent` tool、`subagent_type: skill-verify-auditor`（sonnet+medium、tools 僅 Read，定義檔釘死）
 - description 固定含 marker 字串 `skill-verify:github-repo-research`（採用率統計 grep 用，不要改字）
 - prompt 內嵌：(1) 完整報告原文 (2) 下方 template 全文。不需給 gh api 權限——rubric 全部可從報告文本判定
 

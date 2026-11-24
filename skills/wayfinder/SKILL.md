@@ -121,7 +121,7 @@ User invokes with a loose idea, or accepts the proposal after a requirements gat
 3. **Create the board**: map.md with Destination and Notes filled in, Decisions-so-far empty, fog sketched into Not yet specified. Done when: map.md exists with all five sections.
 4. **Create the tickets you can specify now**, then wire `blocked-by` in a **second pass** (tickets need numbers before they can reference each other). Everything you can't yet specify stays in the fog. Done when: every sharp question has a ticket file and blocking edges are wired.
 5. **Fire the research agents.** For each research ticket, dispatch a background agent with a fresh context window per the routing rules in context, pointing its findings file back at the ticket. Done when: every research ticket has an agent dispatched, or a stated reason to defer.
-6. **Self-Verify** (mandatory — board written, before presenting). Dispatch an `Agent` with `subagent_type: skill-verify-auditor` (sonnet+low, Read-only, pinned in the agent definition), description containing the marker string `skill-verify:wayfinder` (statistics grep — keep verbatim)。
+6. **Self-Verify** (mandatory — board written, before presenting). Dispatch an `Agent` with `subagent_type: skill-verify-auditor` (sonnet+medium, Read-only, pinned in the agent definition), description containing the marker string `skill-verify:wayfinder` (statistics grep — keep verbatim)。
 
    **Prompt 要內嵌 board 全文，不要給目錄路徑。** 兩個理由：
 

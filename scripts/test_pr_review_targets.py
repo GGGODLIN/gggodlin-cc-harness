@@ -859,6 +859,19 @@ def merged_response(repo, merge, head, base_ref="master", author="alice"):
   }
 
 
+
+def open_response(repo, head, head_ref, base_ref="master", author="alice"):
+  return {
+    "status": "ok",
+    "state": "OPEN",
+    "destination_repo": repo,
+    "base_ref": base_ref,
+    "head": head,
+    "head_ref": head_ref,
+    "merge_commit": None,
+    "author": author,
+  }
+
 class MergedFixture:
   def __init__(self, base):
     self.base = Path(base)
@@ -1223,6 +1236,116 @@ class MergedRangePreparationTest(unittest.TestCase):
     self.assertEqual(result["status"], "BLOCKED")
     self.assertEqual(self.failure_codes(result), ["MERGED_PLATFORM_UNSUPPORTED"])
 
+
+  def mixed_repo(self, name="mixed"):
+    remote = f"https://github.com/acme/{name}.git"
+    repo = self.fx._init(name, remote)
+    c = {}
+    c["base"] = self.fx.change(repo, "base", write={"a.txt": "a0\n", "b.txt": "b0\n", "z.txt": "z0\n"})
+    git(repo, "checkout", "-q", "-b", "f1")
+    c["reviewed1"] = self.fx.change(repo, "pr1 reviewed", write={"a.txt": "a1\n"})
+    c["head1"] = self.fx.change(repo, "pr1 follow-up", write={"a.txt": "a2\n"})
+    git(repo, "checkout", "-q", "master")
+    c["m1"] = self.fx.merge(repo, "f1")
+    c["other"] = self.fx.change(repo, "someone else", write={"z.txt": "z1\n"})
+    git(repo, "checkout", "-q", "-b", "f3")
+    c["head3"] = self.fx.change(repo, "pr3 open", write={"b.txt": "b3\n"})
+    git(repo, "checkout", "-q", "master")
+    self.fx.publish(repo)
+    git(repo, "update-ref", "refs/remotes/origin/f3", c["head3"])
+    repos = {f"acme/{name}": {"checkout": str(repo), "remote": remote}}
+    return repo, c, repos
+
+  def test_open_pr_whose_head_contains_target_becomes_the_range_end(self):
+    repo, c, repos = self.mixed_repo()
+    platform = {
+      "github.com/acme/mixed#1": merged_response("acme/mixed", c["m1"], c["head1"], author="alice"),
+      "github.com/acme/mixed#3": open_response("acme/mixed", c["head3"], "f3", author="carol"),
+    }
+    result = self.prepare(self.fx.payload(
+      [pr_url("acme/mixed", "1"), pr_url("acme/mixed", "3")], platform,
+      since=[f"acme/mixed={c['reviewed1']}"], repos=repos, run_id="open-mixed",
+    ))
+    self.assertEqual(result["status"], "READY", result["failures"])
+    target = result["targets"][0]
+    self.assertEqual(target["start"]["sha"], c["reviewed1"])
+    self.assertEqual(target["end"]["sha"], c["head3"])
+    self.assertEqual(target["end"]["ref"], "refs/remotes/origin/f3")
+    self.assertEqual(target["end"]["source"], "open-pr-head")
+    self.assertEqual(target["end"]["pr"], "3")
+    self.assertEqual(target["end"]["target_branch_tip"], c["other"])
+    self.assertEqual(
+      [(pr["pr"], pr["state"], pr["merge_commit"], pr["head"]) for pr in target["related_prs"]],
+      [("1", "merged", c["m1"], c["head1"]), ("3", "open", "", c["head3"])],
+    )
+    self.assertEqual(sorted(entries_by_path(target)), ["a.txt", "b.txt"])
+    diff = Path(target["review_diff"]["file"]).read_text()
+    self.assertIn("+b3", diff)
+    self.assertIn("+a2", diff)
+    self.assertNotIn("z.txt", diff)
+
+  def test_merged_only_range_keeps_the_target_branch_as_end(self):
+    result = self.prepare(self.fx.payload(self.fx.saas_inputs(), self.fx.saas_platform()))
+    self.assertEqual(result["status"], "READY", result["failures"])
+    end = result["targets"][0]["end"]
+    self.assertEqual(end["source"], "target-branch")
+    self.assertEqual(end["ref"], "refs/remotes/origin/master")
+    self.assertEqual({pr["state"] for pr in result["targets"][0]["related_prs"]}, {"merged"})
+
+  def test_open_pr_alone_starts_at_the_target_branch_tip(self):
+    repo, c, repos = self.mixed_repo("lone")
+    result = self.prepare(self.fx.payload(
+      [pr_url("acme/lone", "3")],
+      {"github.com/acme/lone#3": open_response("acme/lone", c["head3"], "f3")},
+      repos=repos, run_id="open-lone",
+    ))
+    self.assertEqual(result["status"], "READY", result["failures"])
+    target = result["targets"][0]
+    self.assertEqual(target["start"]["sha"], c["other"])
+    self.assertEqual(target["start"]["source"], "open-pr-target-tip")
+    self.assertEqual(sorted(entries_by_path(target)), ["b.txt"])
+
+  def test_open_pr_that_cannot_stand_for_the_merged_result_fails_explicitly(self):
+    repo, c, repos = self.mixed_repo("bad")
+    git(repo, "checkout", "-q", "-b", "f4", c["other"])
+    head4 = self.fx.change(repo, "pr4 open", write={"a.txt": "a4\n"})
+    git(repo, "update-ref", "refs/remotes/origin/f4", head4)
+    git(repo, "checkout", "-q", "master")
+    merged1 = merged_response("acme/bad", c["m1"], c["head1"])
+
+    def run(label, platform, before=None):
+      if before:
+        before()
+      return self.prepare(self.fx.payload(
+        [pr_url("acme/bad", key.rsplit("#", 1)[1]) for key in platform], platform,
+        repos=repos, run_id=f"open-{label}",
+      ))
+
+    two_open = run("two-open", {
+      "github.com/acme/bad#1": merged1,
+      "github.com/acme/bad#3": open_response("acme/bad", c["head3"], "f3"),
+      "github.com/acme/bad#4": open_response("acme/bad", head4, "f4"),
+    })
+    self.assertEqual(self.failure_codes(two_open), ["OPEN_PR_MULTIPLE"])
+
+    stale_ref = run("stale-ref", {
+      "github.com/acme/bad#1": merged1,
+      "github.com/acme/bad#3": open_response("acme/bad", c["head3"], "missing-branch"),
+    })
+    self.assertEqual(self.failure_codes(stale_ref), ["OPEN_PR_HEAD_UNVERIFIED"])
+
+    def advance_target():
+      self.fx.change(repo, "target moves on", write={"z.txt": "z2\n"})
+      self.fx.publish(repo)
+
+    behind = run("behind", {
+      "github.com/acme/bad#1": merged1,
+      "github.com/acme/bad#3": open_response("acme/bad", c["head3"], "f3"),
+    }, before=advance_target)
+    self.assertEqual(behind["status"], "BLOCKED")
+    self.assertEqual(self.failure_codes(behind), ["OPEN_PR_BEHIND_TARGET"])
+    self.assertEqual(behind["targets"], [])
+
   def test_fallback_start_refuses_merges_without_a_single_earliest(self):
     repo = self.fx._init("parallel", "https://github.com/acme/parallel.git")
     self.fx.change(repo, "base", write={"p.txt": "p\n"})
@@ -1339,6 +1462,151 @@ class MergedRangePreparationTest(unittest.TestCase):
     self.assertEqual(result["status"], "READY", result["failures"])
     self.assertEqual(result["targets"][0]["start"]["source"], "since")
     self.assertEqual(result["targets"][0]["start"]["sha"], self.fx.c["side"])
+
+
+class TargetsBoundaryHardeningTest(unittest.TestCase):
+  def setUp(self):
+    self._tmp = tempfile.TemporaryDirectory()
+    self.addCleanup(self._tmp.cleanup)
+    self.fx = Fixture(self._tmp.name)
+
+  def _run_raw(self, mode, raw_text):
+    proc = subprocess.run(
+      [sys.executable, str(SCRIPT), mode],
+      input=raw_text,
+      capture_output=True,
+      text=True,
+    )
+    self.assertNotIn("Traceback", proc.stderr)
+    return proc.returncode, json.loads(proc.stdout)
+
+  def test_source_files_matches_vendored_directory_segments_not_substrings(self):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("pr_review_targets_unit", SCRIPT)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    files = [
+      "src/redist/handler.ts",
+      "src/rebuild/worker.py",
+      "src/test_coverage/report.ts",
+      "src/my_vendor/api.ts",
+      "dist/bundle.js",
+      "packages/web/build/out.js",
+      "vendor/lib.go",
+      "node_modules/pkg/index.js",
+      "coverage/lcov.js",
+    ]
+    self.assertEqual(
+      mod.source_files(files),
+      [
+        "src/redist/handler.ts",
+        "src/rebuild/worker.py",
+        "src/test_coverage/report.ts",
+        "src/my_vendor/api.ts",
+      ],
+    )
+
+  def test_cancel_refuses_symlinked_materials_run_dir_without_deleting_outside_files(self):
+    outside = Path(self._tmp.name) / "outside-victim"
+    outside_sub = outside / "review-pr-1"
+    outside_sub.mkdir(parents=True)
+    secret_file = outside_sub / "precious.txt"
+    secret_file.write_text("keep me")
+
+    state_root = self.fx.state_root
+    materials_dir = state_root / "materials"
+    materials_dir.mkdir(parents=True, exist_ok=True)
+    (materials_dir / "run-sym").symlink_to(outside)
+    state_file = state_root / "run-sym.json"
+    state_file.write_text(json.dumps({
+      "status": "READY",
+      "run_id": "run-sym",
+      "targets": [{"materials": {"root": str(outside_sub)}, "review_root": "/tmp/x"}],
+      "capacity": None,
+    }))
+    result = run_cli("cancel", {"preparation_path": str(state_file)})
+    self.assertFalse(result["cancelled"])
+    self.assertEqual(result["reason_codes"], ["STATE_MATERIALS_OUT_OF_SCOPE"])
+    self.assertTrue(secret_file.exists())
+
+    # Sibling symlink inside materials/ shares the same parent dir; only is_symlink() blocks it.
+    sibling_run = materials_dir / "other-run"
+    sibling_target = sibling_run / "review-pr-1"
+    sibling_target.mkdir(parents=True)
+    sibling_file = sibling_target / "keep.txt"
+    sibling_file.write_text("sibling data")
+    (materials_dir / "run-sibling-sym").symlink_to(sibling_run)
+    sib_state = state_root / "run-sibling-sym.json"
+    sib_state.write_text(json.dumps({
+      "status": "READY",
+      "run_id": "run-sibling-sym",
+      "targets": [{"materials": {"root": str(sibling_target)}, "review_root": "/tmp/x"}],
+      "capacity": {},
+    }))
+    sib_result = run_cli("cancel", {"preparation_path": str(sib_state)})
+    self.assertFalse(sib_result["cancelled"])
+    self.assertEqual(sib_result["reason_codes"], ["STATE_MATERIALS_OUT_OF_SCOPE"])
+    self.assertTrue(sibling_file.exists())
+
+  def test_merged_rejects_ambiguous_start_reports_and_conflicting_duplicate_since(self):
+    mfx = MergedFixture(self._tmp.name + "-merged")
+    self.addCleanup(lambda: shutil.rmtree(self._tmp.name + "-merged", ignore_errors=True))
+    r1 = mfx.report("saas", "12", "acme/saas", mfx.c["m30"])
+    r2 = mfx.report("saas", "13", "acme/saas", mfx.c["c0"])
+    ambiguous = run_cli("prepare", mfx.payload(
+      mfx.saas_inputs(), mfx.saas_platform(), start_report=[r1, r2], run_id="ambig-report",
+    ))
+    self.assertEqual(ambiguous["status"], "BLOCKED")
+    self.assertIn("START_REPORT_AMBIGUOUS", [f["reason_code"] for f in ambiguous["failures"]])
+
+    conflicting = run_cli("prepare", mfx.payload(
+      mfx.saas_inputs(), mfx.saas_platform(),
+      since=[f"acme/saas={mfx.c['side']}", f"ACME/SAAS={mfx.c['c0']}"],
+      run_id="conflict-since",
+    ))
+    self.assertEqual(conflicting["status"], "BLOCKED")
+    self.assertIn("SINCE_CONFLICTING", [f["reason_code"] for f in conflicting["failures"]])
+
+  def test_malformed_cli_inputs_diff_lines_and_ref_traversal_fail_cleanly(self):
+    for mode in ("prepare", "finalize", "cancel", "authorize-dispatch"):
+      for raw in ("[]", "null", '"bad"'):
+        with self.subTest(mode=mode, raw=raw):
+          rc, data = self._run_raw(mode, raw)
+          self.assertEqual(rc, 1)
+          self.assertEqual(data["status"], "ERROR")
+
+    rc, bad_inputs = self._run_raw("prepare", json.dumps({
+      "run_id": "bad-inputs",
+      "state_root": str(self.fx.state_root),
+      "inputs": "https://github.com/acme/saas/pull/1",
+      "current_repo": "not-a-dict",
+    }))
+    self.assertEqual(bad_inputs["status"], "NEEDS_INPUT")
+
+    platform = {
+      "github.com/acme/saas#1": self.fx.platform_ok(
+        "acme/saas", self.fx.commits["saas_c"], "master", self.fx.commits["saas_a"],
+        ["c.txt"], "not-an-int", ["bad-spec"], head_ref="feat1",
+      )
+    }
+    rc, bad_diff = self._run_raw("prepare", json.dumps(self.fx.payload(
+      [{"raw": "https://github.com/acme/saas/pull/1"}], platform, run_id="bad-diff-lines",
+    )))
+    self.assertEqual(bad_diff["status"], "BLOCKED")
+    self.assertEqual(bad_diff["failures"][0]["reason_code"], "TARGET_METADATA_INVALID")
+
+    traversal_platform = {
+      "github.com/acme/saas#1": self.fx.platform_ok(
+        "acme/saas", self.fx.commits["saas_c"], "master@{0}", self.fx.commits["saas_a"],
+        ["c.txt"], 4, [], head_ref="feat1",
+      )
+    }
+    rc, traversed = self._run_raw("prepare", json.dumps(self.fx.payload(
+      [{"raw": "https://github.com/acme/saas/pull/1"}], traversal_platform, run_id="ref-traversal",
+    )))
+    self.assertEqual(traversed["status"], "BLOCKED")
+    self.assertEqual(traversed["failures"][0]["reason_code"], "TARGET_VERSION_UNRESOLVED")
+
 
 if __name__ == "__main__":
   unittest.main()

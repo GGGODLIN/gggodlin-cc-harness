@@ -101,3 +101,17 @@ test('兩路保留原共用驗證與收尾，補測在最後 review 前', () => 
   assert.match(implement, /For a started implement run in either testing mode/)
   assert.match(implement, /不是人類選擇或測試品質的機器證明/)
 })
+
+test('收尾第 1 步的修正還原檢查兩路共用，排除全新功能與已同意保護的既有行為', () => {
+  const check = implement.indexOf('修正還原檢查')
+  assert.ok(check > implement.indexOf('兩路到這裡才合流'))
+  assert.ok(check < implement.indexOf('Run the full test suite once'))
+  assert.match(implement, /git apply -R/)
+  assert.match(implement, /git stash push -- <非測試檔>/)
+  assert.match(implement, /還原後仍綠的測試分不出有修與沒修/)
+  assert.match(implement, /全新功能的測試/)
+  assert.match(implement, /票上已同意要保護的既有行為/)
+  assert.match(implement, /用同一份 patch 復原並確認 `git status --short` 與檢查前一致/)
+  assert.match(implement, /只斷言 mock/)
+  assert.match(regression, /修正還原檢查兩種模式都要做/)
+})

@@ -1,7 +1,7 @@
 #!/bin/bash
 # websearch-parallel-enforce.sh
 # Threat model: drift prevention for honest agents, not a security boundary. This
-# literal matcher recognizes LCU navigation calls and retained OBU command shapes;
+# literal matcher recognizes non-error LCU navigation results only;
 # it does not promise complete shell/JavaScript semantics and may match quoted code.
 # LCU tickets require a non-error result, not proof that every SERP row was read.
 # Locked: this hook and its fixtures. Editable: paired-search guidance. Append-only:
@@ -15,8 +15,8 @@ INPUT=$(cat)
 TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name // empty' 2>/dev/null)
 TRANSCRIPT=$(echo "$INPUT" | jq -r '.transcript_path // empty' 2>/dev/null)
 
-LOG_DIR="$HOME/.claude/hooks/state"
-mkdir -p "$LOG_DIR"
+LOG_DIR="${HOME:-/tmp}/.claude/hooks/state"
+mkdir -p "$LOG_DIR" 2>/dev/null || true
 LOG="$LOG_DIR/websearch-parallel.log"
 
 log() {
@@ -138,7 +138,6 @@ def lcu_result_ok(block):
 
 nav_queries = []
 lcu_pending_queries = {}
-bash_pending_queries = {}
 ws_success_queries = []
 ws_pending_q = None
 ws_pending_id = None
@@ -151,13 +150,7 @@ for line in sys.stdin:
             for c in d["message"]["content"]:
                 if c.get("type") != "tool_use": continue
                 name = c["name"]
-                if name in ("mcp__open_browser_use__open_tab", "mcp__open_browser_use__navigate"):
-                    url = c["input"].get("url", "")
-                    parsed = urllib.parse.urlparse(url)
-                    if parsed.netloc in ("google.com", "www.google.com") and parsed.path == "/search":
-                        q = urllib.parse.parse_qs(parsed.query).get("q", [""])[0]
-                        if q: nav_queries.append(norm(q))
-                elif name == "mcp__lcu__js":
+                if name == "mcp__lcu__js":
                     code = c["input"].get("code", "")
                     queries = []
                     if re.search(r"(?:\.createBrowserTab|\.goto)\s*\(", code):
@@ -168,17 +161,6 @@ for line in sys.stdin:
                             if q: queries.append(norm(q))
                     if queries and c.get("id"):
                         lcu_pending_queries[c["id"]] = queries
-                elif name == "Bash":
-                    command = c["input"].get("command", "")
-                    queries = []
-                    if "agent_browser_cli.py" in command and "open-tab" in command:
-                        urls = re.findall(r"https://(?:www\.)?google\.com/search\?[^\s\"\x27\\]+", command)
-                        for url in urls:
-                            parsed = urllib.parse.urlparse(url)
-                            q = urllib.parse.parse_qs(parsed.query).get("q", [""])[0]
-                            if q: queries.append(norm(q))
-                    if queries and c.get("id"):
-                        bash_pending_queries[c["id"]] = queries
                 elif name == "WebSearch":
                     ws_pending_q = norm(c["input"].get("query", ""))
                     ws_pending_id = c.get("id")
@@ -193,20 +175,6 @@ for line in sys.stdin:
                         if lcu_result_ok(c):
                             nav_queries.extend(lcu_pending_queries[tool_use_id])
                         del lcu_pending_queries[tool_use_id]
-                    if tool_use_id in bash_pending_queries:
-                        payload = None
-                        if not c.get("is_error") and isinstance(c.get("content"), str):
-                            try:
-                                payload = json.loads(c["content"])
-                            except json.JSONDecodeError:
-                                pass
-                        steps = payload.get("steps") if isinstance(payload, dict) else None
-                        if isinstance(steps, list) and any(
-                            isinstance(step, dict) and step.get("action") == "open-tab"
-                            for step in steps
-                        ):
-                            nav_queries.extend(bash_pending_queries[tool_use_id])
-                        del bash_pending_queries[tool_use_id]
                     if ws_pending_q is not None and tool_use_id == ws_pending_id:
                         text = str(c.get("content", ""))
                         if "[search-parallel]" not in text:
@@ -237,4 +205,5 @@ log "block" ",\"q_nav\":${Q_NAV:-0},\"q_ws_ok\":${Q_WS_OK:-0}"
 # Build JSON safely via jq to handle quotes/special chars in query.
 REASON="[search-parallel] 例外條款（先看這條）：使用者明確說「只跑 WebSearch」「不要開 browser」可只 call WebSearch，但需在 response 開頭明示原因。非例外情況：沒有可用的 SERP ticket 配對 query='${CURRENT_WS_QUERY}'（同 query nav=${Q_NAV:-0}, 已成功 WS=${Q_WS_OK:-0}）。先用正式 LCU MCP js 的 createBrowserTab／goto 實際導航並讀回 https://www.google.com/search?q=${ENCODED}，操作碼保留該完整 URL 字面值，取得非錯誤回件後再 call WebSearch。同 query 重複 WebSearch 請先補新 ticket；不要為補 ticket 啟動已退出預設路徑的 OBU／Agent Chrome。背景：reference_search_tool_comparison_2026_05_10.md"
 
-jq -nc --arg reason "$REASON" '{decision: "block", reason: $reason}'
+jq -nc --arg reason "$REASON" '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:$reason}}'
+exit 0

@@ -4,6 +4,7 @@ description: 建立或修改 subagent 定義檔（~/.claude/agents/*.md 或專�
 ---
 
 <!-- 本檔在契約測試底下：bash ~/.claude/skills/agent-authoring/scripts/tests/agent-contract-validator-closeout.test.sh -->
+<!-- 本檔在契約測試底下：bash ~/.claude/skills/agent-authoring/scripts/tests/smoke-agent.test.sh -->
 
 # Agent Authoring
 
@@ -44,18 +45,18 @@ tools: Read, Grep, Bash          # ⚠️ 見 Step 2，省略與空陣列語意�
 | 角色類型 | 預設 tools 起點 | 瘦身理由 |
 |---|---|---|
 | 機械對表（rubric auditor）| `Read` | 素材全嵌 prompt，實測 0-tool-call 也吃 ~40K schema 預載，砍到只剩保險 |
-| 只讀審查（reviewer / critic）| `Read, Grep, Glob, Bash` | code 審查要跑測試留 Bash；語意搜尋另加 semble 兩件 |
+| 只讀審查（reviewer / critic）| `Read, Grep, Glob, Bash` | code 審查要跑測試留 Bash；語意搜尋另加 semble 兩件；不跑測試的純靜態審查可拔 `Bash`。例外：`security-reviewer` 因兼負責漏洞修補，刻意保留 `Write, Edit`（由 `review-standards-contract.test.sh` 釘住） |
 | 研究抓取（fetch / search）| `Read, WebFetch, WebSearch` + 按需 `ToolSearch` | deferred MCP 靠 ToolSearch 載，不預載全套 |
 | 寫檔實作（implementer）| `Read, Write, Edit, Bash, Grep, Glob` | |
 | 文件維運（wiki / docs）| `Read, Write, Edit, Grep, Glob, Bash` | 散文語料搜尋走 `semble search ... --content docs` CLI（走 Bash）；**不要**用 code 版 `mcp__semble__search`，它是 code-only 註冊、查散文會靜默回程式碼檔。舊的 `semble-docs` MCP server 已於 2026-08-08 移除 |
 
 完成判準：tools 欄的每個名字都對過「這工具在這台機器現在真的存在」。
 
-## Step 3: 載入時機——改完檔不等於生效
+## Step 3: 載入時機與實驗隔離——中途改檔會污染進行中的 session
 
-- Agent 定義檔 **per-session 載入**：新建 / 修改後，現行 session 派的還是舊定義（新建檔會 `Agent type not found`、改欄位靜默用舊值）。驗證一律走 headless 新 process 或新 session
+- Agent 定義檔在現行 Claude Code 已支援 **session 進行中動態載入與熱更新**（新建檔會觸發 `New agent types are now available`、修改既有定義如 `omitClaudeMd` 或欄位會在後續派工生效，但不保證舊版 session 或快取路徑百分之百即時切換）：因此(1) 上線驗證一律走 Step 5 的 headless 新 process 確保拿到乾淨新定義；(2) **跑 A/B 或多格對照實驗期間嚴禁中途修改受測 agent 定義檔**——中途改檔會直接把舊版對照組污染成新版，必須凍結原檔或另開不同檔名的變體受測
 - **Agent result cache 以 prompt 為 key**：同 session 內同 prompt 重派會原样回放舊結果（token 數逐位相同可辨識）。修完定義在同 session 用同 prompt 重測 = 測到的是快取不是修復
-- 若有 gate / hook 強制導向新 agent（如 T2-routing-gate sentinel）：**開關必須等新 session 載入 agent 後才開**，否則該 session 舊路被擋、新 agent 不存在，即興派工全鎖死
+- 若有 gate / hook 強制導向新 agent（如 T2-routing-gate sentinel）：**開關必須確認目標 session 已載入新 agent 後才開**，否則舊路被擋、新 agent 未就緒會讓即興派工鎖死
 
 完成載入時機檢查後，接 Step 4：contract validator closeout，再進 smoke。
 
@@ -69,7 +70,7 @@ ACTIVE_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || true)
 if [ -n "$ACTIVE_ROOT" ] && [ "$(git -C "$ACTIVE_ROOT" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" = "$(git -C "$CONFIG_ROOT" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" ]; then
   CONFIG_ROOT=$ACTIVE_ROOT
 fi
-node "$CONFIG_ROOT/scripts/agent-contract-validator.mjs" --global-root "$CONFIG_ROOT"
+node "$CONFIG_ROOT/scripts/agent-contract-validator.mjs" --global-root "$CONFIG_ROOT" --repo-root "$CONFIG_ROOT"
 ```
 
 如果 validator exit status 非 0，停止 closeout，把 validator 原始 JSON 診斷原樣保留在回報，不進 Step 5。Validator 只在 authoring closeout 執行；正常 Agent／Workflow 執行不呼叫 validator。
@@ -78,19 +79,24 @@ node "$CONFIG_ROOT/scripts/agent-contract-validator.mjs" --global-root "$CONFIG_
 
 ## Step 5: 上線前 smoke test（機械閘門、不可跳過）
 
-跑 `scripts/smoke-agent.sh <agent-name>`——headless 新 process 派該 agent 用 Bash 寫檔，**以磁碟上真的出現 side-effect 檔為唯一判準**。
+按受測 agent 的工具權限選對應模式跑 `scripts/smoke-agent.sh`：
+- **有 `Bash` 且允許寫暫存檔的一般／實作角色**：跑預設模式，在 headless 新 process 派該 agent 用 `Bash` 寫檔，**以磁碟上真的出現 side-effect 檔為唯一判準**。
+- **無 `Bash`／`Write` 的唯讀角色（如純 `Read, Grep, Glob` 審查員）或禁止寫任意暫存檔的受限角色**：加 `--read-only`，腳本會在暫存區植入隨機唯一 nonce 探針檔，**同時驗證回覆帶出該隨機 nonce 且結構化紀錄確實發出針對該檔的 `Read` 工具呼叫**（且探針檔未被改動）。
 
 ```bash
+# 一般可寫檔角色
 bash ~/.claude/skills/agent-authoring/scripts/smoke-agent.sh <agent-name>
+# 唯讀或受限輸出角色
+bash ~/.claude/skills/agent-authoring/scripts/smoke-agent.sh --read-only <agent-name>
 ```
 
 為什麼不能用別的判準：
 
 - 驗 jsonl 的 model / effort 解析值 ≠ 驗工具能用（07-26 smoke 4/4 過、隔天 live 全滅的實證）
 - 信 agent 的文字回報 ≠ 驗證（幻覺型會編出完整驗收證據）；這條同樣適用日常——**subagent 說改了檔，main 驗收一律磁碟實查**
-- 角色紀律強的 agent（如 reviewer 類）可能拒絕 off-role probe——這是好事不是 FAIL，改用一次最小真實任務驗，並在該 agent 檔記「首次真實使用時驗」
+- 連 `Read` 都沒有的純外部专用工具角色（如僅配 `WebFetch` 或單一 MCP 的擷取器），若無法跑 `--read-only`，才改用一次最小真實工具任務驗，並在該 agent 檔記「首次真實使用時驗」
 
-完成判準：smoke PASS 輸出貼在交付訊息裡，或明寫「拒絕 probe、待首次真實任務驗」。
+完成判準：對應模式的 smoke PASS 輸出貼在交付訊息裡，或（僅限無 `Bash` 亦無 `Read` 的專用工具角色）明寫最小真實任務收據／「待首次真實任務驗」。
 
 ## Step 6: 接線收尾
 

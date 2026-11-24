@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# 提示型 Stop hook：只認常見的整段英文結案與反引號包住的 Markdown 連結，不承諾完整語意；判不出來就放行。
+# 提示型 Stop hook：只認常見的整段英文結案與反引號包住的 Markdown 連結／裸網址，不承諾完整語意；判不出來就放行。
 # 字串比對型：會攔到「談論該寫法的非 code block 文字」，不能阻止第一份回覆顯示，也不保證模型接受提醒；不處理中途進度或刻意繞過。
 # 背景任務進行中也提醒（2026-10-13 起）：舊版跳過這類回合，導致有背景任務時英文結案 0 次提醒，
 # 通知喚醒回合的 nudge 注入了 Opus 也沒照做；每則人類訊息透過 mark_once 仍只提醒一次（第二次必放行、不卡死）。
@@ -32,15 +32,23 @@ NEGATIVE_ENGLISH = re.compile(
 )
 REMINDER = (
   "[opus-chinese-stop] 使用者的預設回覆語言是繁體中文；剛才的結案說明主要是英文。"
-  "請以繁體中文重述相同的結論與必要資訊，不增減內容，也不要重跑已完成的工具工作；"
+  "請以繁體中文重述相同的結論與必要資訊，不增減內容，也不要重做已完成的修改或外部操作（若同輪有收尾檢查要求執行唯讀 git 狀態／差異核對，仍照常執行）；"
   "背景任務還在跑就照原計畫等它的通知，不要另開新動作。"
 )
 LINK_REMINDER = (
-  "[opus-chinese-stop] 剛才的回覆把 Markdown 連結包進了反引號（如 `[文字](file:///...)`），這會讓終端機超連結失效。"
-  "請去掉連結外面的反引號（直接寫 [顯示文字](完整URL)）並重述結論，不增減內容，也不要重跑已完成的工具工作；"
+  "[opus-chinese-stop] 剛才的回覆把 Markdown 連結或裸網址包進了反引號（如 `[文字](file:///...)` 或 `https://...`），這會讓終端機超連結失效。"
+  "請去掉連結外面的反引號（直接寫 [顯示文字](完整URL)）並重述結論，不增減內容，也不要重做已完成的修改或外部操作（若同輪有收尾檢查要求執行唯讀 git 狀態／差異核對，仍照常執行）；"
   "背景任務還在跑就照原計畫等它的通知，不要另開新動作。"
 )
 BACKTICK_LINK = re.compile(r"(?<!`)`\[[^\]`\n]+\]\((?:https?://|file://)[^)\s`]+\)`(?!`)")
+BACKTICK_BARE_URL = re.compile(
+  r"(?<!`)`https?://"
+  r"(?!(?:[A-Za-z0-9-]+\.)*localhost\b)"
+  r"(?:[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\.)+(?:[A-Za-z]{2,}|xn--[A-Za-z0-9-]+)"
+  r"(?::\d+)?"
+  r"(?:[/?#][^`\s<>\"'{}$*\\|\[\]]*)?(?<!\.\.\.)`(?!`)",
+  re.IGNORECASE,
+)
 LOG_LIMIT = 512 * 1024
 
 
@@ -52,7 +60,8 @@ def strip_blocks(text):
 
 
 def backtick_wrapped_link(text):
-  return bool(BACKTICK_LINK.search(strip_blocks(text)))
+  cleaned = strip_blocks(text)
+  return bool(BACKTICK_LINK.search(cleaned) or BACKTICK_BARE_URL.search(cleaned))
 
 
 def natural_text(text):
@@ -251,7 +260,7 @@ def main():
       return
     if english_fire and has_backtick_link:
       log_decision(root, payload, "reminded")
-      msg = REMINDER + "另外請去掉 Markdown 連結外面的反引號（直接寫 [顯示文字](完整URL)），避免終端機超連結失效。"
+      msg = REMINDER + "另外請去掉 Markdown 連結或裸網址外面的反引號（直接寫 [顯示文字](完整URL)），避免終端機超連結失效。"
     elif english_fire:
       log_decision(root, payload, "reminded")
       msg = REMINDER

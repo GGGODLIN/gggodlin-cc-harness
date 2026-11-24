@@ -9,7 +9,12 @@
 # 這是提示型（advisory）注入：只防健忘的 agent 把候選當待辦自行執行，不防刻意繞過、也不阻擋任何動作；
 # 真正擋 push 的是 public-push-gate hook，不是這段文字。
 input=$(cat)
-prompt=$(printf '%s' "$input" | jq -r '.prompt // ""')
+# Fast-path: 沒出現關鍵子字串也沒 \u 轉義時直接退場，省掉每回合 jq 啟動。
+case "$input" in
+  *本機分析*|*'\u'*) ;;
+  *) exit 0 ;;
+esac
+prompt=$(printf '%s' "$input" | jq -r 'if type == "object" and (.prompt | type) == "string" then .prompt else "" end' 2>/dev/null || true)
 # 2026-07-10 誤觸修復：UserPromptSubmit 也會收到 task-notification / 系統注入內容，
 # subagent 報告內文含關鍵字曾觸發本 hook。兩道守衛：
 # (1) 來源排除——系統通知標記直接跳過；(2) 長度守衛——真實觸發是短指令，
@@ -25,6 +30,9 @@ prompt=$(printf '%s' "$input" | jq -r '.prompt // ""')
 # 合成 prompt 搬到本檔（指令不留原因），每條規則的「為什麼」留在
 # ~/.claude/workflows/local-analysis.js 的「合成 agent 已移除」註解段——
 # 改本檔任何一條之前先讀那段。
+# 第 14 條：digest 後同回合先執行自決清單；第 12、16 條同步指向第 14 條。
+# 第 8 條新增 distill／habits 候選例外，避免個人專案候選被過濾。
+# 2026-11-16 同日加 habits channel（local-analysis.js 同日沿革）：其候選在第 14 條一律歸「需要你決策」。
 case "$prompt" in *"[SYSTEM NOTIFICATION"*|*"<task-notification>"*) exit 0;; esac
 [ "${#prompt}" -gt 300 ] && exit 0
 if printf '%s' "$prompt" | grep -qE '每日本機分析|今日本機分析'; then
@@ -40,7 +48,7 @@ if printf '%s' "$prompt" | grep -qE '每日本機分析|今日本機分析'; the
 
 使用者要求每日本機分析。立即啟動兩項互不相依工作，不要等其中一項完成才開另一項：
 
-A. 用 Bash `run_in_background=true` 執行 `~/code/social-info/scripts/local-analysis/recap-daily.sh`。這支 wrapper 會自行判斷模型路由：原生 Claude 使用 native Opus，其餘啟動方式固定走本機 CLIProxyAPI 的 Luna(max)；失敗時不退回 free(max)。
+A. 用 Bash `run_in_background=true` 執行 `~/code/social-info/scripts/local-analysis/recap-daily.sh`。這支 wrapper 會自行判斷模型路由：原生 Claude 使用 native Opus，其餘啟動方式主用 group/gemini-flash:high，失敗備援 GPT_SOL(high)[1m]；失敗時不退回 free(max)。
 B. 用 Workflow tool 跑 scriptPath `~/.claude/workflows/local-analysis.js`，args 用本訊息**最後一行**給的值，其中 `"external_recap":true` 讓 workflow 跳過內建 recap agent。
 
 recap Bash 與 workflow 都完成後才產 digest。workflow 回傳的 `external_channels` 只宣告 recap 由外部負責，不代表成功：Bash exit 0 且 recap report 存在時，Read 該 report，並把 recap 併入 ran / channels（needs_read=true）；Bash 非 0、report 缺失或內容空白時，把 recap 加進 failed，保留錯誤與 report 狀態。不要重跑完整 workflow，也不要靜默改用其他模型。
@@ -66,19 +74,24 @@ recap 只交候選，main 核對後才追加兩份事件帳本（外部 Bash 與
 5. 任何含 ⚠️ 或 🚨 的行**原文保留**，不得濃縮或省略。
 6. 產「今天值得做的事（依優先度）」段：🔴 高 / 🟡 中 / 🔵 低三檔，每項用粗體可尋址編號起頭（H1. / M1. / L1.），三檔各自從 1 起編、跨檔不重號。不夠不湊，高檔可以是 0 條。 skill-changes channel 的 report 每個對象自帶「建議檔位：高／中／低」，照該檔位放、不得下調；它是唯一預先分檔的 channel，其他 channel 仍由你判。publish-candidate channel（`~/code/social-info/reports/local-analysis/<date>-publish-candidate.md`，公開 harness 每週發布候選）不套用第 8 條產品 repo 排除，也不寫 pending-actions.jsonl（候選由每週 channel 重新產生，沒處理就下週再列）：報告含 heading「## 📦 公開 harness 發布候選（需要你決策，agent 不得代做）」→ 固定放 🔴 高檔、不得下調，條目保留「需要你決策，agent 不得代做」原文，濃縮差異摘要、第 3 關結論、判「進」的新增檔與是否建議升級全審，行動項只列「發布／不發布／升級全審」由使用者拍板，agent 不得代做發布、push 或啟動全審；含「## ⚠️ 公開 harness 發布候選檢查失敗」→ 也放 🔴 高檔、⚠️ 行原文保留、不產生候選；兩種 heading 都沒有（報告只寫「本週沒有發布候選」）→ 不進三檔、不列沉底行。
 7. reconcile 輸出的 forced_high / min_medium 是**強制下限**，不得下調；bottom_only 只列沉底行；silent 的既不進三檔也不列沉底行。其餘（open）由你判檔位。
-8. **範圍排除**：產品 repo（`~/Desktop/work/` 底下的公司 repo，如 acme-dashboard-v2 / acme-saas-v2-service / acme-context-v2 / agent-toolkit，以及個人專案 repo 等）當前進行中的實作、修 bug、驗收待辦——不進三檔、不進沉底行、不寫 ledger。判準：這件事要在哪裡做？在產品 repo 的 code 裡就排除。**例外：ledger-lifecycle 命中不套用產品 repo 排除**——判準是帳本檔生命週期，不是 repo 內實作待辦；照既有 H/M/L 三檔、pending-actions、count 升檔與沉底行處理，不另建區塊。session-audit-consume 項目依「實際修改落點」分流：修改落點在全域環境或本機分析工具鏈（`~/.claude`、`~/code/social-info`）且有具體處置提案的項目（含常駐規則改善提案），已在 commit-cursor 階段預寫入 pending-actions.jsonl（source_key 為 `session-audit-consume:...`），必須逐筆排入 H/M/L 三檔供使用者拍板（不得將不同 source_key 揉成單一編號或靜默省略常駐規則改善項）；落點在產品或個人專案 repo 內部的待辦依本條排除，僅留在報告正文備查。recap 段照常敘述發生了什麼，但不轉成 action item。
+8. **範圍排除**：產品 repo（`~/Desktop/work/` 底下的公司 repo，如 acme-dashboard-v2 / acme-saas-v2-service / acme-context-v2 / agent-toolkit，以及個人專案 repo 等）當前進行中的實作、修 bug、驗收待辦——不進三檔、不進沉底行、不寫 ledger。判準：這件事要在哪裡做？在產品 repo 的 code 裡就排除。**例外：distill A 線與 habits channel 的固化／規則候選不套用本條排除**——它們是「要不要把重複動作寫成規則或流程」的提案，不是 repo 內進行中的實作；即使建議落點在產品或個人專案 repo 內（如該 repo 的 CLAUDE.local.md 或 repo 內小腳本），也照第 14 條一律歸「需要你決策」，只寫建議與落點，使用者拍板前不改該 repo。**例外：ledger-lifecycle 命中不套用產品 repo 排除**——判準是帳本檔生命週期，不是 repo 內實作待辦；照既有 H/M/L 三檔、pending-actions、count 升檔與沉底行處理，不另建區塊。session-audit-consume 項目依「實際修改落點」分流：修改落點在全域環境或本機分析工具鏈（`~/.claude`、`~/code/social-info`）且有具體處置提案的項目（含常駐規則改善提案），已在 commit-cursor 階段預寫入 pending-actions.jsonl（source_key 為 `session-audit-consume:...`），必須逐筆排入 H/M/L 三檔供使用者拍板（不得將不同 source_key 揉成單一編號或靜默省略常駐規則改善項）；落點在產品或個人專案 repo 內部的待辦依本條排除，僅留在報告正文備查。recap 段照常敘述發生了什麼，但不轉成 action item。
 9. **beads-aging 專屬區塊**：beads-aging 不套用第 8 條的產品 repo 排除，也不進 H/M/L 或本次沉底；將 report 已限量的 B1/B2 放進獨立 \`## 🧵 待辦老化\`，保留每筆的絕對 repo path、bead id、原因、priority、due、defer、age，並請使用者逐筆拍板「保留／延後／關閉」。beads-aging finding 不得寫入 pending-actions.jsonl，也不得放進 reconcile 的 --findings。bead mutation 是 human-controlled：未拍板不得執行 bd。使用者拍板後才依 report 內的絕對 repo path + bead id 操作：保留或調 priority 用 \`bd update\`；延後用 \`bd defer\` 並帶 \`--until\`、\`--reason\`；關閉用 \`bd close --reason\`。不得改用標題猜 repo 或 id。
 10. **新 finding 進場閘**：今天新出現的 finding 只要指名具體可查物（路徑 / 行號 / frontmatter 欄位 / 版本號 / 計數 / wikilink / 目錄存在與否），排檔前自己查一次。查了不成立 → 不排檔、不寫 ledger，改在該 channel 段寫一行「channel 提報 X，查證不成立：<證據>」，並判斷該不該回頭修那個 wrapper。沒有可查物 → 照排但標「未驗」。
 11. **不要自行下根因結論**。可以寫現象與影響；根因未實查就寫「根因：未查」。
-12. digest 末尾固定加一行「本次沉底：<今日 actionable 但沒進三檔的 title；無則寫 無>」。「要使用者決定、不做也沒關係」的項目不放 digest 末尾，改收進「## 可選（不回也沒關係）」段：產 digest 時先收齊，等使用者叫你執行高中低、執行完高中低、交完成回報時，放在回報最後（若有「需要你決策」段，放在它之後）。每項一行並附回覆方式；使用者沒回應就算略過，不追問、不升級進高中低、不寫 ledger。下一輪條件仍成立就照常再列，同一項只佔一行。沒有項目寫「可選：無」。目前收四種：
-   - 有 pending 且 count>=2 的項目：「⚖️ 留/殺待拍板：<titles>」，使用者回「留／殺 <title>」再走第 13 條 --decide。
+12. digest 末尾固定加一行「本次沉底：<今日 actionable 但沒進三檔的 title；無則寫 無>」。「要使用者決定、不做也沒關係」的項目不放 digest 末尾，改收進「## 可選（不回也沒關係）」段：產 digest 時先收齊，依第 14 條自動執行自決清單、執行完高中低、交完成回報時，放在回報最後（若有「需要你決策」段，放在它之後）。每項一行並附回覆方式；使用者沒回應就算略過，不追問、不升級進高中低、不寫 ledger。下一輪條件仍成立就照常再列，同一項只佔一行。沒有項目寫「可選：無」。目前收四種：
+   - 有 pending 且 count>=2 的項目：「⚖️ 留/殺待拍板：<titles>」，使用者回「留／殺 <title>」再走第 14 條 --decide。
    - 最近一份 rules-size 報告含「🎯 建議處理」：「📏 always-on 超標：<檔名> 超 <N> bytes，要處理就回『做 📏』→ /rules-slim」。本輪 channels 有 rules-size 就用它；沒有就 Read `~/code/social-info/reports/local-analysis/` 下的 `*-rules-size.md`，依檔名日期取最新（不用 mtime）。數字照 report 原文、不要自己量。這一行**不自動跑** /rules-slim——與第 4 條的 wiki 接線刻意不對稱，因為改 always-on 規則檔的影響面比改 wiki frontmatter 大，使用者要先看草稿再逐段拍板。
    - 同一份最近的 rules-size 報告含「## 🪦 零使用規則候選（N）」且 N≥1：「🪦 零使用規則 N 條 → /rules-slim」，N 照標題原文；N 為 0 或報告沒有這段就不列。這些是觀察範圍內未見場合的候選、不是已證明沒用，同樣不自動跑 /rules-slim。rules-size 報告的零使用段只進可選欄，不進三檔、不進沉底行、不寫 ledger；報告若只有零使用段（沒有超標表），整份 rules-size 就不排檔。
    - 最近一份 skill-trigger-health 報告含「## 🔔 久未執行提醒（N）」且 N≥1：先對照 `.skill-trigger-registry.json` 的 `last_skipped_at` 與 `~/.claude/skills/deep-check/state/*.json` 的 `checked_at`／`skipped_at`，濾除在該份週報日期之後已跳過或已健檢的項目；仍有剩餘項目時，將每行原樣加上「🔔 久未執行提醒：」列進可選欄，且此項在**首次 digest 末尾即呈現**（不以使用者要求執行高中低為前提；同輪完成回報不再重複列），不進三檔、不進沉底行、不寫 pending-actions.jsonl。使用者回「跳過 <名稱>」時更新 `.skill-trigger-registry.json` 的 `last_skipped_at`（或 deep-check 對應 repo 帳本的 `skipped_at`）。
 13. workflow 回傳的 `failed` 非空時，digest 末尾固定加一行「⚠️ 偵測 channel 失敗：<failed 的 keys>，先查 wrapper」（使用者拍板新增）——failed channel 沒有報告可讀，這行是偵測器自己壞掉的唯一可見訊號；不得因為 failed 清單在回傳物件裡就假設已處理，也不得把 failed keys 混進 silent 或沉底行的「無」。
-13. digest 全文放在回合最後一則文字訊息給使用者。使用者拍板後（H1 做 / M2 殺 / L3 留）才寫回 ledger，且**只走腳本**：findings 併入用 --findings、status 轉換用 --decide，兩者都配 --apply。不要用 Write / Edit / python 直接改 pending-actions.jsonl。一般 findings.json 與 decide.json 的 match 欄由你做語意比對；recurring-errors 升格項不得重做語意比對，先將 candidate.finding 原樣用 --findings --apply 寫入，再依拍板用 --decide --apply：處理＝完成修正與復發驗證後 verdict=done，完成前維持 pending；忽略＝verdict=killed；延後＝verdict=pending 並填 next_due。session-audit-consume 的全域環境待決項已由 commit-cursor 預寫入 pending-actions.jsonl，週六未回覆時會在後續每日 reconcile_cmd 自動列出追問；使用者拍板後直接用 --decide --apply 更新狀態（完成修正與驗證後 verdict=done，保留觀察 verdict=kept 或 observing，忽略 verdict=killed）。
-14. 本檔（daily-local-analysis-trigger.sh）、ledger-reconcile.py、recurring-errors-promote.py 與 recurring-errors-pattern-aliases.json 的閘位邏輯屬 locked surface：排檔回合內不得修改它們來讓自己的判斷過關。legacy alias 只記使用者既有拍板，不得由排檔者自行新增。覺得某條規則錯 → 在 digest 裡提出來讓使用者拍板，不要自己動。
-15. 最後回報：上面 14 條你跳過了哪幾條、為什麼。一條都沒跳就寫「無」。
+14. digest 排好後不停下來等放行：預設在同回合先處理低風險可自決項，需要決策的項目再整理呈現。同一回合把三檔分成「自決清單」與「需要你決策」兩組，先做自決清單，再交最後一則文字訊息。
+    - 自決清單只收可逆、高信心、在既有授權內、不需要使用者選邊的項目。條目寫明要使用者拍板、human-controlled、「agent 不得代做」，或要使用者在多個做法間選一個的，一律歸「需要你決策」；第 8 條的 session-audit-consume 項目、第 2 條的 recurring-errors 升格項，與 habits channel 的工作習慣候選（寫成規則等於改 harness；行動項只列「寫進規則／不寫／再觀察」，agent 不得代做）也一律歸這組。
+    - 自決清單裡有會改 harness 的條目時，照第 16 條 (b) 先做其餘條目，在動手前停下來問。
+    - 最後一則文字訊息依序放：digest 全文、自決清單的完成回報、可選欄，最後接「需要你決策」的第一題（訪談，一次一題）。沒有待決題就明講今天可以結案。
+    自決項做完後與使用者拍板後（H1 做 / M2 殺 / L3 留）才寫回 ledger，且**只走腳本**：findings 併入用 --findings、status 轉換用 --decide，兩者都配 --apply。不要用 Write / Edit / python 直接改 pending-actions.jsonl。一般 findings.json 與 decide.json 的 match 欄由你做語意比對；recurring-errors 升格項不得重做語意比對，先將 candidate.finding 原樣用 --findings --apply 寫入，再依拍板用 --decide --apply：處理＝完成修正與復發驗證後 verdict=done，完成前維持 pending；忽略＝verdict=killed；延後＝verdict=pending 並填 next_due。session-audit-consume 的全域環境待決項已由 commit-cursor 預寫入 pending-actions.jsonl，週六未回覆時會在後續每日 reconcile_cmd 自動列出追問；使用者拍板後直接用 --decide --apply 更新狀態（完成修正與驗證後 verdict=done，保留觀察 verdict=kept 或 observing，忽略 verdict=killed）。
+15. 本檔（daily-local-analysis-trigger.sh）、ledger-reconcile.py、recurring-errors-promote.py 與 recurring-errors-pattern-aliases.json 的閘位邏輯屬 locked surface：排檔回合內不得修改它們來讓自己的判斷過關。legacy alias 只記使用者既有拍板，不得由排檔者自行新增。覺得某條規則錯 → 在 digest 裡提出來讓使用者拍板，不要自己動。
+16. 顧問停點：依第 14 條自動執行自決清單或使用者拍板後、你動手前，有兩處要問一次要不要發 /advisor。問法、訊號與分支先讀 `~/.claude/references/advisor-checkpoint.md` 再照做，每處每批只問一次，使用者回覆後才動手。(b) 依第 14 條自動執行自決清單時，清單裡只要有一條會改 harness，就先把不改 harness 的自決條目做完，在動手做會改 harness 的條目前問；自決清單沒有會改 harness 的條目就不問。(c)「需要你決策」的題目使用者全部答完後，在執行這些拍板前問。同一回合只放一個待回覆的問題：(b) 還沒回覆前不開始「需要你決策」的訪談。
+17. 最後回報：上面 16 條你跳過了哪幾條、為什麼。一條都沒跳就寫「無」。
 EOF
 )
   msg="$msg

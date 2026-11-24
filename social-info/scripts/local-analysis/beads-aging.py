@@ -2,11 +2,12 @@
 
 import argparse
 import json
+import math
 import os
 import re
 import subprocess
 import sys
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -20,9 +21,11 @@ DEFAULT_TIMEZONE = "Asia/Taipei"
 
 
 def parse_day(value, tz):
-  if not value:
+  if value is None:
     return None
-  raw = str(value).strip()
+  if not isinstance(value, str):
+    raise ValueError("date value must be a string")
+  raw = value.strip()
   if not raw:
     return None
   if re.fullmatch(r"\d{4}-\d{2}-\d{2}", raw):
@@ -33,7 +36,11 @@ def parse_day(value, tz):
 
 
 def parse_moment(value, tz):
-  raw = str(value).strip()
+  if not isinstance(value, str):
+    raise ValueError("timestamp value must be a string")
+  raw = value.strip()
+  if not raw:
+    raise ValueError("timestamp value must not be empty")
   if re.fullmatch(r"\d{4}-\d{2}-\d{2}", raw):
     return datetime.combine(date.fromisoformat(raw), datetime.min.time(), tz)
   parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
@@ -69,19 +76,31 @@ def discover_repos(roots):
   return sorted(repos)
 
 
-def validate_issue(issue, repo, index):
+def validate_issue(issue, repo, index, tz=None):
   if not isinstance(issue, dict):
     raise RuntimeError(f"bd list issue {index} for {repo} must be an object")
-  for field in ("id", "title", "updated_at"):
+  for field in ("id", "title"):
     if not isinstance(issue.get(field), str) or not issue[field].strip():
       raise RuntimeError(f"bd list issue {index} for {repo} has invalid {field}")
   priority = issue.get("priority")
   if isinstance(priority, bool) or not isinstance(priority, int) or not 0 <= priority <= 4:
     raise RuntimeError(f"bd list issue {index} for {repo} has invalid priority")
+  effective_tz = tz if tz is not None else ZoneInfo(DEFAULT_TIMEZONE)
+  try:
+    parse_moment(issue.get("updated_at"), effective_tz)
+  except (ValueError, OverflowError) as error:
+    raise RuntimeError(f"bd list issue {issue['id']} for {repo} has invalid updated_at") from error
+  for field in ("due_at", "due", "defer_until"):
+    if issue.get(field) is None:
+      continue
+    try:
+      parse_day(issue[field], effective_tz)
+    except (ValueError, OverflowError) as error:
+      raise RuntimeError(f"bd list issue {issue['id']} for {repo} has invalid {field}") from error
   return issue
 
 
-def load_issues(repo, bd_bin, timeout):
+def load_issues(repo, bd_bin, timeout, tz=None):
   command = [
     bd_bin,
     "-C",
@@ -95,20 +114,26 @@ def load_issues(repo, bd_bin, timeout):
     ACTIVE_STATUSES,
   ]
   try:
-    result = subprocess.run(command, capture_output=True, text=True, timeout=timeout)
+    result = subprocess.run(command, capture_output=True, timeout=timeout)
   except subprocess.TimeoutExpired as error:
     raise RuntimeError(f"bd list timed out after {timeout:g}s for {repo}") from error
+  stdout = result.stdout.decode("utf-8", errors="replace")
+  stderr = result.stderr.decode("utf-8", errors="replace")
   if result.returncode != 0:
-    detail = result.stderr.strip() or result.stdout.strip() or f"exit {result.returncode}"
+    detail = stderr.strip() or stdout.strip() or f"exit {result.returncode}"
     raise RuntimeError(f"bd list failed for {repo}: {detail}")
-  data = json.loads(result.stdout)
+  try:
+    data = json.loads(stdout)
+  except json.JSONDecodeError as error:
+    raise RuntimeError(f"bd list returned invalid JSON for {repo}: {error}") from error
   if not isinstance(data, list):
     raise RuntimeError(f"bd list returned non-array JSON for {repo}")
-  return [validate_issue(issue, repo, index) for index, issue in enumerate(data)]
+  return [validate_issue(issue, repo, index, tz) for index, issue in enumerate(data)]
 
 
 def classify(issue, analysis_day, tz):
-  due_value = issue.get("due_at") if issue.get("due_at") is not None else issue.get("due")
+  raw_due_at = issue.get("due_at")
+  due_value = raw_due_at if (isinstance(raw_due_at, str) and raw_due_at.strip()) else issue.get("due")
   due = parse_day(due_value, tz)
   deferred = parse_day(issue.get("defer_until"), tz)
   updated = parse_moment(issue.get("updated_at"), tz)
@@ -120,8 +145,7 @@ def classify(issue, analysis_day, tz):
   if due and due < analysis_day:
     days = (analysis_day - due).days
     return 0, due, f"逾期 {days} 天", age_days, due, deferred, updated
-  if due and analysis_day <= due <= analysis_day + timedelta(days=7):
-    days = (due - analysis_day).days
+  if due and (days := (due - analysis_day).days) <= 7:
     reason = "今天到期" if days == 0 else f"{days} 天內到期"
     return 1, due, reason, age_days, due, deferred, updated
   if deferred and deferred <= analysis_day:
@@ -137,7 +161,7 @@ def collect_candidates(repos, bd_bin, analysis_day, tz, timeout):
   failures = []
   for repo in repos:
     try:
-      issues = load_issues(repo, bd_bin, timeout)
+      issues = load_issues(repo, bd_bin, timeout, tz)
     except RuntimeError as error:
       failures.append({"repo": repo, "error": str(error)})
       continue
@@ -221,7 +245,7 @@ def main():
     raise SystemExit("--date must be YYYY-MM-DD")
   if args.limit < 1:
     raise SystemExit("--limit must be at least 1")
-  if args.bd_timeout <= 0:
+  if not math.isfinite(args.bd_timeout) or args.bd_timeout <= 0:
     raise SystemExit("--bd-timeout must be greater than 0")
   try:
     analysis_tz = ZoneInfo(args.timezone)

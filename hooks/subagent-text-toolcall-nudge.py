@@ -20,8 +20,8 @@ Recovery: set SUBAGENT_TEXT_TOOLCALL_NUDGE_DISABLED=1, or drop the SubagentStop 
 ~/.claude/settings.json. Audit rows go to ~/.claude/logs/subagent-text-toolcall-nudge.jsonl
 (append-only, pure log).
 
-CC-only: SubagentStop last_assistant_message has no Codex counterpart, and Codex is retired
-(2026-09-20), so this is not mirrored into ~/.codex/hooks/cc-hooks.json.
+CC-only: SubagentStop last_assistant_message has no Codex counterpart, so this is not
+mirrored into ~/.codex/hooks/cc-hooks.json.
 """
 
 import json

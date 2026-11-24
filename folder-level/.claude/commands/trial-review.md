@@ -5,22 +5,21 @@ argument-hint: [--preflight | trial 名稱或摩擦檔路徑（可選，不給�
 
 <!-- 本檔在契約測試底下：bash ~/Desktop/projects/.claude/hooks/trial-review-friction-consumption.test.sh && bash ~/Desktop/projects/.claude/hooks/friction-review-state.test.sh -->
 <!-- 本檔在契約測試底下：bash ~/Desktop/projects/.claude/hooks/ledger-index-writer-contract.test.sh -->
-<!-- 本檔在契約測試底下：python3 ~/.claude/scripts/friction-outcome-packet.test.py -->
 <!-- 本檔在契約測試底下：bash ~/.claude/commands/tests/failure-mode-loop-contract.test.sh -->
 
 > 帳本生命週期：規則見 `~/.claude/references/ledger-lifecycle.md`；門檻以 `~/.claude/scripts/ledger-lifecycle/registry.json` 為準。
 
 # Trial Review
 
-用同一個拍板入口處理兩類積壓：到期試用觀察，以及單一 `friction-log.md`「待折」達門檻的摩擦。Trial 結案的檔案操作規範仍以 active.md 檔頭「結案 SOP」為準；摩擦的狀態、時間鎖與歸因紀錄以 `~/.claude/friction/PROTOCOL.md` 為準。
+用同一個拍板入口處理三類積壓：到期試用觀察、單一 `friction-log.md`「待折」達門檻的摩擦，以及失敗模式提案。Trial 結案的檔案操作規範仍以 active.md 檔頭「結案 SOP」為準；摩擦的狀態、時間鎖與歸因紀錄以 `~/.claude/friction/PROTOCOL.md` 為準。
 
 ## Step 0: 撈候選清單
 
-並行盤點兩類候選：
+並行盤點三類候選：
 
-1. **Trial 候選**：先讀 `~/Desktop/projects/.claude/trials/active.md` 的 H2＋索引欄位（超過 50KB 時用 grep/sed 分段讀、不要硬 Read），撈 review date ≤ 今天的 H2 entry。到期判定優先直接跑 `TRIAL_REVIEW_QUERY_ONLY=1 bash ~/Desktop/projects/.claude/hooks/trial-review.sh`（stdin 餵 `{"session_id":"probe-<隨機>","cwd":"<家目錄>/Desktop/projects"}`，讀它回傳的 systemMessage；`TRIAL_REVIEW_QUERY_ONLY=1` 為唯讀預檢，不會建立 `/tmp/trial-review-session-*` 暫存檔、也不必執行 `rm` 刪除）；要自己重算就用 grep 抽日期做字串比較，或把 bash 語法整段包進 `bash -c '…'`——Bash tool 的 shell 是 zsh，`[[ =~ ]]` 不填 `BASH_REMATCH`，把 hook 的 bash 寫法原樣搬進來會讓日期擷取變空字串、被 `|| continue` 靜默吃掉並回報 0 個到期（2026-09-10 實例：6 筆全被吃掉、當輪整批漏處理）。新格式固定讀 `started`、`status`、`detail`；`detail` 指向 `trials/active/<slug>-<started>.md`，盤點時只讀身分與開場 metadata 檔頭，真正處理該項才讀長段；先核對前兩行 `detail-key` 與 `detail-title`：指針必須和 H2 的 slug／started／`[run-N]` 對上，名稱必須逐字相同。索引欄位齊全但 detail 檔不存在或身分不符時列 `detail-missing`／`detail-mismatch` 並停止該項，不得靜默略過。hook 提醒裡的 `detail-mismatch` 只是要你核對的提示，不是核對結果：前兩行通過上面的核對、差別只在 hook 的檔名正規化（例如把 `1.5s` 轉成 `1-5s`）時，照常列入可處理，並在證據副檔記一句差異；2026-10-08 曾把標籤當結論而漏審 claim-detect-two-layer-1.5s。尚未遷移的舊格式仍依 H2 日期列入。時間鎖格式與期限只讀 active.md 檔頭「多 session review 時間鎖」。
-2. **摩擦候選**：照 `trial-review.sh` 同一口徑，掃 `~/.claude/skills/*/friction-log.md`、`~/.claude/friction/*.md`（排除 `PROTOCOL.md`）及 hook 明列的公司側檔案；只數第一個 `## 待折` 段中以 `- ` 開頭、且不含 `[pending_implementation ` 的行，單一檔案達門檻才列入。另列所有 `[pending_implementation ` 項目作落地證據追蹤，不把它們重新送進拍板。時間鎖格式與期限只讀 `PROTOCOL.md`。
-3. **失敗模式提案候選**：讀 `~/.claude/references/failure-mode-taxonomy.md`「案例登記」區沒有 `[reviewed ` 尾碼的登記行；「一筆登記行」的判定只有一條：以 `YYYY-MM-DD | ` 開頭（正則 `^[0-9]{4}-[0-9]{2}-[0-9]{2} \| `，與 `scripts/failure-mode-daily.py` 的 `ROW_RE` 同一條，格式說明行不算）。有任一行就列成一項候選、整批一起處理；每日 channel 的 failure-mode 輸出只是提醒，不是候選的唯一來源，沒看到當日通知也照樣讀登記區。不設門檻、不取時間鎖（代價與去重規則見 Step 1）；`Acceptance-miss` 條目原樣列出、當場決定，不套預設分流。
+1. **Trial 候選**：先讀 `~/Desktop/projects/.claude/trials/active.md` 的 H2＋索引欄位（超過 50KB 時用 grep/sed 分段讀、不要硬 Read），撈 review date ≤ 今天的 H2 entry。到期判定優先直接跑 `TRIAL_REVIEW_QUERY_ONLY=1 bash ~/Desktop/projects/.claude/hooks/trial-review.sh`（stdin 餵 `{"session_id":"probe-<隨機>","cwd":"<家目錄>/Desktop/projects"}`，讀它回傳的 systemMessage；`TRIAL_REVIEW_QUERY_ONLY=1` 為唯讀預檢，不會建立 `/tmp/trial-review-session-*` 暫存檔、也不必執行 `rm` 刪除）；要自己重算就用 grep 抽日期做字串比較，或把 bash 語法整段包進 `bash -c '…'`——預設 `/bin/bash` 3.2 頂層寫 `BASH_REMATCH[1]` 會被陣列語法守衛擋下，而切 `CLAUDE_CODE_SHELL=zsh` 時 `[[ =~ ]]` 不填 `BASH_REMATCH`，直接把 hook 的寫法搬進頂層會失敗或讓日期擷取變空字串、被 `|| continue` 靜默吃掉並回報 0 個到期（2026-09-10 實例：6 筆全被吃掉、當輪整批漏處理）。新格式固定讀 `started`、`status`、`detail`；`detail` 指向 `trials/active/<slug>-<started>.md`，盤點時只讀身分與開場 metadata 檔頭，真正處理該項才讀長段；先核對前兩行 `detail-key` 與 `detail-title`：指針必須和 H2 的 slug／started／`[run-N]` 對上，名稱必須逐字相同。索引欄位齊全但 detail 檔不存在或身分不符時列 `detail-missing`／`detail-mismatch` 並停止該項，不得靜默略過。hook 提醒裡的 `detail-mismatch` 只是要你核對的提示，不是核對結果：前兩行通過上面的核對、差別只在 hook 的檔名正規化（例如把 `1.5s` 轉成 `1-5s`）時，照常列入可處理，並在證據副檔記一句差異。尚未遷移的舊格式仍依 H2 日期列入。時間鎖格式與期限只讀 active.md 檔頭「多 session review 時間鎖」。
+2. **摩擦候選**：照 `trial-review.sh` 唯讀預檢（`TRIAL_REVIEW_QUERY_ONLY=1`）同一口徑，掃 `~/.claude/skills/*/friction-log.md`、`~/.claude/friction/*.md`（排除 `PROTOCOL.md`）與具名個人檔 `PRIVATE_FRICTION_FILES`（`~/.claude/pr-review/friction.md`），不掃公司側摩擦檔；只數第一個 `## 待折` 段中以 `- ` 開頭、且不含 `[pending_implementation ` 與 `target` 指向 `/Desktop/work/` 的個人側行，單一檔案達門檻才列入。數的是這些行的總數，不扣掉 `~/.claude/logs/friction-sweep/*.notified` 記為已提醒的項目。公司側的未審條目、`[pending_implementation ` 項目、休眠公司項與 `acme/docs/owner/harness-friction.md` 統一交由 `~/Desktop/work/acme/` 的 `acme-friction` skill 處理，本指令只在全場收尾由 `company-summary` 彙整總覽；預檢若同時輸出 `⚠️ 摩擦結構異常`（由 `friction-review-state.py lint` 檢出缺段或已折段後無歸因條目），一併列出待修。時間鎖格式與期限只讀 `PROTOCOL.md`。
+3. **失敗模式提案候選**：讀 `~/.claude/references/failure-mode-taxonomy.md`，涵蓋兩類來源：(a)「案例登記」區沒有 `[reviewed ` 尾碼的登記行（「一筆登記行」的判定只有一條：以 `YYYY-MM-DD | ` 開頭，正則 `^[0-9]{4}-[0-9]{2}-[0-9]{2} \| `，與 `scripts/failure-mode-daily.py` 的 `ROW_RE` 同一條，格式說明行不算；`Acceptance-miss` 條目不套盲目預設分流，須經預跑逐筆證據核實或人工當場決定）；(b) 近 30 天跨 ≥5 張獨立工作單（同票／同 PR／同本地提交去重，同細項合併 `Failure-miss` 與帶 `probe=Fn.m` 的 `Acceptance-miss`）、且未被「累犯決策紀錄」區最新 `open` 列或決策／結案日後未滿 5 張新單之 `deferred`／`closed` 列抑制的 `Fn.m` 累犯升級候選（由 `python3 ~/.claude/scripts/failure-mode-daily.py` 同口徑篩出，每輪最多取前 3 名）。(a) 或 (b) 任一非空就列成一項候選處理；每日 channel 的 failure-mode 輸出只是提醒，不是候選的唯一來源，沒看到當日通知也照樣讀探針表。不設額外門檻、不取時間鎖（代價與去重規則見 Step 1）。
 
 `$ARGUMENTS` 有指定 trial 名、摩擦檔路徑或機制名，或對話中已選好題目 → 只盤點指定項，通過身分與鎖檢查後先接下方「強模型通知」，未觸發才直接接 Step 1 認領，不重問選題；明確點名的摩擦檔不受門檻限制。沒有指定時，先列 trial、再列摩擦候選，先對第一個可處理項檢查「強模型通知」；未觸發就直接認領清單第一個可處理項並接 Step 1，不停下讓使用者選題。若 `$ARGUMENTS` 為 `--preflight`（清晨全量預跑模式），盤點完成後先接下方「Step 0b：全量預跑取證（`--preflight`）」，把本輪所有可處理項的研究與三行入口草稿預先寫入本輪證據副檔後，再對第一個可處理項檢查「強模型通知」、認領第一個可處理項並接 Step 1。一般題沿用當前 session 模型，不例行詢問選模型。
 
@@ -52,30 +51,32 @@ Trial 清單讀已核對身分的 detail 檔頭 `review-start`、`review-start-r
 
 Trial 與摩擦各自分成三組並列給使用者：本 session 可處理、其他 session 的有效時間鎖（顯示名稱／檔案與到期時間）、marker 格式損壞。有效時間鎖不進入研究；已到期 marker 留在可處理組，等真正輪到該項時接手。Step 0 一次只認領一項，不預先認領整批；無參數時盤點完成，先檢查本項「強模型通知」，未觸發或使用者已回覆繼續才認領第一個可處理項、接 Step 1。指定題目可處理時同樣先檢查再接 Step 1。沒有可處理項時停下回報。
 
-**完成判準**：trial 的可處理數 + 有效時間鎖跳過數 + marker 損壞數，對上 hook 的到期 trial 數；失敗模式候選的行數對上 `sed -n '/^## 案例登記/,$p' ~/.claude/references/failure-mode-taxonomy.md | grep -E '^[0-9]{4}-[0-9]{2}-[0-9]{2} \| ' | grep -vc '\[reviewed '`；摩擦分開核對：(a) 過門檻檔案三組合計對上 hook 的「摩擦待折」檔案數，(b) `[pending_implementation]` 項目數對上 hook 的「已拍板待落地」數。使用者只點名一項或 hook 與現況有時間差時，明寫差異原因。這裡的「hook 的到期 trial 數」指 hook 實際輸出的那個數，不是照它邏輯自己重算的數；自算結果為 0 時再用一次獨立方法對帳（例如 `grep -c '^## .*(<今天日期>' active.md`），兩者不一致就停下查原因，不直接採信 0——「掃出 0 個」與「真的沒到期」外觀相同，拿自算數字對自算數字永遠會過。`$ARGUMENTS` 含 `--preflight` 時完成後接 Step 0b，否則接 Step 1。
+**完成判準**：trial 的可處理數 + 有效時間鎖跳過數 + marker 損壞數，對上 hook 的到期 trial 數；失敗模式候選的未審行數對上 `sed -n '/^## 案例登記/,$p' ~/.claude/references/failure-mode-taxonomy.md | grep -E '^[0-9]{4}-[0-9]{2}-[0-9]{2} \| ' | grep -vc '\[reviewed '`、累犯升級候選數對上 `python3 ~/.claude/scripts/failure-mode-daily.py` 同口徑篩出之前 3 名候選數；摩擦分開核對：(a) 過門檻檔案三組合計對上 hook 的「摩擦待折」檔案數，(b) `[pending_implementation]` 項目數對上 hook 的「已拍板待落地」數。使用者只點名一項或 hook 與現況有時間差時，明寫差異原因。這裡的「hook 的到期 trial 數」指 hook 實際輸出的那個數，不是照它邏輯自己重算的數；自算結果為 0 時再用一次獨立方法對帳（例如 `grep -c '^## .*(<今天日期>' active.md`），兩者不一致就停下查原因，不直接採信 0——「掃出 0 個」與「真的沒到期」外觀相同，拿自算數字對自算數字永遠會過。`$ARGUMENTS` 含 `--preflight` 時完成後接 Step 0b，否則接 Step 1。
 
 ## Step 0b: 全量預跑取證（僅 `--preflight` 觸發）
 
 當且僅當 `$ARGUMENTS` 含 `--preflight` 時執行本步驟，先把當天所有可處理項目的查證工作一次做完存進本輪證據副檔，讓後續 Step 1 逐題決策在換題時直接讀檔秒回：
 
-1. **無鎖全量查證（涵蓋三類候選）**：對 Step 0「本 session 可處理」清單中的每一個到期 trial、達門檻摩擦檔，以及 `failure-mode-taxonomy.md` 未標 `[reviewed ...]` 的失敗模式登記行批次（若當前主 session 未命中最強模型，跳過 `review-start=strong` 且有非空理由的項目），在**不寫入 `active.md`／`friction-log.md` 時間鎖、也不寫入 `[reviewed ...]` 尾碼**的前提下，逐項（或平行派唯讀 subagent）完成 Step 1 的四件套／摩擦四件套查證與「呈現前 preflight」四項檢查；失敗模式批次則預先讀完未標 `[reviewed ...]` 的登記行、對照探針表完成分類與 `Failure-miss`／`Acceptance-miss` 提案草稿。預跑階段不預取時間鎖，避免鎖死整批項目或留下孤兒鎖。
+1. **無鎖全量查證（涵蓋三類候選）**：對 Step 0「本 session 可處理」清單中的每一個到期 trial、達門檻摩擦檔，以及 `failure-mode-taxonomy.md` 的失敗模式候選（若當前主 session 未命中最強模型，跳過 `review-start=strong` 且有非空理由的項目），在**不寫入 `active.md`／`friction-log.md` 時間鎖**的前提下，逐項（或平行派唯讀 subagent）完成 Step 1 的四件套／摩擦四件套查證與「呈現前 preflight」四項檢查。對於失敗模式未標 `[reviewed ...]` 的登記行，逐筆核對處置證據：**僅當**同時滿足 (i) `Failure-miss` 能明確指出既有某條 `[Fn.m]` 問句中涵蓋本案的具體條件（對不準、跨類模糊或屬新問題時不得自動歸檔），或 `Acceptance-miss` 對應票面明確驗收項（原驗收項有標細項則沿用對應之單一 `probe=Fn.m`——若原條目合併標註多個細項如 `F2.8, F4.2`，擇最直接命中的單一 `Fn.m` 填入，禁填逗號串接或重複 `probe=`；無細項填 `probe=none` 仍可進下一步）；**且** (ii) 查獲**該單一錯誤條件專屬**的處置證據——原倉庫／分支針對該條件新增或修改了對應測試斷言並通過驗證（核准測試豁免之文件／部署變更則核實對應修正與驗證紀錄），或對話／規格中已有明確的人類風險接受決定——才可在預跑階段重讀該行確認仍無尾碼後，用 `Edit` 直接附加 `[reviewed YYYY-MM-DD <處置與具體證據指針> probe=<Fn.m|none> mode=<auto-verified|auto-accepted>]` 免送人工蓋章（接受風險者須如實寫明「依既有決定接受風險未修」，不得冒稱已修）。**同一修復提交涵蓋多題但該筆找不到對應測試斷言、來自尚未修復且無既有風險接受決定之 `pr-review`、以及無把握對準既有問句的 `Failure-miss`，一律不得自動歸檔**，保留為未審例外行；接著重跑 `failure-mode-daily.py` 口徑取得當輪最多前 3 名 `Fn.m` 累犯升級候選並預先完成「5 單回放核對」草稿。預跑階段不預取時間鎖，避免鎖死整批項目或留下孤兒鎖。
 2. **寫入本輪證據副檔 `checkpoint`（標記 `preflight_ready=true`）**：把每一題通過「呈現前 preflight」的查證結果寫入本輪證據副檔 `~/Desktop/projects/.claude/trials/review-evidence/<YYYY-MM-DD>-<session 前 8 碼>.md` 對應 H2（trial 為 `## trial-<slug>-<started>`，摩擦為 `## friction-<檔名或 owner slug>`，失敗模式批次為 `## failure-mode-batch`），固定包含：
    - `evidence_state=checkpoint`、`preflight_ready=true`、`checkpoint_owner=<session id>`、`checkpointed_at=<UTC ISO-8601>`
-   - `source_identity:`（列出該題依賴的來源：對於 `active.md` 與 `friction-log.md`，固定記錄**「排除 `<!-- [reviewing ...]` 與 `<!-- [friction-review-lock:v1 ...]` 時間鎖註解行後的目標段落條目原文（或行數＋首尾條目文字）」**，禁止使用整檔 `bytes+mtime`，以免 Step 1.0 自己認領加鎖時讓來源身分自爆失效；對於 git 追蹤的代碼庫或設定檔，固定記錄 `git rev-parse HEAD` 搭配 `git status --porcelain -- <目標路徑>` 之工作樹狀態；對於失敗模式批次，記錄未標 `[reviewed ...]` 的原始登記行清單）
-   - `verified_facts:` 與固定證據行（receipt 五欄、`causal mode`、`earliest failed handoff`／摩擦 `history` 與 `provenance`／失敗模式批次的逐行對照）
+   - `source_identity:`（列出該題依賴的來源：對於 `active.md` 與 `friction-log.md`，固定記錄**「排除 `<!-- [reviewing ...]` 與 `<!-- [friction-review-lock:v1 ...]` 時間鎖註解行後的目標段落條目原文（或行數＋首尾條目文字）」**，禁止使用整檔 `bytes+mtime`，以免 Step 1.0 自己認領加鎖時讓來源身分自爆失效；對於 git 追蹤的代碼庫或設定檔，固定記錄 `git rev-parse HEAD` 搭配 `git status --porcelain -- <目標路徑>` 之工作樹狀態；對於失敗模式批次，記錄預跑自動歸檔收據、剩餘未標 `[reviewed ...]` 的例外行清單與當輪前 3 名累犯升級候選）
+   - `verified_facts:` 與固定證據行（receipt 五欄、`causal mode`、`earliest failed handoff`／摩擦 `history` 與 `provenance`／失敗模式批次的逐行證據核對與 5 單回放明細）
    - `draft_entry:`（預先寫好已通過「呈現前 preflight」四項檢查且符合 Step 1 allowlist 的 `現在：`、`影響：`、`決策：` 三行入口、證據要點與拍板表草稿）
    - `unresolved_decision: none (ready_for_user_verdict)` 與 `resume_from: Step 1 認領並輸出拍板主報告`
-3. **完成判準**：Step 0 可處理清單中的每一個預跑目標（含 trial、摩擦檔與失敗模式批次）都在本輪證據副檔有對應 H2 且 `evidence_state=checkpoint`、`preflight_ready=true`、`source_identity` 與 `draft_entry` 非空，且 `active.md`、各 `friction-log.md` 與 `failure-mode-taxonomy.md` 在本步結束時零新增時間鎖或 `[reviewed ...]` 尾碼。完成後接 Step 1，從第一個可處理項開始認領（進入 Step 1 後仍嚴格維持逐題一題一題請使用者 a/b/c 拍板）。
+3. **完成判準**：Step 0 可處理清單中的每一個預跑目標都在本輪證據副檔有對應 H2 且 `evidence_state=checkpoint`、`preflight_ready=true`、`source_identity` 與 `draft_entry` 非空；`active.md` 與各 `friction-log.md` 在本步結束時零新增時間鎖；`failure-mode-taxonomy.md` 僅具專屬證據之合格行帶有 `mode=auto-verified|auto-accepted` 尾碼，缺專屬斷言或未修項保持未歸檔（若剩餘未審例外行為 0 且當輪前 3 名累犯升級候選為 0，該批次免進 Step 1 人工拍板，但只要本輪預跑有寫入任何自動歸檔尾碼，收尾仍必須將該批自動歸檔行納入 Step 3 R6 合規驗證並輸出 Step 4 總結與 `company-summary`）。完成後接 Step 1，從第一個尚待人工拍板的可處理項開始認領（進入 Step 1 後仍嚴格維持逐題一題一題請使用者 a/b/c 拍板）。
 
 ## Step 1: 逐項 review 迴圈
 
-固定逐題處理：一題是一個 trial、一個摩擦檔，或一批失敗模式登記行，每題完整走完 Step 1–4。Trial 與摩擦照 Step 0 的候選順序接本段第 0 點認領；失敗模式批次跳過第 0 點（若當日證據副檔已有 `## failure-mode-batch` 且 `preflight_ready=true`，重讀未標 `[reviewed ...]` 的登記行確認與 `source_identity` 一致後，直接將該 H2 升為 `evidence_state=frozen` 並輸出拍板表；已被其他 session 標記 `[reviewed ...]` 的行則剔除後再呈現）。
+固定逐題處理：一題是一個 trial、一個摩擦檔，或一批失敗模式候選（含預跑後剩餘未歸檔例外行＋當輪最多前 3 名 `Fn.m` 累犯升級候選），每題完整走完 Step 1–4。Trial 與摩擦照 Step 0 的候選順序接本段第 0 點認領；失敗模式批次跳過第 0 點（若當日證據副檔已有 `## failure-mode-batch` 且 `preflight_ready=true`，重讀剩餘未標 `[reviewed ...]` 的登記行與決策區確認與 `source_identity` 一致後，直接將該 H2 升為 `evidence_state=frozen` 並輸出拍板表；已被其他 session 標記 `[reviewed ...]` 的行則剔除後再呈現）。
 
-失敗模式候選走簡化路：不做四件套、不取時間鎖；不取鎖的代價是兩個 session 可能同時處理同一批，所以每行寫尾碼前重讀該行，已有 `[reviewed ` 尾碼就跳過不覆寫、不改問句，並在總結標「N 行已被別的 session 處理」。逐行讀「條件 → 症狀」與 Fn，對照探針表該類現有問句，提案只准兩種：改探針表某一類的問句、把 F7 累積的形狀升格為新類別；「不改探針、證據不足、同案重複」是合法處置，也是預設答案——兩筆登記可能是同一案，登記筆數不是事故率。`Failure-miss` 行給使用者 a/b/c（改問句／升格／不改＋理由）；`Acceptance-miss` 行是「票有列、實作沒做」的執行紀律問題，不套探針三選一，當場由使用者決定處置（例如查該驗收項有沒有紅測試、交 mutation-testing、記成摩擦、或不動），處置寫自由文字。拍板後在該行行尾加 `[reviewed YYYY-MM-DD <處置>]`，`Failure-miss` 的處置是「改問句」「升格」「不改」之一加一句理由。消費結果只改探針表，不動 to-tickets／implement／pr-review 的流程檔；問句改了就是改了，兩個接點下次讀到的就是新問句。同一回合只認領、研究與處理一題，不預先認領或研究第二題。每則開頭先標「這則要你做的事：N 件」（結案回報通常是 0 件）。
+失敗模式候選走簡化路：不做四件套、不取時間鎖；不取鎖的代價是兩個 session 可能同時處理同一批，所以每行寫尾碼前重讀該行，已有 `[reviewed ` 尾碼就跳過不覆寫、不改問句，並在總結標「N 行已被別的 session 處理」。分兩部分呈報拍板：
+- **未歸檔個案例外行**：逐行讀「條件 → 症狀」與 Fn，對照探針表該類現有問句，個案層提案只准兩種：改探針表某一類的問句、把 F7 累積的形狀升格為新類別；「不改探針、證據不足、同案重複」是合法處置，也是預設答案——兩筆登記可能是同一案，登記筆數不是事故率。`Failure-miss` 行給使用者 a/b/c（改問句／升格／不改＋理由）；`Acceptance-miss` 行原樣列出、當場決定自由文字處置（例如查該驗收項有沒有紅測試、交 mutation-testing、記成摩擦、或不動）。拍板後在該行行尾加 `[reviewed YYYY-MM-DD <處置>]`（有明確對應細項時附單一 `probe=<Fn.m|none>`，禁多值逗號串接，人工結清不加 `mode=`），`Failure-miss` 的處置是「改問句」「升格」「不改」之一加一句理由。日常個案消費只改探針表，不動 to-tickets／implement／pr-review 的流程檔。
+- **累犯升級候選（每輪最多前 3 名 `Fn.m`）**：對近 30 天跨 ≥5 張獨立工作單（含已自動／人工歸檔案例）且未被決策區抑制的前 3 名 `Fn.m` 細項，每項**必須附上「5 單回放核對」**——逐一列出觸發的 5 張真實工作單，說明擬議措施在哪個時點執行、能提早攔住其中哪幾張（攔住 0 單的工具提案不得推薦）。給使用者拍板改善決策案：(a) 合併重複來源／抽出共用實作；(b) 修復或前移既有檢查接線；(c) 將該條加入實作 worker 交件前自檢（全系統同時啟用上限 1–3 條，必綁定 `trial` 到期複查日，禁塞 47 題）；(d) 擴充測試範本或新增檢查腳本／`hook`；(e) 暫緩（`deferred`＋理由）。同一回合只認領、研究與處理一題，不預先認領或研究第二題。每則開頭先標「這則要你做的事：N 件」（結案回報通常是 0 件）。
 
 0. **認領本項（四件套前）**：
    - Trial：重新讀該 H2 與三個索引欄位，確認仍在 active、仍符合候選資格；新格式先驗 `detail` 檔存在，再只讀前兩行 `detail-key`／`detail-title`，核對指針與 H2 的 slug、started、`[run-N]` 及名稱，通過後照 active.md 檔頭格式取得時間鎖。detail 缺失、指針格式錯誤或身分不符時標 `detail-missing`／`detail-mismatch`、停止該項，不留下 marker；身分以自己讀到的前兩行為準，hook 的標籤不能取代這次核對；舊格式才直接讀 H2 下的 legacy 長段。
-   - 摩擦：重新讀該檔，先執行 `python3 ~/Desktop/projects/.claude/hooks/friction-review-state.py inspect --file <path>` 驗證第一個精確 `## 待折` 與第一個 `## 已折／已否決`／舊式 `## 已折 / 已否決` 都存在；結構不完整時在認領前停止，不留下 marker。確認第一個待折段仍達門檻、含待追蹤的 pending implementation，或是使用者明確點名後，使用 helper 回傳的 SHA-256 digest 取得時間鎖。重新讀取並用 helper `validate` 驗 owner、完整 marker 格式、期限與 digest 後，才可在結案寫入時把舊式標題正規化。鎖的 owner 是檔案，不是單筆摩擦；同一檔的待折項目由一個 session 批次處理。
+   - 摩擦：重新讀該檔，先執行 `python3 ~/Desktop/projects/.claude/hooks/friction-review-state.py inspect --file <path> --snapshot <snapshot-path>` 驗證第一個精確 `## 待折` 與第一個 `## 已折／已否決`／舊式 `## 已折 / 已否決` 都存在；結構不完整時先視情況執行 `bootstrap` 或在認領前停止，不留下 marker。確認第一個待折段仍達門檻、含待追蹤的 pending implementation，或是使用者明確點名後，使用 helper 產出的 owner-only 原文快照（涵蓋排除 marker 行之第一個 `## 待折` 與 `## 休眠`）取得時間鎖。重新讀取並用 helper `validate --snapshot <snapshot-path>` 驗 owner、完整 marker 格式、期限與原文快照後，才可在結案寫入時把舊式標題正規化。鎖的 owner 是檔案，不是單筆摩擦；同一檔的待折與休眠項目由一個 session 批次處理。
 
 兩類都遵守相同競爭規則：沒有 marker 才插入；其他 session 的有效 marker 直接跳過；已到期 marker精確替換成自己的新 marker。寫後重新讀取，必須恰好一個合法 marker 且 `session=$CLAUDE_CODE_SESSION_ID` 才開始研究；Edit 衝突、格式損壞或多 marker 都停止該項，不盲目重試。每次認領的 marker 固定到期，review 過程不刷新。
 
@@ -109,9 +110,9 @@ Trial entry 若有 `review-handoff`，完成認領後接 Step 0「續接 handoff
    - **條件式因果模式**：先問本項是否出現任一可觀察訊號：前後數字、A/B／模型／工具比較、宣稱某介入造成改善／下降／上升，或前後結果互相矛盾。任一命中就輸出固定單行：`causal mode: baseline=<yes/no/N-A + 數據或原因> / fixed worker=<yes/no/N-A + model、version、agent host、environment 或原因> / only difference=<yes/no/N-A + worker 以外的母體、輸入、分類法差異或原因> / equivalent fresh rerun=<yes/no/N-A + 證據或原因> / result comparison=<原始數字 + 差值計算 + 結論邊界>`；不得填 N/A。每個前四欄都以 `yes`、`no` 或 `N-A` 開頭並附數據或原因，資訊不存在也保留欄位。`fixed worker` 只回答 worker 身分與執行條件是否相同（model 名稱／版本、agent host、執行環境），是否固定只在這欄判斷。`only difference` 的輸出只用兩種正向形狀：`yes（母體、輸入、工具／library 版本、日期與分類法均相同）`，或 `no（列出上述哪些條件不同）`。`baseline` 與 `result comparison` 可用 model／工具名稱標識比較兩臂，但不在那兩欄重複判斷 worker 是否固定。四種訊號全未命中才填 `causal mode: N/A（原因）`。
    - **最早失敗交接點**：若項目是 FAIL、高摩擦或低採用，輸出固定單行：`earliest failed handoff: class=<context/capability/domain owner/authority/proof/feedback/worker limitation> / first failed step=<第一個未發生或產出錯誤的單一步驟> → owner=<...> / proof boundary=<現有證據最多能證明什麼、不能外推什麼；指向前文 receipt／數據>`。0 出題／未受考驗屬 `context` 或 `domain owner`；介入已執行但證據撐不起結論才屬 `proof`。誤攔、錯誤驗收、未逐項驗證，或介入總數高於適用樣本（多出的案例已受到作用）屬高摩擦，都要填本行。多個條件都缺時，`first failed step` 只取流程中最早的一個；`proof boundary` 可以短引關鍵數字定位，但不另開 evidence 欄。只有正常運作且無上述訊號才填 `earliest failed handoff: N/A`。三行完成後接下方呈現前 preflight。
    - **呈現前 preflight**：寫三行入口前先在內部完成證據檢查，不把檢查中的半成品丟進聊天。逐項核對：(1) receipt 五 key 各一次；(2) `retrieved=yes` 有 context 白名單證據，`retrieved=N-A` 有結構理由；(3) `invoked=yes` 有主動作證據；(4) 四種因果訊號任一命中時沒有填 N/A，且前四欄都有列舉值與原因。四項全通過後把固定證據寫進證據副檔（唯一且具權威性的 final 版），聊天走**拍板主報告＋完整證據副檔**形：三行入口＋推薦＋拍板選項＋副檔連結；討論中若修正過值，在副檔把舊版本標為 superseded、只保留一份 final。freeze 後若晚到證據不改推薦，只更新完整證據副檔且不另發拍板；若第一次改推薦，先把舊版標為 superseded，再只發一則完整替代報告；替代報告比照三行入口重新鋪底，先重述這個 trial 在驗什麼與現在只決定什麼，再附翻案對照，並在副檔記 `replacement_report_count=1`。每項最多一則完整替代報告。第二次或之後再改推薦時，把副檔標 `evidence_state=unstable`、撤回拍板且不再要求 a/b/c，停止本項回到研究，不再發推薦報告。
-3. **推薦結論**：對號 entry 內「決策邏輯」段給提案（KEEP / KILL / 延輪 / 轉事件驅動），並與三行入口的推薦保持一致；本段只補證據邊界，不在後段突然換結論。
+3. **推薦結論**：對號 entry 內「決策邏輯」段給提案（KEEP / KILL / 延輪 / 轉事件驅動），並與三行入口的推薦保持一致；本段只補證據邊界，不在後段突然換結論。評估長期規則／hook／gate 保留、升級或摩擦折入時，統一先對照 `~/.claude/references/mechanism-iteration-materiality.md`（H1–H4／N1–N4）：僅命中 N1–N4 且未命中 H1–H4 的提案不得標為推薦新增規則或 hook，仍照列於既有批次並附條目與理由，不新增額外停點。
    - 推薦內容若主張「機制缺少 X」，先檢查 profile／config／allowlist 等既有設定面；形成推薦前必須完成枚舉並在證據副檔附枚舉指令，枚舉不到才可提。
-   - KILL 提案**必附連帶清理清單**：restore.sh、trial 產生的資料檔 / log、接線拆點（`grep -r '<trial名>' ~/.claude ~/Desktop/projects/.claude` 把接點找全，別漏 workflow / hook / INVENTORY row）。
+   - KILL 提案**必附連帶清理清單**：restore.sh、trial 產生的資料檔 / log、接線拆點（`command grep -r --exclude-dir={.git,node_modules,.venv,out,.shopify,projects,cache,plugins,snapshot,jobs} '<trial名>' ~/.claude ~/Desktop/projects/.claude` 把接點找全，別漏 workflow / hook / INVENTORY row）。
    - **0 真實觸發 → 預設延期，且分三格不是兩格**。三格直接讀第 2 點那行 receipt 判，處置各不相同：
      - **沒出題**（`relevant=no`，或整個觀察窗沒有適用樣本）＝場景根本沒發生、機制未受考驗 → 延期，等真案例。
      - **沒接上**（`available=yes / invoked=no / relevant=yes`）＝場景發生了、東西沒被叫起來 → 該修的是觸發鏈（hook / 接線 / description），不是殺工具。
@@ -128,46 +129,41 @@ Trial entry 若有 `review-handoff`，完成認領後接 Step 0「續接 handoff
 
 同樣採 compact-first：三行入口先講分成幾群、哪些建議折入／保留及理由；逐群證據寫進證據副檔，聊天每群只講決策所需的那一點；最後的拍板表不得是使用者第一次看到推薦。
 
-0. **本次待審事項**：批次的輸入是「待折段中尚未通知過、或已符合 `wake-when` 而重開的項目」，不是「所有尚未折入或否決的項目」。休眠段的內容不重新開庭、不重新分群、不重列同一張表——只有被歷史比對帶回來的那幾條例外。已通知但人類尚未處理的項目仍在待折段、照樣看得到，不因通知送過就當成已完成。
+0. **本次待審事項**：批次的輸入是第一個 `## 待折` 段的全部個人側項目（不含 `[pending_implementation ` 行，也不含 `target` 指向 `/Desktop/work/` 的公司側條目——後者統一留待 `~/Desktop/work/acme/` 的 `acme-friction` skill 完整重審），加上已符合 `wake-when` 而重開的休眠項。`~/.claude/logs/friction-sweep/*.notified` 的提醒水位只讓白天的「🧰 摩擦待折」提醒行不重複出現，不決定批次：提醒顯示過、但沒有人拍板的項目照樣進本輪。若用水位決定批次，白天顯示過提醒的項目就永遠進不了拍板（2026-11 doc-drift 51 條中 44 條因此卡住）。休眠段的內容不重新開庭、不重新分群、不重列同一張表——只有被歷史比對帶回來的那幾條例外。
 
 1. **來龍去脈（白話）**：讀完整 `## 待折` 段；每筆指出首次發生場景、既有建議方向，以及是否有同類前例。新格式先讀 `source_ref`、`signal_type`、`target`、`feedback_quote`、`why` 與 optional `flags`；舊格式標 `legacy`，不要求先 migration。只憑一句紀錄無法判斷 authority 或建議落點時，才沿 session／git 指針回查；不要預設全域掃 JSONL。回查不到不補寫假 provenance；既有無 metadata 條目保持有效。
-1a. **歷史比對（分群後、形成推薦前執行）**：完整規則、四種命中的處置分類與四種失敗模式，只讀 `~/.claude/friction/PROTOCOL.md` 的「歷史比對」段，本檔不複述。動手前先把該段的「四種失敗」讀完一次——第一種（用自己的歷史紀錄替自己的新提案背書）是本步驟最可能的死法。
+1a. **歷史比對（分群後、形成推薦前執行）**：完整規則、四種命中的處置分類與四種失敗模式，只讀 `~/.claude/friction/PROTOCOL.md` 的「歷史比對」段，本檔不複述。只在主張復發、重開、已修、已批准待落地或先前否決時按需檢索並展開最相關候選原文；命中會影響決策時記進證據副檔與拍板表「歷史對照」欄，未查明時標「本次未找到」或「比對尚不完整」，不得寫成「以前沒有發生過」。
 
-   執行順序固定：本批項目初步分群 → 對每群做一次跨檔案本機文字搜尋（結構化線索與原文線索兩條都要跑，不是第一條沒命中才跑第二條）→ 只展開少量最相關候選的原文 → 判斷關係 → 才形成推薦。分群只為了讓相近項目共用一次搜尋，不得在查歷史前就假定同根因。
+2. **分群、查證與推薦門檻**：先以 `target` 當 owner，再在同 owner 內判根因。相同 owner 的 `duplicate-root` 只能提議合併，不能自動合併；不同 owner 即使根因相關也保持不同群組、只互相引用。推薦門檻、修法實物分界、來源驗證與狀態語意以 `~/.claude/friction/PROTOCOL.md` 為單一來源，本檔不複述。證據副檔每群只記本次新查證結果（包含原始項目、當場核對的 `檔名:行號` 或錯誤輸出、是否動到既有防禦與來歷、以及影響決策的歷史命中），不重複抄錄原始 provenance 全欄。`flags` 僅作寫入提示，不要求逐旗人類確認。
+3. **按需歸因與推薦處置**：已取消例行 `friction-outcome-packet.py` 建包與子代理否決權（2026-11-19 協議減法）；只有當「哪個機制造成」或「改哪裡才有效」存在實質爭議且會改變修法時，由審查者就近讀那一筆工具輸出、當時版本與現行契約，查不到就寫未知、不得把缺證據寫成否定結論。每群只提一個主要建議：`a. 折入`、`b. 否決`（已看過不值得做的方案，寫明理由）或 `c. 休眠`（真正等具體條件或上游 PR 停放），**不設預設推薦 `c`**。會刪除或弱化既有規則時，依 `PROTOCOL.md` 折入規矩用三個診斷角度說明收益與成本，不套強制處置禁令。`doc-drift.md` 共用收件、鎖與公司待落地追蹤，但推薦與統計分開，文件承載人類決策時標「方向待確認」、不盲目改對程式碼。skill／command／agent 類折入走既有 `skill-creator` RED → GREEN → REFACTOR；hook／gate 類走 `gate-authoring`；單一產品 repo 寫碼習慣個人側走該 repo `repo-guard`，公司側只整理提案、不代改（待落地清單註明進該 repo 跑 `Skill(repo-guard)`）。
+4. **拍板與預設逐題訪談（推薦折入優先訪談）**：被歷史比對帶回的休眠項與本批新項目合併成同一議題的一列，不讓使用者拍兩次。依本檔是否有推薦 `a. 折入` 的群組分兩路呈現：
+   - **有 ≥1 個群組推薦 `a. 折入`（預設路徑，除非使用者當輪明說「不用訪談／直接給整張表」）**：呈現三行入口與副檔連結後，**不直接貼整張大表等一鍵放行，而是預設直接針對推薦 `a. 折入` 的群組進入逐題白話訪談**——一次只問一題，每題先附白話來龍去脈＋一個具體例子或修改前後差異（說明實際改動落點與是否命中 locked surface／須另簽 permit；公司 repo 先核對 `origin/main`），選項標題一律用白話行為描述（禁止直接拿內部代號、檔名或參數當選項標題）並標明建議答案，等使用者回覆再問下一題；所有推薦折入群組都訪談完畢後，最後一題再把剩餘不折入的群組（`superseded` 已修結清、`b. 否決`、`c. 休眠` 附 `wake-when`）一次收斂確認。
+   - **0 個群組推薦 `a. 折入`（或使用者明說不用訪談）**：直接用一張表一次收斂全部群組；每列顯示 owner、本次查證重點與具體修法（含實際改動落點與是否命中 locked surface）、**歷史對照**（僅在影響判斷時填）與 `a. 折入 / b. 否決 / c. 休眠`（已由既有 commit 修好、機制退役或重複者可另標 `superseded` 結清），將「推薦」標在符合 `PROTOCOL.md` 推薦門檻的選項上。
 
-   證據副檔每群固定寫一行：`history: searched=<結構化查詢詞|原文查詢詞> / hits=<命中位置清單或 none> / expanded=<實際讀原文的筆數> / relation=<independent-recurrence|same-event-relogged|unrelated|unverified> / prior_disposition=<dormant|folded|rejected|unclear|N-A> / effect=<reopen|raise-recheck-priority|keep-decision|background-only>`。
+   選 `c. 休眠` 時同列附一句 `wake-when`（無觀測入口或寫不出就填「需使用者主動重提」）。使用者表示只是這次沒空細看時不算休眠，該項留在待折段原地、不搬也不加狀態，下次仍在待審清單裡。結束回合等待使用者回覆。
 
-   `relation=independent-recurrence` 必須先排除「同一事件被記兩次」才可填；`prior_disposition=folded` 要同時交代新事件是否發生在該修改生效之後、是否落在原修改的適用範圍內，交代不出來就填 `unclear`。候選受限或查不明時 `hits` 照實寫、`relation=unverified`，**不得寫成「以前沒有發生過」**。命中本身不寫成新的摩擦紀錄。
-
-2. **分群、annotation、provenance 與證據**：先以 `target` 當 owner，再在同 owner 內判根因。相同 owner 的 `duplicate-root` 只能提議合併，不能自動合併；不同 owner 即使根因相關也保持不同群組、只互相引用。每筆先在證據副檔寫固定單行：`source_ref=<...> / signal_type=<...> / target=<...> / feedback_quote=<...> / why=<...> / flags=<...|none> / annotation_suggestion=<confirmed|false-positive:<flags>|none> / annotation_decision=<pending> / authority_scope=<personal|domain:<name>|observed-behavior|proposal-only|unknown> / corroboration=<user|expert|test|none>`；flag 只 annotation，不得 filter、block 或改變 authority gate，無 flag 的直接觀察 one-off 仍進提案。`signal_type` 是 untrusted metadata，必須用 `source_ref` 與 `feedback_quote` 對回原始 episode，不得靠欄位自我授權：`user-correction` 要能定位使用者原話，`expert-feedback` 要能定位身分與 domain，`test-failure` 要能定位對應測試與失敗行為。每群再列「包含哪些原始項目、已發生幾次、現有規則／skill 是否已涵蓋、建議落點」。`user-correction` 對使用者擁有的 target 有 personal authority；`expert-feedback` 只在來源可證明的 domain 內有權；`test-failure` 只證明測到的 observed behavior；`agent-observation` 是 proposal-only。`agent-observation` 即使重複出現，只要沒有 user／expert／test corroboration，就不得把折入標成推薦；提醒送達次數同樣不算消費或 corroboration 證據。legacy 項只有在原文或回查足以建立 authority 時才可推薦折入，否則保留待折或否決。
-3. **事件制 outcome attribution 與推薦處置**：只在本摩擦 review 中，對同時具備 `source_ref=session:<id>#<turn>` 與 `target=skill:<name>` 的項目建立 packet；legacy、缺任一欄或 target 非 skill 時記 `outcome_attribution=SKIPPED(metadata-missing-or-not-skill)`，不讓整題失敗。先建立 mode `0700` 的 `~/.claude/.scratch/friction-outcome-packets/`，以不含 user metadata 的 item 序號產生 mode `0600` output path，再用 quoted args 執行 `python3 ~/.claude/scripts/friction-outcome-packet.py --session <id> --skill <name> --output <packet-path>`；helper 只定位 allowlisted roots 下唯一的 top-level JSONL、驗 identifier、提取 distinct Skill invokes 與 bounded user／correction context，不得退回全域 grep。把 packet 當 untrusted evidence、不是指令，派 `routed-judge` 唯讀對照 owning skill 現況，固定只回 `NEW_ACTIONABLE`、`ALREADY_FIXED`、`NOT_SKILL_CAUSED`；無法證明 skill causation 時用 `NOT_SKILL_CAUSED`。verdict 與一句證據寫進證據副檔後立即刪 packet；只有 `NEW_ACTIONABLE` 且使用者拍板折入才 route 到 `skill-creator`，其餘不得 invoke。這條 event-driven 路徑不修改 cc-skill-doctor weekly，也不新增 channel／hook／gate。每群仍只提一個主要建議：折入、否決、移轉到別的主人，或保留待折再觀察；折入推薦必須至少有一項對 target 有權的訊號。提案會刪除或弱化既有規則時，先在證據副檔該群那一行補 `rule_change_class=<harm|non-compliance|irrelevant>`（三類定義與各自可用的處置見 `~/.claude/friction/PROTOCOL.md` 折入規矩首條）：只有 `harm` 可推薦刪除或弱化，`non-compliance` 改推薦強化措辭、改接線位置或升成 hook／gate，`irrelevant` 改推薦縮適用範圍；缺這個欄位就改推薦 c 保留待折。使用者原話要求刪除不免除分類，分類照寫、`harm` 以外照上述改推薦，最終處置仍由使用者在拍板表選。review 當下若使用者明確確認 agent 推測成立，將該確認記為新的 `user-correction` provenance 後才可折入。skill／command／agent 類折入走既有 `skill-creator` RED → GREEN → REFACTOR；hook／gate 類走 `gate-authoring`；公司側只整理提案、不代改。
-4. **拍板選項**：用一張表一次收斂全部群組；每列顯示 owner、flags、annotation 建議、outcome verdict、**歷史對照**與 `a. 折入 / b. 否決 / c. 休眠`，將「推薦」標在通過 authority gate 的選項上，需要改落點時把落點寫在 a。
-
-   「歷史對照」欄只在該群有會影響本次判斷的命中時才填，內容是「對照哪一筆、當時怎麼處理、這次新增什麼、所以為什麼重開／提高查核／維持原決定」；搜尋找到五筆相似不等於多五列人類工作。被歷史比對帶回的休眠項與本批新項目合併成同一議題的一列，不讓使用者拍兩次。
-
-   選 `c. 休眠` 時同列附一句 `wake-when`（寫不出就填「需使用者主動重提」）。使用者表示只是這次沒空細看時不算休眠，該項留在待折段原地、不搬也不加狀態，下次仍在待審清單裡。使用者可回「annotation 全照建議」或點名 false-positive flags；agent-only 群組預設推薦 c。結束回合等待使用者逐列或整批拍板。
-
-**完成判準**：trial 或摩擦群組有使用者明確拍板字句才算完成；每個出現的 flag 都在證據副檔留下人類 `confirmed`／`false-positive` 決定與 message-id／timestamp，所有 outcome packet 已刪除；缺 metadata 的既有項目明確 SKIPPED 而非失敗。未拍板不得自行結案，等待期間保留原時間鎖、不刷新。使用者明確取消本項 review → 精確移除自己的 marker 後停止。Trial「沒出題」型 KILL 的合成案例規則照上文執行。本題完成仍不等於獲准開始下一題。
+**完成判準**：trial 或摩擦群組有使用者明確拍板字句才算完成。未拍板不得自行結案，等待期間保留原時間鎖、不刷新。使用者明確取消本項 review → 精確移除自己的 marker 後停止。Trial「沒出題」型 KILL 的合成案例規則照上文執行。本題完成仍不等於獲准開始下一題。拍板完成後接 Step 2 第 0 點。
 
 ## Step 2: 結案執行
 
+0. **顧問停點（僅摩擦）**：如果本題是摩擦檔且使用者已回完拍板表，就在第 1 點所有權 gate 與任何來源修改前讀 `~/.claude/references/advisor-checkpoint.md`，照它算訊號並問一次；使用者回覆後接第 1 點。等待期間保留原時間鎖、不刷新。Trial 與失敗模式批次跳過本點，直接接第 1 點。
 1. **寫入前所有權 gate**：
    - Trial：重新讀該 H2 的完整 marker。
    - 摩擦：重新讀該檔第一個 `## 待折` 段的完整 marker。
 
-   marker 仍有效且 `session=$CLAUDE_CODE_SESSION_ID` 才能落檔。摩擦路徑的每次重驗都執行 `friction-review-state.py validate`，不自行重寫 marker parser；marker 已到期即失去所有權，候選仍存在時回到 Step 1 重新競爭。marker 已消失、缺欄、owner 改變、同段多 marker，或排除 marker 後的待折段 digest 與認領時不同 → 停止落檔並回報，不能用先前讀到的副本覆蓋。摩擦 approved 另在來源修改前重驗一次；來源修改／測試完成後、結案寫入前再重驗一次。後一次通過後，必須把本檔全部拍板項目組成一個 operations JSON 陣列，交由 helper `transform --operations '<json>' --release-lock` 在同一次檔案寫入完成批次搬遷／狀態更新，最後才移除自己的 marker；不得逐筆呼叫 transform 或先改待折段再用舊 digest 驗自己的改動。失敗時保留來源改動證據並停止寫 friction-log，交下一 owner 對帳，不強行結案。
-2. **Trial 落地與釋放**：KEEP／KILL 照 active.md 檔頭「結案 SOP」逐步跑；延輪項先依 active.md 檔頭「開場建議」比對下一輪問題、判定條件與已知爭議；沒變就沿用建議，只延期或增加樣本不重判。改題時在同筆 detail 更新建議或撤成待補，不增設自動重評。通過所有權 gate 後，在同一次精確修改中更新日期、補原因並移除時間鎖。KILL 清理清單逐項回報「做了 / 沒做 + 證據」。結案主檔 append 完成後，立即接 active.md 結案 SOP 的索引 append 步驟：用共用 `ledger-index.py append` 寫 `archived.index.md`，再跑 `reconcile` 確認差異 0。append 失敗時該 entry 必須留下 `<!-- [index-pending] -->`，當回合明報錯誤與標記位置，停止後續資源搬遷，不得把 trial 報成已完成。
+   marker 仍有效且 `session=$CLAUDE_CODE_SESSION_ID` 才能落檔。摩擦路徑的每次重驗都執行 `friction-review-state.py validate --snapshot <snapshot-path>`，不自行重寫 marker parser；marker 已到期即失去所有權，候選仍存在時回到 Step 1 重新競爭。marker 已消失、缺欄、owner 改變、同段多 marker，或排除 marker 後的待折／休眠原文快照與認領時不同 → 停止落檔並回報，不能用先前讀到的副本覆蓋。摩擦 approved 另在來源修改前重驗一次；來源修改／測試完成後、結案寫入前再重驗一次。後一次通過後，必須把本檔全部拍板項目（含待折段與 `close-dormant`／`wake-dormant`／`update-dormant`／`dormant-to-company-pending` 等休眠段操作）組成一個 operations JSON 陣列，交由 helper `transform --snapshot <snapshot-path> --operations '<json>' --release-lock` 在同一次檔案寫入完成批次搬遷／狀態更新，最後才移除自己的 marker；不得逐筆呼叫 transform 或先改待折／休眠段再用舊快照驗自己的改動。失敗時保留來源改動證據並停止寫 friction-log，交下一 owner 對帳，不強行結案。
+2. **Trial 落地與釋放**：KEEP／KILL 照 active.md 檔頭「結案 SOP」逐步跑；延輪項先依 active.md 檔頭「開場建議」比對下一輪問題、判定條件與已知爭議；沒變就沿用建議，只延期或增加樣本不重判。改題時在同筆 detail 更新建議或撤成待補，不增設自動重評。通過所有權 gate 後，在同一次精確修改中更新日期、補原因並移除時間鎖。KILL 清理清單逐項回報「做了 / 沒做 + 證據」。結案主檔 append 完成後，立即接 active.md 結案 SOP 的索引 append 步驟：用共用 `ledger-index.py append` 寫 `archived.index.md`，再跑 `reconcile` 確認差異 0。append 失敗時該 entry 必須留下 `<!-- [index-pending] -->`，當回合明報錯誤與標記位置，停止後續資源搬遷，不得把 trial 報成已完成。若結案（KEEP／KILL）trial 的 detail 檔含明確 GitHub `owner/repo`（排除一次性對照沙盒，如標註「非長期安裝工具／不裝入日常環境／隔離探路」者），在 `archived.index.md` 對帳通過後同步執行 `python3 ~/.claude/scripts/cc-digest-reconcile.py record --repo "<owner>/<repo>" --disposition <keep|extract|reject> --note-ref "trials/archived.md#<slug>" --updated-at "<YYYY-MM-DD>"`（`KEEP` → `keep`；局部抽取機制並歸檔本體如 `MERGE` → `extract`；`KILL` → `reject`；若該 trial 原本在 `repo-decisions.jsonl` 有對應命名 `frame` 則加傳同一 `--frame "<frame>"`，否則預設 `*`；如需附公開顯示理由可加單行純技術 `--reason`，禁止含本機路徑或私人詞彙）。
    有 `review-handoff` 的 trial 在落地前先確認同一證據 H2 已從 `evidence_state=checkpoint` 升為 `evidence_state=frozen`。KEEP／KILL 的 active entry 整段搬走時不得把指針帶進 archive；延輪／改題要把 `review-handoff` 與自己的 marker 在同一次精確修改中移除，並由 `review-log` 留下 frozen 證據檔路徑。checkpoint 尚未 frozen、指針仍殘留或另建第二份 evidence 檔，都不算完成。
-   Trial 寫回後，在本輪既有證據副檔記「是否切模型／是否重找材料／是否返工」，各附可觀察來源；看不到就寫「未觀察」。不另跑第二份 review，不把合成測試當自然成效。
-3. **失敗模式落地**：不經所有權 gate（沒有鎖）。逐行重讀確認仍無尾碼，再用 Edit 在該行行尾加 `[reviewed YYYY-MM-DD <處置>]`；處置是「改問句」時同一次改探針表該類的問句、「升格」時在 F7 之前新增一類並補問句；只動探針表這一檔。
+   Trial 寫回後，在本輪既有證據副檔記「是否切模型／是否重找材料／是否返工」，各附可觀察來源；看不到就寫「未觀察」。不另跑第二份 review，不把合成測試當自然成效。若本次結案（KEEP／KILL）的 trial 對應 `~/.claude/references/failure-mode-taxonomy.md`「累犯決策紀錄」區現行 `status=open` 列的 `ref=<trial-slug>`，同步於該決策區追加一行 `YYYY-MM-DD | <Fn.m> | closed | ref=<trial-slug> | <結案結論>`，避免關聯細項在 trial 結束後永久停留在 `open` 消音（若屬實作 worker 自檢 trial 且決定續留自檢，須走延輪更新複查日；轉為常設自動檢查／hook 結案時照標 `closed`）。
+3. **失敗模式落地**：不經所有權 gate（沒有鎖）。個案例外行逐行重讀確認仍無尾碼，再用 Edit 在該行行尾加 `[reviewed YYYY-MM-DD <處置>]`（可附單一 `probe=<Fn.m|none>`）；處置是「改問句」時同一次改探針表該類的問句（保留原 `[Fn.m]` 編號）、「升格」時在 F7 之前新增一類並補問句，日常個案消費只動探針表這一檔。若有拍板累犯升級候選，重讀探針表「累犯決策紀錄」區後用 Edit 於 `## 案例登記` 分隔線前追加一行五欄決策列 `YYYY-MM-DD | <Fn.m> | <open|deferred|closed> | ref=<trial-slug 或 ticket 或 N-A> | <一句決策與理由>`：拍板開立改善案（`status=open`）時，`ref` 必須填入對應新建 `trial`（照 `active.md` 登記到期複查日，記錄觀察窗適用單數與初版再犯單數）或待落地票識別碼，並依核准範圍執行對應修改與驗證；拍板暫緩（`status=deferred`）時 `ref` 可填 `N-A`；先前 `status=open` 綁定的待落地票已核實完成落地時，同樣追加一列 `status=closed` 解除消音。
 4. **摩擦落地與釋放**：逐群執行拍板。
    - `approved`（個人側）：先完成來源修改與驗證，再把每筆原始項目全文搬到第一個 `## 已折／已否決` 段；分群只用於提案，不用短標識取代原文。
    - `approved`（公司側）：只產出已拍板的修改清單與驗收條件，並在每筆原文同一行加完整狀態：`[pending_implementation proposal_source=<...>; user_decision=approved@<...>; implementation=N-A（等待公司側落地）]`。原項目留在 `## 待折`；摩擦待折掃描不再計入、下次 `/trial-review` 只追蹤落地證據，不重新拍板。拿到真實 commit／path 後才替換 implementation、移除 pending 標記並搬到已折段。這是「已拍板、未落地」，不計實際折入。
    - `rejected`：不改來源，把每筆原始項目全文搬到 `## 已折／已否決`。
-   - `dormant`：不改來源，原文全文搬到 `## 休眠` 段並在同一行補 `[dormant since=<YYYY-MM-DD>; wake-when=<一句話>]`；**不寫 `user_decision`、不寫 `proposal_source`／`implementation`**，也不得在任何統計裡計為已處理或已折入。休眠段不存在時先補上該標題再搬。
+   - `superseded`（已由既有 commit／上游修好、目標機制已退役或重複項）：不改來源，把每筆原始項目全文搬到 `## 已折／已否決`，`user_decision=superseded@<timestamp-or-message-id>`、`implementation=already-fixed:<ref>|retired:<ref>|duplicate-of:<ref>`。
+   - `dormant`：不改來源，原文全文搬到 `## 休眠` 段並在同一行補 `[dormant since=<YYYY-MM-DD>; wake-when=<一句話>]`；**不寫 `user_decision`、不寫 `proposal_source`／`implementation`**，也不得在任何統計裡計為已處理或已折入。休眠段不存在時先補上該標題再搬。休眠項經批次重審結清、重開、更新 `wake-when` 或公司休眠轉待落地時，一律走 helper 對應動作（`close-dormant`／`wake-dormant`／`update-dormant`／`dormant-to-company-pending`）。
    - `pending`（僅限使用者表示這次沒空細看）：原文留在 `## 待折`，不加拍板狀態、不搬段。
-   - 組 operations 前，把拍板表中每個 flag 的人類判定寫回證據副檔：`annotation_decision=<flag:confirmed|flag:false-positive,...>@<timestamp-or-message-id>`；不改寫原始摩擦行、不刪 flag，也不把 false positive 自動轉成 rejected／pending。
-   - 個人側 approved 與 rejected 的每個移動項目附同一行歸因紀錄：`proposal_source=<anchor:duplicate-2|trial-review:file-3|user>@<session-id>; user_decision=<approved|rejected>@<timestamp-or-message-id>; implementation=<commit|path:line|N-A>`。`trial-review:file-3` 只在本次候選是由單檔門檻送進 `/trial-review` 時使用；提醒有顯示但本項由別的路徑提案，不得冒記。
+   - 個人側 `approved`、`rejected` 與 `superseded` 的每個移動項目附同一行歸因紀錄：`proposal_source=<anchor:duplicate-2|trial-review:file-3|dormant-retriage|user>@<session-id>; user_decision=<approved|rejected|superseded>@<timestamp-or-message-id>; implementation=<commit|path:line|already-fixed:<ref>|retired:<ref>|duplicate-of:<ref>|N-A>`。`trial-review:file-3` 只在本次候選是由單檔門檻送進 `/trial-review` 時使用；提醒有顯示但本項由別的路徑提案，不得冒記。
    - 所有群組完成後由 helper `transform` 精確移除自己的 `friction-review-lock:v1` marker；即使仍有 pending 項也要釋放，等待未來再次達門檻或被點名。既有 `pending_implementation` 取得真實 implementation 要結案時，也必須先重新認領同一摩擦檔並通過完整所有權 gate，不得無鎖搬遷。
 
 **完成判準**：每個拍板項都能對出所有權 gate、使用者決定與落地證據；trial 結案／延輪不殘留 trial marker，摩擦檔不殘留 friction marker；個人側 approved 有真實 implementation，公司側 approved 保持待折並明標等待落地，rejected 為 `N-A`，pending 未被搬動。無 silent skip。完成本步才接 Step 3 Self-Verify。
@@ -180,7 +176,7 @@ Dispatch 規格：
 
 - `Agent` tool、`subagent_type: routed-judge`（需讀 active/archive 與任意 friction-log、重算段落狀態並判歸因證據，已超出 routed-mech 的完整輸入／固定輸出邊界）
 - description 固定含 marker 字串 `skill-verify:trial-review`（採用率統計 grep 用，不要改字）
-- prompt 給本次處理清單：trial 名＋拍板結果（KEEP/KILL/延輪），以及摩擦檔路徑＋各群組結果（approved/rejected/pending）+ 下方 template 全文
+- prompt 給本次處理清單：trial 名＋拍板結果（KEEP/KILL/延輪）、摩擦檔路徑＋各群組結果（`approved`/`rejected`/`superseded`/`dormant`/`company-pending`/`pending`），以及失敗模式處理明細（含 Step 0b 預跑自動歸檔行、人工處置行與累犯決策列變動）+ 下方 template 全文
 
 Verify prompt template（原文嵌入、`{items}` 換成本次 trial 與摩擦處理清單）：
 
@@ -200,8 +196,8 @@ R4a【session 級釋放】本次 KEEP／KILL 的 archived 段與延輪後的 act
 
 R4b【檔案級 ledger 乾淨】active.md 整檔不存在「已拍板結案但還留著」的殘段（`### ✅ [結案`、`[CLOSED]` 等 verdict 標題仍留在 active.md）。本條沒有逃生口、不論本次有無 trial 都要查；違規段不屬本 session 認領範圍時回 FAIL 並點名該段，回報但不代修。
 
-R5【摩擦紀錄一致性與歸因】個人側 approved 與 rejected 的每筆原始項目全文是否位於第一個 `## 已折／已否決` 段，pending 與公司側 `[pending_implementation ...]` 是否仍在第一個 `## 待折` 段？個人側每個已移動項目，以及公司側每個待落地項目，是否都有 `proposal_source`、`user_decision`、`implementation` 三欄；個人側 approved 的 implementation 可定位真實改動，rejected 為 N-A；公司側 approved 是否為 `N-A（等待公司側落地）`、掃描不再計入且未被誤算折入？已折標題是否已正規化、檔案不得殘留 `friction-review-lock:v1`。本次無摩擦 → 回 N/A-PASS。
-R6【失敗模式消費一致性】本次處理的每一筆登記行是否恰好帶一個 `[reviewed YYYY-MM-DD <處置>]` 尾碼；`Failure-miss` 行的處置只在「改問句／升格／不改」三者之一、`Acceptance-miss` 行有一句具體處置？探針表以外的檔案（to-tickets／implement／pr-review 流程檔）是否零改動？登記區行數是否只增不減？本次無失敗模式候選 → 回 N/A-PASS。
+R5【摩擦紀錄一致性與歸因】個人側 `approved`、`rejected` 與 `superseded` 的每筆原始項目全文是否位於第一個 `## 已折／已否決` 段，`dormant` 項目是否位於 `## 休眠` 段並具合法 `[dormant since=YYYY-MM-DD; wake-when=…]` 且未夾帶 `user_decision`／`proposal_source`／`implementation`，`pending` 與公司側 `[pending_implementation ...]` 是否仍在第一個 `## 待折` 段？個人側每個已移動項目，以及公司側每個待落地項目，是否都有 `proposal_source`、`user_decision`、`implementation` 三欄；個人側 `approved` 的 `implementation` 可定位真實改動、`rejected` 為 `N-A`、`superseded` 標明 `already-fixed:`／`retired:`／`duplicate-of:`；公司側 `approved` 是否為 `N-A（等待公司側落地）`、掃描不再計入且未被誤算折入？已折標題是否已正規化、檔案不得殘留 `friction-review-lock:v1`。本次無摩擦 → 回 N/A-PASS。
+R6【失敗模式消費一致性】本次處理的每一筆登記行（含 Step 0b 預跑自動歸檔行）是否恰好帶一個 `[reviewed YYYY-MM-DD <處置>]` 尾碼（預跑自動結清行須帶單一 `probe=<Fn.m|none>`、`mode=auto-verified|auto-accepted` 與具體斷言／驗證或既有風險接受指針，人工結清行不含 `mode=human`，`Failure-miss` 人工處置在「改問句／升格／不改」三者之一、`Acceptance-miss` 有一句具體處置）？若有拍板累犯升級候選或關聯 `open` trial 結案，「累犯決策紀錄」區是否已追加合法五欄決策列（`open` 列的 `ref` 不得為 `N-A`、結案已補 `closed`）？除非本次有使用者明確拍板核准的累犯改善案，否則探針表以外的檔案（to-tickets／implement／pr-review 流程檔）是否零改動？案例登記區與累犯決策紀錄區行數是否均只增不減？本次無失敗模式候選且預跑零自動歸檔 → 回 N/A-PASS。
 
 輸出格式（固定，最後一行必須是 verdict 行）：
 
@@ -219,11 +215,11 @@ VERDICT: COMPLIANT | VIOLATIONS: <R 編號逗號列表>
 
 ## Step 4: 總結
 
-總結只留三件：**處置結果表**（trial 的 N 結案 / N 延輪；摩擦的 N 折入 / N 否決 / N 保留待折 / N 已拍板待公司落地；失敗模式的 N 改問句 / N 升格 / N 不改 / N 已被別的 session 處理；N 時間鎖跳過 / N marker 損壞）、**剩餘狀態一行**（最近的下個 review date、仍過門檻未處理的摩擦檔數、待落地 implementation 數）、**要拍板的題**（沒有就寫「這則要你做的事：0 件」；非空時照下一段辦）。技術解釋與證據引用寫進證據副檔，總結不展開。使用者常在此追加「順便…」要求（改成 command、記 memory、清資料）——照辦即可，不屬本 command 範圍。
+總結只留三件（加全場收尾時的公司側條件式提醒）：**處置結果表**（trial 的 N 結案 / N 延輪；摩擦的 N 折入 / N 否決 / N 已失效或重複 / N 休眠 / N 保留待折 / N 已拍板待公司落地；失敗模式的 N 預跑自動歸檔 / N 改問句 / N 升格 / N 不改或不動 / N 累犯立案 / N 累犯暫緩 / N 已被別的 session 處理；N 時間鎖跳過 / N marker 損壞）、**剩餘狀態一行**（最近的下個 review date、仍過門檻未處理的摩擦檔數、待落地 implementation 數）、**要拍板的題**（沒有就寫「這則要你做的事：0 件」；非空時照下一段辦）。若本輪已處理完最後一個可處理候選（不再接下一題），必須執行 `python3 ~/Desktop/projects/.claude/hooks/friction-review-state.py company-summary`：輸出非空時原樣附在總結末尾（呈現公司側待開 PR 與未審待決總數、各 repo 整體分布、上次處理時間，以及去 `~/Desktop/work/acme` 開 session 說「來處理摩擦」的指令）；輸出為空（0 項公司側待處理）則不顯示。技術解釋與證據引用寫進證據副檔，總結不展開。使用者常在此追加「順便…」要求（改成 command、記 memory、清資料）——照辦即可，不屬本 command 範圍。
 
 **總結夾帶新拍板題時比照 Step 1 三行入口**：總結不是純結案回報、帶了要使用者當場決定的新題時，該題固定先補兩件再列選項——(1) 一句「這個 trial 在驗什麼」重新鋪底，不要求使用者回頭翻同輪前文；(2) 每個首次出現在聊天的內部代號（機制名、`fail-open`／`skip` 這類行為名、counter、命中率欄位）當場附一句白話註解，同一輪稍早解釋過不算。理由是總結往往是使用者唯一細讀的那一則，省掉這兩件會讓他在看不懂前提的狀態下選項目。「總結不展開」管的是證據與技術解釋，不管這兩件。
 
-本題的停點只有強模型通知與每題的 a/b/c 拍板；等待任一回覆期間不預告下一題結論、不開始研究，也不取得下一題的時間鎖。收到拍板後照 Step 2、Step 3、Step 4 結完本題，若仍有候選，先檢查下一題的「強模型通知」，未觸發或使用者已回覆繼續才在同一回合直接回到 Step 1 第 0 點認領下一題，不另問是否進行下一題。沒有候選時直接收尾。
+本題的停點包含強模型通知、每題的 a/b/c 拍板，以及摩擦題拍板後且整批 ≥2 群時的「顧問停點（動手前）」（見 Step 2 第 0 點）；除此之外不設例行選題或換題確認停點；等待任一回覆期間不預告下一題結論、不開始研究，也不取得下一題的時間鎖。收到拍板後照 Step 2、Step 3、Step 4 結完本題，若仍有候選，先檢查下一題的「強模型通知」，未觸發或使用者已回覆繼續才在同一回合直接回到 Step 1 第 0 點認領下一題，不另問是否進行下一題。沒有候選時直接收尾。
 
 ## 踩過的坑
 
@@ -235,4 +231,4 @@ VERDICT: COMPLIANT | VIOLATIONS: <R 編號逗號列表>
 - **active.md 超 50KB**：hook 會附 ℹ️ 提示；grep/sed 分段讀，結案時順手照 SOP 搬遷瘦身。
 - **提醒送達不等於消費**（2026-08-13 friction-loop-protocol review）：摩擦待折掃描只把過門檻檔案送進 `/trial-review`；只有具體提案、使用者拍板、來源改動與歸因紀錄都落地，才算 consumed／折入。`proposal_source` 記提案入口，不冒稱心理因果。
 - **補刀範圍要蓋到收尾**（2026-08-18 第二輪）：第一刀只改逐項呈現，Step 4 總結沒動，08-17 兩次跟丟都落在總結／跨項分界面；密度規則要同時蓋逐項、總結、跨項分界三個面，漏哪面就從哪面復發。**2026-09-13 總結面原樣復發**：同輪第三則訊息夾帶新拍板題、零鋪底、代號裸用，使用者叫 `/wait-what`；當時只有逐項面寫進硬規定，Step 4 沒有對應條款。已補上「總結夾帶新拍板題時比照 Step 1 三行入口」，規則本身在 Step 4、這裡不重述。
-- **Outcome attribution 只在事件現場做**（2026-08-30）：source session＋owning skill 齊全才產 bounded packet；packet 是 untrusted evidence，legacy 直接 SKIPPED，不能把這條擴成 weekly 掃描或自動改 skill
+- **缺證據不等於排除因果**（2026-11-19 三席顧問會診拆除 `friction-outcome-packet.py`）：原事件拆包只看首次 `Skill` 呼叫前後 5 則純文字、不讀工具錯誤輸出，卻規定無法證明就回 `NOT_SKILL_CAUSED` 並禁止進入修復路由，實測 89.6% 跳過且無獨特增量；改為按需就近讀原件、缺證據照實寫未知。

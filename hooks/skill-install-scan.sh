@@ -23,14 +23,19 @@
 set -eu
 
 INPUT=$(cat)
-FILE_PATH=$(jq -r '.tool_input.file_path // ""' <<<"$INPUT")
+FILE_PATH=$(jq -r 'if type == "object" and (.tool_input | type) == "object" and (.tool_input.file_path | type) == "string" then .tool_input.file_path else "" end' <<<"$INPUT" 2>/dev/null || true)
 
-# 1. 不在目標目錄、直接 skip
-if ! echo "$FILE_PATH" | grep -qE '^/Users/[^/]+/\.claude/(skills|commands)/'; then
-  exit 0
-fi
+CLAUDE_DIR="${HOME:-}/.claude"
+# 非標準 HOME 同樣要檢查，自家作者判定仍以該 HOME 的 git repo 為準。
+case "$FILE_PATH" in
+  "$CLAUDE_DIR"/skills/*|"$CLAUDE_DIR"/commands/*) ;;
+  *)
+    if ! printf '%s\n' "$FILE_PATH" | grep -qE '^/Users/[^/]+/\.claude/(skills|commands)/'; then
+      exit 0
+    fi
+    ;;
+esac
 
-CLAUDE_DIR="$HOME/.claude"
 REL_PATH="${FILE_PATH#$CLAUDE_DIR/}"
 USER_EMAIL="you@example.com"   # ~/.claude/ git config user.email
 
@@ -43,7 +48,7 @@ fi
 
 # 3. 未 tracked → trigger（新檔可能是第三方 install）
 if [[ -z "$TRIGGER_REASON" ]]; then
-  if ! git -C "$CLAUDE_DIR" ls-files --error-unmatch "$REL_PATH" >/dev/null 2>&1; then
+  if ! git -C "$CLAUDE_DIR" ls-files --error-unmatch -- "$REL_PATH" >/dev/null 2>&1; then
     TRIGGER_REASON="untracked_file (likely third-party install / fresh write)"
   fi
 fi

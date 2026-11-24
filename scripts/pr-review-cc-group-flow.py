@@ -4,14 +4,25 @@ import argparse
 import hashlib
 import importlib.util
 import json
+import os
 import re
 import sys
+import tempfile
 from pathlib import Path
 
 
 TARGETS_SCRIPT = Path(__file__).with_name("pr-review-targets.py")
 SAFE_RUN_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 CC_INITIAL_ANGLES = {"context-aware primary", "security"}
+VALID_DISPOSITIONS = {None, "reviewed", "skipped"}
+RESPONSE_LIST_FIELDS = ("findings", "missed_files", "new_interfaces", "accounted_files", "checks")
+
+
+def is_valid_disposition(item):
+  if not isinstance(item, dict):
+    return False
+  disposition = item.get("disposition")
+  return (disposition is None or isinstance(disposition, str)) and disposition in VALID_DISPOSITIONS
 
 
 def load_targets_module():
@@ -25,9 +36,13 @@ TARGETS = load_targets_module()
 
 
 def selected_cells(selection):
+  if not isinstance(selection, list):
+    return []
   result = []
   seen = set()
-  for cell in selection or []:
+  for cell in selection:
+    if not isinstance(cell, dict):
+      continue
     if cell.get("status") not in (None, "selected"):
       continue
     seat = str(cell.get("seat") or "")
@@ -115,12 +130,17 @@ def coverage_counts(targets, accounted_items, unverified_files):
   # (a typo like "SKIPPED") stays unaccounted: counting it as reviewed is the 89/89 inflation.
   buckets = {None: set(), "reviewed": set(), "skipped": set()}
   for item in accounted_items:
-    bucket = buckets.get(item.get("disposition"))
+    if not isinstance(item, dict):
+      continue
+    disposition = item.get("disposition")
+    if disposition is not None and not isinstance(disposition, str):
+      continue
+    bucket = buckets.get(disposition)
     if bucket is not None:
       bucket.add(item_key(item))
   reviewed = buckets[None] | buckets["reviewed"]
   skipped = buckets["skipped"]
-  unverified = {item_key(item) for item in unverified_files}
+  unverified = {item_key(item) for item in unverified_files if isinstance(item, dict)}
   counts = {"total": 0, "reviewed": 0, "skipped": 0, "unaccounted": 0}
   for key in ((target["target_identity"], path) for target in targets if is_range(target)
               for path in target.get("changed_files") or []):
@@ -135,7 +155,16 @@ def coverage_counts(targets, accounted_items, unverified_files):
 
 
 def plan_dispatch(state, selection, confirmation):
-  targets = state.get("targets") or []
+  raw_targets = state.get("targets") if isinstance(state, dict) else None
+  targets = [t for t in raw_targets if isinstance(t, dict)] if isinstance(raw_targets, list) else []
+  if not targets:
+    return {
+      "status": "BLOCKED",
+      "mode": "multi-target",
+      "reason": "targets-missing",
+      "dispatches": [],
+      "coverage": {"state": "UNVERIFIED", "unverified": []},
+    }
   mode = flow_mode(targets)
   if len(targets) == 1 and mode != "range":
     return {
@@ -206,6 +235,10 @@ def invoke_reviewer(reviewer, dispatch):
   if not isinstance(response, dict) or response.get("status") != "ok":
     reason = response.get("reason") if isinstance(response, dict) else "invalid-response"
     return None, failed_entry(dispatch, "FAILED", reason or "reviewer-failed")
+  for field in RESPONSE_LIST_FIELDS:
+    value = response.get(field)
+    if value is not None and (not isinstance(value, list) or not all(isinstance(item, dict) for item in value)):
+      return None, failed_entry(dispatch, "FAILED", f"invalid-response-field:{field}")
   return response, None
 
 
@@ -217,7 +250,7 @@ def interface_checks(interfaces, repair_response):
   returned = {
     str(item.get("interface_id") or ""): item
     for item in (repair_response or {}).get("checks") or []
-    if item.get("interface_id")
+    if isinstance(item, dict) and item.get("interface_id")
   }
   result = []
   for interface in interfaces:
@@ -247,12 +280,22 @@ def write_ledger(state, result):
   path = ledger_path(state)
   if path is None:
     return None
-  path.write_text(json.dumps(result, ensure_ascii=False, sort_keys=True))
+  temporary = None
+  try:
+    with tempfile.NamedTemporaryFile("w", dir=path.parent, delete=False, encoding="utf-8") as handle:
+      temporary = Path(handle.name)
+      handle.write(json.dumps(result, ensure_ascii=False, sort_keys=True))
+      handle.flush()
+      os.fsync(handle.fileno())
+    os.replace(temporary, path)
+  finally:
+    if temporary is not None and temporary.exists():
+      temporary.unlink()
   return str(path)
 
 
 def run_group_review(request, reviewer):
-  state = request.get("state") or {}
+  state = request.get("state") if isinstance(request.get("state"), dict) else {}
   plan = plan_dispatch(state, request.get("selection") or [], request.get("confirmation"))
   if plan["status"] != "READY":
     return {
@@ -269,7 +312,9 @@ def run_group_review(request, reviewer):
   failed_seats = []
   findings = []
   missed_files = []
+  missed_keys = set()
   new_interfaces = []
+  seen_interface_ids = set()
   initial_accounted = set()
   accounted_items = []
   reviewer_call_count = 0
@@ -290,14 +335,26 @@ def run_group_review(request, reviewer):
       "file_ownership": dispatch["file_ownership"],
     })
     findings.extend(response.get("findings") or [])
-    missed_files.extend(response.get("missed_files") or [])
-    new_interfaces.extend(response.get("new_interfaces") or [])
-    accounted_items.extend(response.get("accounted_files") or [])
-    initial_accounted.update(item_key(item) for item in response.get("accounted_files") or [])
-  missed_keys = {item_key(item) for item in missed_files}
-  missed_files.extend(item for item in unaccounted_range_files(state.get("targets") or [],
-                                                               initial_accounted)
-                      if item_key(item) not in missed_keys)
+    for item in response.get("missed_files") or []:
+      key = item_key(item)
+      if key not in missed_keys:
+        missed_keys.add(key)
+        missed_files.append(item)
+    for item in response.get("new_interfaces") or []:
+      iface_id = str(item.get("interface_id") or "")
+      if iface_id and iface_id in seen_interface_ids:
+        continue
+      if iface_id:
+        seen_interface_ids.add(iface_id)
+      new_interfaces.append(item)
+    reply_accounted = response.get("accounted_files") or []
+    accounted_items.extend(reply_accounted)
+    initial_accounted.update(item_key(item) for item in reply_accounted if is_valid_disposition(item))
+  for item in unaccounted_range_files(state.get("targets") or [], initial_accounted):
+    key = item_key(item)
+    if key not in missed_keys:
+      missed_keys.add(key)
+      missed_files.append(item)
 
   repair_response = None
   repair_rounds = 0
@@ -331,14 +388,15 @@ def run_group_review(request, reviewer):
       })
 
   checks = interface_checks(new_interfaces, repair_response)
-  accounted = {item_key(item) for item in (repair_response or {}).get("accounted_files") or []}
+  repair_accounted = (repair_response or {}).get("accounted_files") or []
+  accounted = {item_key(item) for item in repair_accounted if is_valid_disposition(item)}
   unverified_files = [item for item in missed_files if item_key(item) not in accounted]
   coverage = {
     "state": "COMPLETE" if not unverified_files else "UNVERIFIED",
     "unverified": unverified_files,
   }
   if plan["mode"] == "range":
-    accounted_items.extend((repair_response or {}).get("accounted_files") or [])
+    accounted_items.extend(repair_accounted)
     coverage["counts"] = coverage_counts(state.get("targets") or [], accounted_items,
                                          unverified_files)
   group_payload = {
@@ -373,7 +431,8 @@ def load_state(payload):
   if not path:
     return {}
   try:
-    return json.loads(Path(str(path)).expanduser().read_text())
+    loaded = json.loads(Path(str(path)).expanduser().read_text())
+    return loaded if isinstance(loaded, dict) else {}
   except (OSError, ValueError, TypeError):
     return {}
 
@@ -388,12 +447,21 @@ def main(argv=None):
     json.dump({"status": "ERROR", "reason_codes": ["INVALID_INPUT_JSON"]}, sys.stdout)
     sys.stdout.write("\n")
     return 1
+  if not isinstance(payload, dict):
+    json.dump({"status": "ERROR", "reason_codes": ["INVALID_INPUT_JSON"]}, sys.stdout)
+    sys.stdout.write("\n")
+    return 1
   state = load_state(payload)
   if args.mode == "plan":
     result = plan_dispatch(state, payload.get("selection") or state.get("selection") or [],
                            payload.get("confirmation"))
   else:
-    responses = list(payload.get("responses") or [])
+    raw_responses = payload.get("responses")
+    if raw_responses is not None and not isinstance(raw_responses, list):
+      json.dump({"status": "ERROR", "reason_codes": ["INVALID_INPUT_JSON"]}, sys.stdout)
+      sys.stdout.write("\n")
+      return 1
+    responses = list(raw_responses or [])
     def reviewer(_request):
       if not responses:
         return {"status": "error", "reason": "missing-fixed-response"}

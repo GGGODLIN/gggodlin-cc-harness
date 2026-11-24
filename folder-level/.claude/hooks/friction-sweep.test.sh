@@ -70,7 +70,7 @@ mkdir -p "$FIX/h8/.claude/skills"
 OUT=$(run_hook c8 "$FIX/h8")
 assert "friction 目錄分支達門檻觸發" yes "$OUT"
 
-# case 9: 公司側已拍板待落地不重複計入門檻
+# case 9: 公司側已拍板待落地白天不印且不計入門檻；QUERY_ONLY=1 唯讀預檢仍印「已拍板待落地：1 項」且不計入門檻
 mkdir -p "$FIX/h9/.claude/friction"
 mkfl "$FIX/h9/.claude/skills/mech-a/friction-log.md" 2
 python3 - "$FIX/h9/.claude/skills/mech-a/friction-log.md" <<'PY'
@@ -82,8 +82,18 @@ s = s.replace('- 2026-08-06 假摩擦 1 假方向', '- 2026-08-06 [pending_imple
 p.write_text(s)
 PY
 OUT=$(FRICTION_THRESHOLD=2 run_hook c9 "$FIX/h9")
-printf '%s' "$OUT" | grep -q '摩擦待折' && { echo "FAIL: pending implementation 被算進門檻"; echo "$OUT"; FAIL=$((FAIL+1)); } || { echo "PASS: pending implementation 不計入門檻"; PASS=$((PASS+1)); }
-printf '%s' "$OUT" | grep -q '已拍板待落地：1 項' && { echo "PASS: pending implementation 有獨立追蹤提醒"; PASS=$((PASS+1)); } || { echo "FAIL: pending implementation 沒有追蹤提醒"; echo "$OUT"; FAIL=$((FAIL+1)); }
+printf '%s' "$OUT" | grep -q '摩擦待折' && { echo "FAIL: pending implementation 白天被算進門檻"; echo "$OUT"; FAIL=$((FAIL+1)); } || { echo "PASS: pending implementation 白天不計入門檻"; PASS=$((PASS+1)); }
+printf '%s' "$OUT" | grep -q '已拍板待落地' && { echo "FAIL: pending implementation 白天仍印已拍板待落地"; echo "$OUT"; FAIL=$((FAIL+1)); } || { echo "PASS: pending implementation 白天不印已拍板待落地"; PASS=$((PASS+1)); }
+OUT_Q=$(printf '{"session_id":"fricttest-c9q","cwd":"%s/Desktop/projects"}' "$HOME" | FRICTION_SCAN_HOME="$FIX/h9" FRICTION_THRESHOLD=2 TRIAL_REVIEW_QUERY_ONLY=1 bash "$HOOK")
+printf '%s' "$OUT_Q" | grep -q '🧰' && { echo "FAIL: QUERY_ONLY=1 下 pending implementation 被算進摩擦待折門檻"; echo "$OUT_Q"; FAIL=$((FAIL+1)); } || { echo "PASS: QUERY_ONLY=1 下 pending implementation 不計入摩擦待折門檻"; PASS=$((PASS+1)); }
+PENDING_Q_LINE=$(printf '%s' "$OUT_Q" | jq -r '.systemMessage // empty' | grep '^🧾 已拍板待落地' || true)
+if printf '%s' "$PENDING_Q_LINE" | grep -q '已拍板待落地：1 項' \
+  && printf '%s' "$PENDING_Q_LINE" | grep -q '（公司側待開 PR 落地，於 /trial-review 結尾彙整）' \
+  && ! printf '%s' "$PENDING_Q_LINE" | grep -q '跑 /trial-review'; then
+  echo "PASS: QUERY_ONLY=1 唯讀預檢仍印已拍板待落地：1 項且不含工廠喚醒詞"; PASS=$((PASS+1))
+else
+  echo "FAIL: QUERY_ONLY=1 待落地行格式不符"; echo "$OUT_Q"; FAIL=$((FAIL+1))
+fi
 
 # case 5: 噪音目錄（skills 樹 depth>2）不誤掃
 mkdir -p "$FIX/h5/.claude/friction"
@@ -196,6 +206,57 @@ assert "beta 報過後 alpha 水位仍在（不重複通知）" no "$OUT"
 S7I=$(find "$H7I/.claude/logs/friction-sweep" -name '*.notified' 2>/dev/null | wc -l | tr -d ' ')
 [ "$S7I" = "2" ] && { echo "PASS: 兩個來源檔各有獨立水位檔（實得 ${S7I}）"; PASS=$((PASS+1)); } || { echo "FAIL: 水位檔數應為 2、實得 ${S7I}，basename 撞名"; FAIL=$((FAIL+1)); }
 
+# === case 7j: 唯讀預檢數全部待折項目，不看提醒水位（2026-11-10）===
+# 水位只負責「白天的提醒行不重複」。晨間工廠與 /trial-review 盤點走 TRIAL_REVIEW_QUERY_ONLY=1，
+# 問的是「現在有沒有工作」：若它也套水位，白天任一 session 顯示過提醒，夜裡就判 0 候選。
+# 2026-11-07～11-10 的實例：doc-drift 白天提醒 10 次、待折累積到 51 條，工廠四晚都判摩擦 0 檔。
+run_hook_q() { # $1=session_id $2=scan_home
+  printf '{"session_id":"fricttest-%s","cwd":"%s/Desktop/projects"}' "$1" "$HOME" \
+    | FRICTION_SCAN_HOME="$2" TRIAL_REVIEW_QUERY_ONLY=1 bash "$HOOK"
+}
+H7J="$FIX/h7j"
+G7J="$H7J/.claude/friction/doc-drift.md"
+S7J="$H7J/.claude/logs/friction-sweep/.claude_friction_doc-drift.md.notified"
+mkdir -p "$H7J/.claude/skills"
+
+# 生命週期（bootstrap）：還沒有任何水位狀態時，唯讀預檢照報且不建立狀態目錄
+mkfl_items "$G7J" "J1 假方向" "J2 假方向" "J3 假方向"
+OUT=$(run_hook_q c7j_a "$H7J")
+assert "無水位狀態時唯讀預檢照報" yes "$OUT"
+[ ! -e "$H7J/.claude/logs/friction-sweep" ] && { echo "PASS: 唯讀預檢沒有建立水位目錄"; PASS=$((PASS+1)); } || { echo "FAIL: 唯讀預檢建立了水位目錄"; FAIL=$((FAIL+1)); }
+
+# 白天提醒一次 → 三項全部記為已提醒
+OUT=$(run_hook c7j_b "$H7J")
+assert "白天首次提醒會報" yes "$OUT"
+
+# known-bad（修前的錯誤行為）：三項都提醒過，唯讀預檢仍須報，否則夜裡工廠看不到這份工作
+OUT=$(run_hook_q c7j_c "$H7J")
+assert "全部已提醒時唯讀預檢仍報" yes "$OUT"
+printf '%s' "$OUT" | grep -q 'doc-drift.md(3)' && { echo "PASS: 唯讀預檢報的是待折總數"; PASS=$((PASS+1)); } || { echo "FAIL: 唯讀預檢的計數不是待折總數"; echo "$OUT"; FAIL=$((FAIL+1)); }
+
+# known-good：白天提醒的去重保持不變
+OUT=$(run_hook c7j_d "$H7J")
+assert "全部已提醒時白天提醒不重複" no "$OUT"
+
+# 唯讀預檢不得推進水位：加第四項後跑唯讀預檢，水位仍只有原本三筆
+mkfl_items "$G7J" "J1 假方向" "J2 假方向" "J3 假方向" "J4 假方向"
+OUT=$(run_hook_q c7j_e "$H7J")
+assert "加項後唯讀預檢照報" yes "$OUT"
+[ "$(wc -l < "$S7J" | tr -d ' ')" = "3" ] && { echo "PASS: 唯讀預檢沒有推進水位"; PASS=$((PASS+1)); } || { echo "FAIL: 唯讀預檢改寫了水位（實得 $(wc -l < "$S7J" | tr -d ' ') 筆）"; FAIL=$((FAIL+1)); }
+
+# 邊界：待折總數 N-1 時唯讀預檢不報（門檻套在總數上，不是只要有項目就報）
+mkfl_items "$G7J" "J1 假方向" "J2 假方向"
+OUT=$(run_hook_q c7j_f "$H7J")
+assert "待折總數低於門檻時唯讀預檢不報" no "$OUT"
+
+# 公司側已拍板待落地不計入唯讀預檢的門檻（與 case 9 同一口徑）
+{ echo "# fixture"; echo; echo "## 待折"; echo
+  echo "- 2026-08-06 K1 假方向"; echo "- 2026-08-06 K2 假方向"
+  echo "- 2026-08-06 [pending_implementation proposal_source=user@x; user_decision=approved@y; implementation=N-A（等待公司側落地）] K3"
+  echo; echo "## 已折／已否決"; } > "$G7J"
+OUT=$(run_hook_q c7j_g "$H7J")
+printf '%s' "$OUT" | grep -q '🧰' && { echo "FAIL: 待落地項被計入唯讀預檢門檻"; echo "$OUT"; FAIL=$((FAIL+1)); } || { echo "PASS: 待落地項不計入唯讀預檢門檻"; PASS=$((PASS+1)); }
+
 # === case 8: 個人側具名檔進掃描範圍（2026-09-12）===
 # pr-review/friction.md 被 gitignore 單獨排除、不能搬進 skills/ 樹，改由 PRIVATE_FRICTION_FILES 具名掃描。
 # 「待折 0 所以不報」與「根本沒被掃到」在輸出上同形，所以這裡用「有內容就必須報」反向驗證。
@@ -209,6 +270,52 @@ rm -f "$FIX/h8/.claude/pr-review/friction.md"
 mkfl "$FIX/h8/.claude/skills/other/friction-log.md" 3
 OUT=$(run_hook c8b "$FIX/h8")
 assert "具名檔不存在時其餘掃描照常" yes "$OUT"
+
+# === case 8c: 公司側未審條目與 harness-friction.md 不計入全域個人待折門檻 ===
+H8C="$FIX/h8c"
+mkdir -p "$H8C/.claude/friction" "$H8C/Desktop/work/acme/docs/owner"
+cat > "$H8C/.claude/friction/doc-drift.md" <<'EOF'
+# doc-drift
+
+## 待折
+- 2026-11-21 [source_ref=session:s1#1; target=rule:~/Desktop/work/acme/acme-dashboard-v2/docs/a.md] 公司未審 1
+- 2026-11-21 [source_ref=session:s1#2; target=rule:~/Desktop/work/acme/acme-saas-v2-service/docs/b.md] 公司未審 2
+- 2026-11-21 [source_ref=session:s1#3; target=rule:~/Desktop/work/acme/acme-iot-data-pipeline/docs/c.md] 公司未審 3
+- 2026-11-21 [source_ref=session:s1#4; target=rule:~/.claude/commands/advisor.md] 個人未審 1
+- 2026-11-21 [source_ref=session:s1#5; target=rule:~/Desktop/projects/foo/README.md] 個人未審 2
+
+## 已折／已否決
+EOF
+cat > "$H8C/Desktop/work/acme/docs/owner/harness-friction.md" <<'EOF'
+# harness-friction
+
+## 待折
+- 2026-11-21 公司側 1
+- 2026-11-21 公司側 2
+- 2026-11-21 公司側 3
+
+## 已折／已否決
+EOF
+OUT=$(run_hook c8c_a "$H8C")
+assert "公司未審 3 項＋個人 2 項＋harness-friction 3 項不觸發白天全域門檻" no "$OUT"
+OUT=$(run_hook_q c8c_b "$H8C")
+assert "公司未審 3 項＋個人 2 項＋harness-friction 3 項不觸發唯讀預檢全域門檻" no "$OUT"
+cat > "$H8C/.claude/friction/doc-drift.md" <<'EOF'
+# doc-drift
+
+## 待折
+- 2026-11-21 [source_ref=session:s1#1; target=rule:~/Desktop/work/acme/acme-dashboard-v2/docs/a.md] 公司未審 1
+- 2026-11-21 [source_ref=session:s1#2; target=rule:~/Desktop/work/acme/acme-saas-v2-service/docs/b.md] 公司未審 2
+- 2026-11-21 [source_ref=session:s1#3; target=rule:~/Desktop/work/acme/acme-iot-data-pipeline/docs/c.md] 公司未審 3
+- 2026-11-21 [source_ref=session:s1#4; target=rule:~/.claude/commands/advisor.md] 個人未審 1
+- 2026-11-21 [source_ref=session:s1#5; target=rule:~/Desktop/projects/foo/README.md] 個人未審 2
+- 2026-11-21 [source_ref=session:s1#6; target=rule:~/Desktop/projects/bar/README.md] 個人未審 3
+
+## 已折／已否決
+EOF
+OUT=$(run_hook_q c8c_c "$H8C")
+assert "個人達 3 項時唯讀預檢照報" yes "$OUT"
+printf '%s' "$OUT" | grep -q 'doc-drift.md(3)' && { echo "PASS: 唯讀預檢只數個人 3 項、排除公司 3 項"; PASS=$((PASS+1)); } || { echo "FAIL: 唯讀預檢計數未排除公司未審項"; echo "$OUT"; FAIL=$((FAIL+1)); }
 
 python3 - "$HOOK" <<'PY'
 import json

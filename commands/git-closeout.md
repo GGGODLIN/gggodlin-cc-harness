@@ -12,10 +12,10 @@ disable-model-invocation: true
 
 ## Native pre-push inclusion 邊界
 
-- 使用者的 feature session 仍自行執行 `/git-closeout`；native `pre-push` 只負責 push 前確認送往 `main` 的 ref 通過 inclusion 檢查。
-- push 成功後仍要重新執行 `/git-closeout`，取得 fresh Git reconciliation；native gate 不取代 push 後盤點。
+- feature session 自行執行 `/self-closeout`；native `pre-push` 只負責 push 前確認送往 `main` 的 ref 通過 inclusion 檢查。
+- push 成功後，feature session 用 `/self-closeout` 第 4 步核對發布範圍；全機 fresh Git reconciliation 由使用者手打 `/git-closeout`，native gate 不取代 push 後盤點。
 - `git push --no-verify`、被刪除或修改的 hook，以及 remote API 旁路不在 native gate 的保證範圍；force push 仍須既有 human confirm。
-- client hook 不提供 remote force race 或 final-read race 的原子保證；force push 仍須既有 human confirm，push 後一定要用 `/git-closeout` 做 fresh reconciliation。
+- client hook 不提供 remote force race 或 final-read race 的原子保證；force push 仍須既有 human confirm，push 後的全機 fresh reconciliation 由使用者手打 `/git-closeout`。
 - 安裝後另設 worktree-specific core.hooksPath 會繞過，/git-closeout 要查；命令列 -c core.hooksPath 也會繞過。
 
 ## 流程
@@ -36,6 +36,7 @@ disable-model-invocation: true
 
 2. **取得 fresh ground truth**
    - 確認 trunk 與 remote；有 `origin` 且後續要和 remote trunk 比較時，先執行 `git fetch origin`。
+   - personal scope 的 repo 如果在政策檔（`~/.claude/policies/personal-main-closeout/ignore.jsonl`）有一筆 identity 對上、帶 `"trunk": "<branch>"` 而沒有 `ref` 欄的紀錄，trunk 就是那條 branch，不看 `origin/HEAD`。主工作目錄停在它上面不算「不在主幹」。原本的預設主幹（這種 repo 多半是發版線）與已併進它的 branch 不列為待處理；預設主幹本機領先遠端時照常列出。
    - fetch 失敗就標記 remote 未驗證，不得拿 stale `origin/main` 或 `origin/master` 宣稱內容已整合或已被取代。
    - 用 `cwd=<repo>`、`source=startup` 的 JSON stdin 執行 `python3 ~/.claude/hooks/personal-main-closeout.py`，保存原始 baseline；它只負責揭露候選，不替本 command 做產品判斷。
 
@@ -50,6 +51,7 @@ disable-model-invocation: true
    - 呼叫 `ListAgents` 一次，只讀 busy／idle 旗標；**不對任何 peer session 發 SendMessage**，不等它們回覆。喚醒閒置 session 要重送整段 context、cache 已過期，而它能回答的只有「不是我」。ListAgents 的短 id 與 session id 無已驗證的對應（2026-09-20 實測 `c466b8a3…` 對到 `[77abd4]`），對不上就標「未知」，不得當成「session 已退出」。
    - ListAgents 的 busy 旗標與檔案 mtime 都只是線索，寫進報告供使用者判斷；不能單獨把整個 repo 判成不可收，也不能單獨證明可以刪除或接管。`ACTIVE` 只給有明確保留條件的項目：使用者本輪或 ignore.jsonl 指定保留、檔案在等另一個 session 的 audited commit、同一個檔同時有 staged 與不同的工作樹內容（`closeout-provenance.py` 的 `staged_differs`）。其餘 dirty 走 `SNAPSHOT`。
    - 讀 `~/.claude/policies/personal-main-closeout/ignore.jsonl`，把每筆已登記的 ref 當成使用者既有的 `PRESERVE` 處置帶進 inventory。它記的是「刻意保留、不要再吵」的決定，分類前沒讀它，刻意留的快照與等 upstream 的 branch 會被算成已合併可刪。
+   - 政策檔另有兩種沒有 `ref` 欄的**規則紀錄**。它們是使用者核准過的宣告式規則，不是逐筆保留登記：`"trunk": "<branch>"` 宣告該 repo 的主幹（見第 2 步）；`"pushed_equal": true` 表示該 repo 裡「已推上遠端、本機與遠端指向同一個 commit」的非主幹 branch 不列為待處理。符合 `pushed_equal` 的 branch 在 inventory 標「不列入待處理（pushed_equal）」：不分類成 `AMBIGUOUS`、不當成 `PRESERVE`、不問使用者、不為它提案追加登記。它本機比遠端多了 commit、沒有對應的遠端 branch，或該 repo 沒有這筆規則時，規則不適用，照常分類。不要提案移除、改寫這兩種紀錄，也不要請使用者再確認一次：它們存在的目的是取代「branch 每前進一次就重新登記一次」，再問一次就把省下的那一步加回來了。收尾檢查腳本讀的是同一份規則，所以它的輸出本來就不會列出這些 branch。
    - 用表格列出每個來源：worktree／branch／stash、路徑、dirty／ignored 數、unique commits、lock、owner 狀態與下一步證據。領先幾個 commit 不能單獨證明內容有效、已整合或已退役。
 
    **完成判準**：`git worktree list` 的每個 worktree、每個未合併 branch、每個 stash、ignored path 與 trunk ahead 狀態都恰好出現一次，沒有 silent skip；ignore.jsonl 每筆 ref 都已比對過本次 inventory。
@@ -94,9 +96,25 @@ disable-model-invocation: true
    - hook 沉默仍不夠：main 乾淨但 side worktree dirty、ignore policy 隱藏項目或 active worktree 仍可能存在；repo-wide inventory 也必須沒有未解列。
    - code 未再變更時不重跑相同測試；Git cleanup 後改用重新枚舉 refs／worktrees 的角度驗證。
 
-   **完成判準**：personal scope 的 hook 沒有 `systemMessage`，沒有保留條件的 worktree status 都乾淨，stash／unpushed trunk／部分掃描皆為 0，ignored path 不計入；未合併 branch 只能是有明確理由與 policy 的 `PRESERVE`，其餘 unresolved 為 0，且未靠未核准 ignore 條目消音。有保留條件的項目逐一列出並寫出條件；verdict 仍可 READY，但報告寫「本輪收尾完成，仍有進行中修改」，不寫「全機乾淨」。有人持續寫入時不承諾全機零 dirty；使用者要某一刻真正清空，得讓相關 writer 在收尾期間停筆，mtime 門檻替代不了這件事。
+   **完成判準**：personal scope 的 hook 沒有 `systemMessage`，沒有保留條件的 worktree status 都乾淨，stash／unpushed trunk／部分掃描皆為 0，ignored path 不計入；未合併 branch 只能是有明確理由與 policy 的 `PRESERVE`，或符合 `pushed_equal` 規則紀錄的 branch，其餘 unresolved 為 0，且未靠未核准 ignore 條目消音。有保留條件的項目逐一列出並寫出條件；verdict 仍可 READY，但報告寫「本輪收尾完成，仍有進行中修改」，不寫「全機乾淨」。有人持續寫入時不承諾全機零 dirty；使用者要某一刻真正清空，得讓相關 writer 在收尾期間停筆，mtime 門檻替代不了這件事。
 
    **work scope 的完成判準不同**：等 PR 的 feature branch 本來就會讓 hook 一直有 `systemMessage`，所以不拿 hook 靜默當 READY 條件。改為三項全中才算完成：inventory 每列都有分類；每個「一律先問」的項目都已列給使用者且沒有擅自執行；沒有任何項目未分類就跳過。剩下等使用者決定的項目列進 `待處理`，verdict 用 `BLOCKED`。
+
+   Git 判定完成後接第 7 步，再依「回傳格式」回報。
+
+7. **附上開發快取提醒**
+   - 每次收尾回報前，只執行 `df -h /System/Volumes/Data` 讀取當下 `Avail`，在既有回傳格式最後加上提醒；不設空間門檻、不量快取大小、不掃家目錄。若 df 失敗，空間欄寫「讀取失敗」，仍附提醒。
+   - 提醒不影響 READY／BLOCKED 判定，也不擋新工作；使用者沒回或說不用就結束，不追問。只有使用者回「要清」時，才接下方「開發快取清理」。
+
+### 開發快取清理（使用者回「要清」後）
+
+1. **限時盤點候選**：只查已知位置與本輪已盤點的專案，不整批掃家目錄。每個 `du -sh <path>` 都加 30 秒 timeout（可用 Python `subprocess.run(..., timeout=30)`）；逾時標「大小未知（逾時）」並跳過，不無限等待、不把未知當 0。
+   - uv：用 `uv cache dir` 取得實際路徑；清掉後需重新下載套件、重建 wheel。
+   - 專案 build 產物：已知專案的 `target/`、`build/`、`dist/`；先核對專案設定，列出重編譯／重新打包代價。
+   - Docker：用 `docker system df -v` 盤點可回收資源，指令同樣限時 30 秒；列出 context、資源 ID、大小與重拉 image／重建 build cache 的代價，不把 Docker 資料目錄當一般快取刪除，不清 volumes。
+   - 永遠排除 Go module cache（`~/go/pkg/mod`，commit gate 依賴離線 Go 依賴）、cc-session-index 與 semble 的索引、任何 Git 追蹤或未提交的內容。對 repo 內候選用第 5 步的 status／ignored 枚舉確認只含可重建且 ignored 的產物；有混合內容、仍在使用或無法確認用途就排除，不因使用者想清空間而放寬。
+2. **一次列出、一次同意**：一次列出要刪的完整絕對路徑、實測大小（或逾時）、重建代價與擬執行操作；Docker 另列精確資源 ID，不能以概括 prune 代替刪除清單。沿用第 5 步「破壞性操作一次列出、取得一次明確同意後才執行」；「要清」只授權盤點，不是刪除同意。未獲同意就保留原狀，也不改 Git verdict。
+3. **依核准清單清理並讀回**：刪除前沿用第 5 步重核候選狀態，範圍改變就停止並重新取得同意；只處理核准項，回報成功／失敗／跳過項，最後重讀 `df -h /System/Volumes/Data`，不保證立即釋出與 du 相同的空間。
 
 ## 回傳格式
 
@@ -146,6 +164,12 @@ repo：<canonical path>
 已確認：<可證明的事實>
 待處理：<逐項列出>
 下一個唯一動作：<一次性授權、單一決策或修復 remote>
+```
+
+上述每種回報（含 READY、BLOCKED、不適用）都在既有格式之後接第 7 步，只附一次末行：
+
+```text
+資料碟可用空間：<Avail>。要不要順便清開發快取？
 ```
 
 ## 踩過的坑

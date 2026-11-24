@@ -483,6 +483,45 @@ class IgnoreListTest(HookCase):
     self.assertIn("stash keep", message)
     self.assertNotIn("feat/alpha", message)
 
+  def test_unparsable_policy_line_is_named_while_valid_entries_apply(self):
+    repo = self.branch_repo("https://github.com/me/alpha.git", "feat/alpha", "feat/beta")
+    self.write_ignore(
+      self.entry("github.com/me/alpha", "refs/heads/feat/alpha"),
+      "{not json",
+    )
+    message = self.message_of(self.run_hook(repo))
+    self.assertIn("feat/beta", message)
+    self.assertNotIn("feat/alpha", message)
+    self.assertIn("ignore.jsonl 有 1 行讀不懂（第 2 行）", message)
+
+  def test_unparsable_policy_line_is_reported_even_when_the_repo_is_otherwise_quiet(self):
+    repo = self.branch_repo("https://github.com/me/alpha.git", "feat/alpha")
+    self.write_ignore(
+      "{not json",
+      self.entry("github.com/me/alpha", "refs/heads/feat/alpha"),
+    )
+    message = self.message_of(self.run_hook(repo))
+    self.assertNotIn("feat/alpha", message)
+    self.assertIn("ignore.jsonl 有 1 行讀不懂（第 1 行）", message)
+
+  def test_well_formed_policy_file_adds_no_policy_note(self):
+    repo = self.branch_repo("https://github.com/me/alpha.git", "feat/alpha", "feat/beta")
+    self.write_ignore(self.entry("github.com/me/alpha", "refs/heads/feat/alpha"))
+    message = self.message_of(self.run_hook(repo))
+    self.assertIn("feat/beta", message)
+    self.assertNotIn("讀不懂", message)
+
+  def test_unknown_record_kind_is_skipped_without_a_policy_note(self):
+    repo = self.branch_repo("https://github.com/me/alpha.git", "feat/alpha", "feat/beta")
+    self.write_ignore(
+      json.dumps({"identity": "github.com/me/alpha", "kind": "future-record", "value": "x"}),
+      self.entry("github.com/me/alpha", "refs/heads/feat/alpha"),
+    )
+    message = self.message_of(self.run_hook(repo))
+    self.assertIn("feat/beta", message)
+    self.assertNotIn("feat/alpha", message)
+    self.assertNotIn("讀不懂", message)
+
 
 class ParentDirectoryTest(HookCase):
   def setUp(self):
@@ -803,6 +842,41 @@ class WorkScopeTest(HookCase):
     git(parent, "checkout", "main")
     message = self.message_of(self.run_hook(parent))
     self.assertIn("docs/private", message)
+    self.assertNotIn(WORK_NOTE, message)
+
+  def test_acme_root_is_personal_while_nested_child_remains_work(self):
+    parent = self.make_acme_parent()
+    git(parent, "checkout", "-b", "docs/private")
+    write_commit(parent, "notes.md", "private notes")
+    git(parent, "checkout", "main")
+    child = self.make_acme_repo("acme-dashboard-v2")
+    git(child, "checkout", "-b", "feat/stray")
+    write_commit(child, "stray.txt", "stray work")
+    git(child, "checkout", "stage")
+    message = self.message_of(self.run_hook(parent))
+    lines = message.splitlines()
+    self.assertIn(f"repo：{parent.resolve()}", lines)
+    self.assertNotIn(f"repo：{parent.resolve()}{WORK_NOTE}", lines)
+    self.assertIn(f"repo：{child.resolve()}{WORK_NOTE}", lines)
+
+    subdir = parent / "governance-subdir"
+    subdir.mkdir()
+    sub_message = self.message_of(self.run_hook(subdir))
+    self.assertIn("docs/private", sub_message)
+    self.assertNotIn(WORK_NOTE, sub_message)
+
+  def test_acme_root_respects_personal_pinned_checkout(self):
+    parent = self.make_acme_parent()
+    git(parent, "checkout", "-b", "docs/pinned")
+    write_commit(parent, "notes.md", "pinned governance notes")
+    tip = git(parent, "rev-parse", "HEAD").stdout.strip()
+    policy = self.home / ".claude" / "policies" / "personal-main-closeout" / "ignore.jsonl"
+    policy.parent.mkdir(parents=True, exist_ok=True)
+    policy.write_text(
+      json.dumps({"identity": "acme", "ref": "refs/heads/docs/pinned", "tip": tip}) + "\n",
+      encoding="utf-8",
+    )
+    self.assert_silent(self.run_hook(parent))
 
   def test_projects_parent_is_unaffected(self):
     repo = self.make_repo("Desktop/projects/alpha")
@@ -828,6 +902,151 @@ class WorkScopeTest(HookCase):
       git(repo, "for-each-ref", "--format=%(refname)", "refs/heads").stdout,
       before_branches,
     )
+
+
+class DeclaredTrunkTest(HookCase):
+  def setUp(self):
+    super().setUp()
+    self.repo = self.make_repo("Desktop/projects/sample-app")
+    # origin 是本機的 bare repo；identity 就是它的路徑去掉 .git。
+    self.identity = str(self.home / "origins" / "sample-app")
+    git(self.repo, "checkout", "-b", "dev")
+    write_commit(self.repo, "dev.txt", "dev work")
+    git(self.repo, "push", "-u", "origin", "dev")
+
+  def write_policy(self, *records):
+    path = self.home / ".claude" / "policies" / "personal-main-closeout" / "ignore.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+      "".join(f"{json.dumps(record, ensure_ascii=False)}\n" for record in records),
+      encoding="utf-8",
+    )
+    return path
+
+  def trunk_record(self, identity=None):
+    return {
+      "identity": identity or self.identity,
+      "trunk": "dev",
+      "reason": "所有改動進 dev",
+      "date": "2026-11-14",
+    }
+
+  def pushed_equal_record(self, identity=None):
+    return {
+      "identity": identity or self.identity,
+      "pushed_equal": True,
+      "reason": "已推上遠端的 branch 不逐筆登記",
+      "date": "2026-11-14",
+    }
+
+  def pushed_branch(self, name):
+    git(self.repo, "checkout", "-b", name, "dev")
+    write_commit(self.repo, f"{name.replace('/', '-')}.txt", "work")
+    git(self.repo, "push", "-u", "origin", name)
+    git(self.repo, "checkout", "dev")
+
+  def commit_on(self, branch, name):
+    git(self.repo, "checkout", branch)
+    write_commit(self.repo, name, "more work")
+    git(self.repo, "checkout", "dev")
+
+  def test_checkout_on_declared_trunk_is_not_reported_as_off_trunk(self):
+    self.assertIn("目前 checkout 在 dev、非主幹 main", self.message_of(self.run_hook(self.repo)))
+    self.write_policy(self.trunk_record())
+    self.assert_silent(self.run_hook(self.repo))
+
+  def test_unmerged_branches_are_judged_against_the_declared_trunk(self):
+    self.write_policy(self.trunk_record())
+    git(self.repo, "checkout", "-b", "feat/local", "dev")
+    write_commit(self.repo, "local.txt", "work")
+    git(self.repo, "checkout", "dev")
+    message = self.message_of(self.run_hook(self.repo))
+    self.assertIn("未合併進 dev 的本機 branch", message)
+    self.assertIn("feat/local", message)
+
+  def test_pushed_branch_equal_to_its_remote_is_not_listed(self):
+    self.pushed_branch("feat/done")
+    self.write_policy(self.trunk_record(), self.pushed_equal_record())
+    self.assert_silent(self.run_hook(self.repo))
+
+  def test_pushed_equal_rule_applies_only_where_it_is_enabled(self):
+    self.pushed_branch("feat/done")
+    self.write_policy(self.trunk_record())
+    self.assertIn("feat/done", self.message_of(self.run_hook(self.repo)))
+
+  def test_branch_ahead_of_its_remote_is_listed_again(self):
+    self.pushed_branch("feat/done")
+    self.commit_on("feat/done", "extra.txt")
+    self.write_policy(self.trunk_record(), self.pushed_equal_record())
+    self.assertIn("feat/done", self.message_of(self.run_hook(self.repo)))
+
+  def test_branch_that_moved_and_was_pushed_stays_unlisted(self):
+    self.pushed_branch("feat/done")
+    self.commit_on("feat/done", "extra.txt")
+    git(self.repo, "push", "origin", "feat/done")
+    self.write_policy(self.trunk_record(), self.pushed_equal_record())
+    self.assert_silent(self.run_hook(self.repo))
+
+  def test_branch_without_a_remote_counterpart_is_still_listed(self):
+    git(self.repo, "checkout", "-b", "feat/local", "dev")
+    write_commit(self.repo, "local.txt", "work")
+    git(self.repo, "checkout", "dev")
+    self.write_policy(self.trunk_record(), self.pushed_equal_record())
+    self.assertIn("feat/local", self.message_of(self.run_hook(self.repo)))
+
+  def test_check_does_not_write_the_policy_file(self):
+    self.pushed_branch("feat/done")
+    policy = self.write_policy(self.trunk_record(), self.pushed_equal_record())
+    before = (policy.read_bytes(), policy.stat().st_mtime_ns)
+    self.assert_silent(self.run_hook(self.repo))
+    self.assertEqual((policy.read_bytes(), policy.stat().st_mtime_ns), before)
+
+  def release_line(self):
+    """main 是發版線：有 dev 永遠不會有的 commit，本機 main 還落後遠端一顆。"""
+    git(self.repo, "checkout", "main")
+    write_commit(self.repo, "release-1.txt", "chore(release): 1")
+    git(self.repo, "branch", "worktree-leftover")
+    write_commit(self.repo, "release-2.txt", "chore(release): 2")
+    git(self.repo, "push", "origin", "main")
+    git(self.repo, "checkout", "dev")
+    git(self.repo, "branch", "-f", "main", "main~1")
+
+  def test_branches_merged_into_the_default_trunk_stay_unlisted_under_a_declared_trunk(self):
+    self.release_line()
+    self.write_policy(self.trunk_record())
+    self.assert_silent(self.run_hook(self.repo))
+
+  def test_default_trunk_ahead_of_its_remote_is_listed_under_a_declared_trunk(self):
+    self.release_line()
+    git(self.repo, "checkout", "main")
+    write_commit(self.repo, "unpushed-release.txt", "chore(release): local only")
+    git(self.repo, "checkout", "dev")
+    self.write_policy(self.trunk_record())
+    message = self.message_of(self.run_hook(self.repo))
+    self.assertIn("  - main", message)
+    self.assertNotIn("worktree-leftover", message)
+
+  def test_company_repo_ignores_trunk_and_pushed_equal_records(self):
+    work = self.make_repo("Desktop/work/acme/dashboard")
+    identity = str(self.home / "origins" / "dashboard")
+    git(work, "checkout", "-b", "feat/pushed", "main")
+    write_commit(work, "pushed.txt", "work")
+    git(work, "push", "-u", "origin", "feat/pushed")
+    self.write_policy(
+      {"identity": identity, "trunk": "feat/pushed", "reason": "x", "date": "2026-11-14"},
+      {"identity": identity, "pushed_equal": True, "reason": "x", "date": "2026-11-14"},
+    )
+    message = self.message_of(self.run_hook(work))
+    self.assertIn("未合併進 main 的本機 branch", message)
+    self.assertIn("feat/pushed", message)
+
+  def test_records_for_another_repository_change_nothing(self):
+    self.pushed_branch("feat/done")
+    other = str(self.home / "origins" / "someone-else")
+    self.write_policy(self.trunk_record(other), self.pushed_equal_record(other))
+    message = self.message_of(self.run_hook(self.repo))
+    self.assertIn("目前 checkout 在 dev、非主幹 main", message)
+    self.assertIn("feat/done", message)
 
 
 if __name__ == "__main__":

@@ -148,7 +148,7 @@ E 規範 trim MEMORY.md 後啟動的觀察：掃 session_prompt 線（使用者 
 - 對每個存活事件分類：
   - 對應得到既有規則（`~/.claude/CLAUDE.md`、`~/.claude/rules/*.md` 的具體條目）→ `rule_violation` + 規則名
   - 對應不到 → `new_rule_candidate`
-- **候選交接**：recap 只交候選，不寫 `~/code/social-info/reports/local-analysis/rule-adherence-ledger.jsonl`。報告內每候選列一行待核 JSON：`{"date":"<今日>","kind":"rule_violation|new_rule_candidate","rule":"<規則名或空字串>","rule_family":"<家族>","quote":"<50 字內原文引用>","session":"<jsonl basename>"}`，並附上述證據對照，main 核對後才追加。可唯讀查 ledger 是否已有**同 quote＋同 session**；兩欄都命中才跳過，不同 session 的相同短引用不能當成重複。
+- **候選交接**：recap 只交候選，不寫 `~/code/social-info/reports/local-analysis/rule-adherence-ledger.jsonl`。報告內每候選列一行待核 JSON：`{"date":"<今日>","kind":"rule_violation|new_rule_candidate","rule":"<規則名或空字串>","rule_family":"<家族>","quote":"<50 字內原文引用>","session":"<jsonl basename>"}`，並附上述證據對照，main 核對後才追加。**禁止用 Read 全檔讀取兩份 .jsonl 帳本**（`rule-adherence-ledger.jsonl` 已逾 400KB，整檔讀入會耗盡十餘萬 context token）；僅在有存活候選時，用 `python3 -I` 腳本針對本輪候選的 `quote`＋`session` 唯讀比對是否已存在（兩欄都命中才跳過，不同 session 的相同短引用不能當成重複）。
 - **`rule_family` 必填（2026-07-25 加）**：`rule` 欄是自由書寫、同一條規則跨天會分裂成十幾個變體字串，單靠它統計抓不到集中度。從下列固定 enum 挑一個最貼近的填 `rule_family`：`evidence-level`（證據 / 驗證 / 行為數據 / 不憑推測）、`plain-language`（白話 / 反晶晶體 / 措辭 / 繁中）、`self-research-first`（查得到的事實自己查 / 先搜再說缺）、`ask-vs-decide`（停下問 vs 自決 / 討論模式 / 一次收斂 / 訪談）、`scope-discipline`（只改當次範圍 / 修改前先讀）、`process-completeness`（skill 流程不省略 / trial 紀律 / 固化）、`output-delivery`（答案進最終訊息 / 連結格式 / 呈現）、`tooling-routing`（抓取路由 / fetch 退路 / 工具選擇）。都不貼近才填 `unclassified`
 - **Rule health**：唯讀跑 `python3 ~/code/social-info/scripts/local-analysis/rule-family-health.py`（家族聚合層，優先讀 `rule_family`、缺欄走關鍵字 fallback，舊 entry 無需 migration），標明「入帳前計數，不含本輪待核候選」；main 查證追加後再更新 digest 的計數。取其輸出：
   - 家族 30 天 ≥5 次 → 報告標「⚠ 規則家族 X 30 天內 N 次（占 P%）→ 該家族措辭或 enforce 方式可能該改」
@@ -165,7 +165,7 @@ repo_commit 線掃描時順帶檢查結局回饋：24h 內 commit subject 以 `r
 
 嚴格 read-only：不寫任何檔案、不 commit、不修改 memory；不得 append、覆寫或刪除兩份 ledger。上述待核 JSON 只輸出在報告內，不是寫入命令或授權。
 
-stdout 只輸出 markdown 報告本身，不要 preamble（「整理完...」「以下是...」）、不要結語、不要 code fence wrap。第一個 byte 直接是 `# Daily Recap` 或數字總覽行。
+stdout 只輸出 markdown 報告本身，不要 preamble（「整理完...」「以下是...」）、不要結語、不要 code fence wrap、不要用 `<details>`／`<summary>` HTML 標籤摺疊清單。第一個 byte 直接是 `# Daily Recap` 或數字總覽行。
 EOF
 )
 PROMPT+=$'\n\n'
@@ -195,9 +195,15 @@ def text_of(event):
             parts.append(block["text"])
     return "\n\n".join(parts)
 
+DETAILS_RE = re.compile(r"<details\b[^>]*>.*?</details>", re.I | re.S)
+
+def has_compaction_summary(text):
+    stripped = DETAILS_RE.sub("", text)
+    return "<summary>" in stripped or "</summary>" in stripped
+
 def acceptable(text):
-    # summary 是 compaction 的容器，不是報告。
-    if "<summary>" in text or "</summary>" in text:
+    # summary 是 compaction 的容器，不是報告（放行合法的 <details><summary>...</details>）。
+    if has_compaction_summary(text):
         return False
     body = text.strip()
     if not re.search(r"(?m)^## \d{4}-\d{2}-\d{2}\b", body):
@@ -206,7 +212,7 @@ def acceptable(text):
     overview = bool(re.fullmatch(
         r"\d+ (?:個 *)?(?:窗內 *)?(?:CC *)?sessions?(?: *檔)?(?:（[^（）]*）)? *[/／] *"
         r"\d+ (?:個 *)?commits?(?:（[^（）]*）)? *[/／] *"
-        r"\d+ (?:個 *)?(?:(?:新或更新的?|新) *)?memory(?: *entr(?:y|ies)| *檔)?(?:（[^（）]*）)? *[/／] *跨 \d+ 個 repos?(?:（[^（）]*）)?", first))
+        r"\d+ (?:個 *)?(?:(?:新(?:增)?(?:或|[/／])更新的?|新(?:增)?|更新的?) *)?memory(?: *entr(?:y|ies)| *檔)?(?:（[^（）]*）)? *[/／] *跨 \d+ 個 *(?:[\w一-鿿-]+ *)?repos?(?:（[^（）]*）)?", first))
     match = re.search(r"(?m)^# ", text)
     # prompt 允許總覽先於標題，但不能因此略過任意前言。
     if match and text[:match.start()].strip():
@@ -240,7 +246,7 @@ if result.get("subtype") != "success" or result.get("is_error") is not False:
 # 普通結語可以略過；中斷摘要必須先拒收，不能再回頭拿較早正文出版。
 chosen = None
 for block in reversed(blocks):
-    if "<summary>" in block or "</summary>" in block:
+    if has_compaction_summary(block):
         print(block, file=sys.stderr)
         fail("interrupted recap")
     if acceptable(block):
@@ -255,7 +261,8 @@ sys.stdout.write(chosen if chosen.endswith("\n") else chosen + "\n")
 }
 
 run_recap() {
-  local luna_model=''
+  local primary_model="${RECAP_PRIMARY_MODEL:-group/gemini-flash:high}"
+  local sol_model=''
   if [[ -z "$PARENT_CC_VENDOR" && -z "$PARENT_ANTHROPIC_BASE_URL" ]]; then
     (
       unset ANTHROPIC_MODEL ANTHROPIC_DEFAULT_FABLE_MODEL ANTHROPIC_DEFAULT_OPUS_MODEL
@@ -279,55 +286,76 @@ run_recap() {
   if [[ -f "$GPT_MODELS_FILE" ]]; then
     local key value
     while IFS='=' read -r key value; do
-      [[ "$key" == GPT_LUNA ]] && luna_model="${value%$'\r'}(max)"
+      [[ "$key" == GPT_SOL ]] && sol_model="${value%$'\r'}(high)[1m]"
     done < "$GPT_MODELS_FILE"
   fi
-  if [[ -z "$luna_model" ]]; then
-    printf 'recap route: GPT_LUNA missing from %s\n' "$GPT_MODELS_FILE" >&2
+  if [[ -z "$sol_model" ]]; then
+    printf 'recap route: GPT_SOL missing from %s\n' "$GPT_MODELS_FILE" >&2
     return 1
   fi
-  (
-    local CLIPROXY_BASE_URL=''
-    local CLIPROXY_KEY_CC=''
-    local key value
-    while IFS='=' read -r key value; do
-      value="${value%$'\r'}"
-      case "$key" in
-        CLIPROXY_BASE_URL) CLIPROXY_BASE_URL="$value" ;;
-        CLIPROXY_KEY_CC) CLIPROXY_KEY_CC="$value" ;;
-      esac
-    done < "$KEYS_FILE"
-    if [[ -z "$CLIPROXY_BASE_URL" || -z "$CLIPROXY_KEY_CC" ]]; then
-      printf 'recap route: keys file must define CLIPROXY_BASE_URL and CLIPROXY_KEY_CC\n' >&2
-      exit 1
-    fi
-    case "$CLIPROXY_BASE_URL" in
-      http://127.0.0.1:8317|http://localhost:8317) ;;
-      *)
-        printf 'recap route: relay URL must be local port 8317\n' >&2
-        exit 1
-        ;;
+  local CLIPROXY_BASE_URL=''
+  local CLIPROXY_KEY_CC=''
+  local key value
+  while IFS='=' read -r key value; do
+    value="${value%$'\r'}"
+    case "$key" in
+      CLIPROXY_BASE_URL) CLIPROXY_BASE_URL="$value" ;;
+      CLIPROXY_KEY_CC) CLIPROXY_KEY_CC="$value" ;;
     esac
-    unset ANTHROPIC_API_KEY ANTHROPIC_FALLBACK_MODEL CLAUDE_CODE_FALLBACK_MODEL
-    export CC_VENDOR=headless-channel
-    export ANTHROPIC_BASE_URL="$CLIPROXY_BASE_URL"
-    export ANTHROPIC_AUTH_TOKEN="$CLIPROXY_KEY_CC"
-    export ANTHROPIC_MODEL="$luna_model"
-    export ANTHROPIC_DEFAULT_FABLE_MODEL="$luna_model"
-    export ANTHROPIC_DEFAULT_OPUS_MODEL="$luna_model"
-    export ANTHROPIC_DEFAULT_SONNET_MODEL="$luna_model"
-    export ANTHROPIC_DEFAULT_HAIKU_MODEL="$luna_model"
-    export CLAUDE_CODE_SUBAGENT_MODEL="$luna_model"
-    export CLAUDE_CODE_MAX_CONTEXT_TOKENS="${CLAUDE_CODE_MAX_CONTEXT_TOKENS:-1000000}"
-    export CLAUDE_CODE_AUTO_COMPACT_WINDOW="${CLAUDE_CODE_AUTO_COMPACT_WINDOW:-900000}"
-    export API_TIMEOUT_MS="${API_TIMEOUT_MS:-3000000}"
-    export CLAUDE_STREAM_IDLE_TIMEOUT_MS="${CLAUDE_STREAM_IDLE_TIMEOUT_MS:-600000}"
-    export CLAUDE_BYTE_STREAM_IDLE_TIMEOUT_MS="${CLAUDE_BYTE_STREAM_IDLE_TIMEOUT_MS:-600000}"
-    command "$CLAUDE" --model "$luna_model" --output-format stream-json --verbose -p "$PROMPT" | extract_recap_text
-    local pipe_rc=("${PIPESTATUS[@]}")
-    [[ "${pipe_rc[0]}" -eq 0 ]] || exit "${pipe_rc[0]}"
-    exit "${pipe_rc[1]}"
-  )
+  done < "$KEYS_FILE"
+  if [[ -z "$CLIPROXY_BASE_URL" || -z "$CLIPROXY_KEY_CC" ]]; then
+    printf 'recap route: keys file must define CLIPROXY_BASE_URL and CLIPROXY_KEY_CC\n' >&2
+    return 1
+  fi
+  case "$CLIPROXY_BASE_URL" in
+    http://127.0.0.1:8317|http://localhost:8317) ;;
+    *)
+      printf 'recap route: relay URL must be local port 8317\n' >&2
+      return 1
+      ;;
+  esac
+
+  run_relay_once() {
+    local target_model="$1"
+    (
+      unset ANTHROPIC_API_KEY ANTHROPIC_FALLBACK_MODEL CLAUDE_CODE_FALLBACK_MODEL
+      export CC_VENDOR=headless-channel
+      export ANTHROPIC_BASE_URL="$CLIPROXY_BASE_URL"
+      export ANTHROPIC_AUTH_TOKEN="$CLIPROXY_KEY_CC"
+      export ANTHROPIC_MODEL="$target_model"
+      export ANTHROPIC_DEFAULT_FABLE_MODEL="$target_model"
+      export ANTHROPIC_DEFAULT_OPUS_MODEL="$target_model"
+      export ANTHROPIC_DEFAULT_SONNET_MODEL="$target_model"
+      export ANTHROPIC_DEFAULT_HAIKU_MODEL="$target_model"
+      export CLAUDE_CODE_SUBAGENT_MODEL="$target_model"
+      export CLAUDE_CODE_MAX_CONTEXT_TOKENS="${CLAUDE_CODE_MAX_CONTEXT_TOKENS:-1000000}"
+      export CLAUDE_CODE_AUTO_COMPACT_WINDOW="${CLAUDE_CODE_AUTO_COMPACT_WINDOW:-900000}"
+      export API_TIMEOUT_MS="${API_TIMEOUT_MS:-3000000}"
+      export CLAUDE_STREAM_IDLE_TIMEOUT_MS="${CLAUDE_STREAM_IDLE_TIMEOUT_MS:-600000}"
+      export CLAUDE_BYTE_STREAM_IDLE_TIMEOUT_MS="${CLAUDE_BYTE_STREAM_IDLE_TIMEOUT_MS:-600000}"
+      command "$CLAUDE" --model "$target_model" --output-format stream-json --verbose -p "$PROMPT" | extract_recap_text
+      local pipe_rc=("${PIPESTATUS[@]}")
+      [[ "${pipe_rc[0]}" -eq 0 ]] || exit "${pipe_rc[0]}"
+      exit "${pipe_rc[1]}"
+    )
+  }
+
+  local attempt_out="$INPUT_DIR/attempt.md"
+  local rc=0
+  run_relay_once "$primary_model" > "$attempt_out" || rc=$?
+  if [[ "$rc" -eq 0 ]]; then
+    cat "$attempt_out"
+    return 0
+  fi
+  printf 'recap route: primary model %s failed (exit %s), falling back to %s\n' "$primary_model" "$rc" "$sol_model" >&2
+  : > "$attempt_out"
+  rc=0
+  run_relay_once "$sol_model" > "$attempt_out" || rc=$?
+  if [[ "$rc" -eq 0 ]]; then
+    cat "$attempt_out"
+    return 0
+  fi
+  return "$rc"
 }
 
 {

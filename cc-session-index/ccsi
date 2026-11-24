@@ -1,12 +1,19 @@
 #!/usr/bin/env python3
 import argparse
+import errno
 import fcntl
 import json
+import marshal
+import math
 import os
 import re
 import sqlite3
+import stat
 import sys
+import tempfile
 import time
+from contextlib import closing, contextmanager
+from pathlib import Path
 
 def default_db_dir():
   if os.environ.get("CCSI_DB_DIR"):
@@ -18,15 +25,29 @@ def default_db_dir():
   return os.path.join(cache_home, "cc-session-index")
 
 
+def follow_root_link(path):
+  if not os.path.islink(path):
+    return path
+  target = os.readlink(path)
+  return os.path.normpath(target if os.path.isabs(target) else os.path.join(os.path.dirname(path), target))
+
+
 def build_roots():
   cc_cfg = os.path.expanduser(os.environ.get("CLAUDE_CONFIG_DIR") or "~/.claude")
   codex_home = os.path.expanduser(os.environ.get("CODEX_HOME") or "~/.codex")
   pi_dir = os.path.expanduser(os.environ.get("PI_CODING_AGENT_DIR") or "~/.pi/agent")
-  return (
-    ("cc", os.path.join(cc_cfg, "projects")),
-    ("codex", os.path.join(codex_home, "sessions")),
-    ("codex", os.path.join(codex_home, "archived_sessions")),
-    ("pi", os.path.join(pi_dir, "sessions")),
+  # Account config dirs link their projects/ to one shared directory; following that last link keeps
+  # one path per transcript, otherwise each CLAUDE_CONFIG_DIR adds a copy that prune never removes.
+  # Only the root's own link is followed: a full realpath would also rewrite /var to /private/var
+  # and stop matching paths stored by earlier versions.
+  return tuple(
+    (vendor, follow_root_link(path))
+    for vendor, path in (
+      ("cc", os.path.join(cc_cfg, "projects")),
+      ("codex", os.path.join(codex_home, "sessions")),
+      ("codex", os.path.join(codex_home, "archived_sessions")),
+      ("pi", os.path.join(pi_dir, "sessions")),
+    )
   )
 
 
@@ -34,29 +55,35 @@ ROOTS = build_roots()
 ROOT = ROOTS[0][1]
 VENDORS = ("cc", "codex", "pi")
 DB_DIR = default_db_dir()
-DB_PATH = os.path.join(DB_DIR, "index.sqlite")
-SCHEMA_VERSION = 2
+DB_PATH = Path(DB_DIR) / "index.sqlite"
+SCHEMA_VERSION = 3
+EXTRACTOR_VERSION = 1
 
 SCHEMA = """
-CREATE TABLE IF NOT EXISTS files (
-  path TEXT PRIMARY KEY,
+CREATE TABLE paths (
+  path_id INTEGER PRIMARY KEY,
+  path TEXT NOT NULL UNIQUE,
+  vendor TEXT NOT NULL
+);
+CREATE TABLE files (
+  path_id INTEGER PRIMARY KEY REFERENCES paths(path_id),
   mtime REAL NOT NULL,
   size INTEGER NOT NULL,
-  offset INTEGER NOT NULL DEFAULT 0,
-  ino INTEGER NOT NULL DEFAULT 0,
-  rows INTEGER NOT NULL DEFAULT 0
+  offset INTEGER NOT NULL,
+  ino INTEGER NOT NULL,
+  rows INTEGER NOT NULL
 );
-CREATE TABLE IF NOT EXISTS message_refs (
+CREATE TABLE message_refs (
   mid INTEGER PRIMARY KEY,
-  path TEXT NOT NULL
+  path_id INTEGER NOT NULL REFERENCES paths(path_id),
+  ordinal INTEGER NOT NULL,
+  ts TEXT NOT NULL,
+  role TEXT NOT NULL
 );
-CREATE INDEX IF NOT EXISTS message_refs_path_mid ON message_refs(path, mid);
-CREATE VIRTUAL TABLE IF NOT EXISTS messages USING fts5(
-  text,
-  path UNINDEXED,
-  ts UNINDEXED,
-  role UNINDEXED,
-  tokenize='trigram'
+CREATE INDEX message_refs_path_id ON message_refs(path_id);
+CREATE TABLE metadata (key TEXT PRIMARY KEY, value INTEGER NOT NULL);
+CREATE VIRTUAL TABLE messages USING fts5(
+  text, tokenize='trigram', content='', contentless_delete=1
 );
 """
 
@@ -75,38 +102,31 @@ def set_private_mode(path, mode):
     pass
 
 
-def connect(upgrade=False):
-  os.makedirs(DB_DIR, mode=0o700, exist_ok=True)
-  set_private_mode(DB_DIR, 0o700)
-  db = sqlite3.connect(DB_PATH)
-  set_private_mode(DB_PATH, 0o600)
+def schema_version(db):
+  return db.execute("PRAGMA user_version").fetchone()[0]
+
+
+def indexed_extractor_version(db):
+  row = db.execute("SELECT value FROM metadata WHERE key = 'extractor_version'").fetchone()
+  return row[0] if row else None
+
+
+def execute_fts_schema(db, schema):
   try:
-    ver = db.execute("PRAGMA user_version").fetchone()[0]
-    if ver != SCHEMA_VERSION:
-      has_files = db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='files'").fetchone()
-      if not has_files:
-        db.executescript(SCHEMA)
-        db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
-        db.commit()
-      elif upgrade:
-        cols = {r[1] for r in db.execute("PRAGMA table_info(files)")}
-        has_refs = db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='message_refs'").fetchone()
-        if not {"offset", "ino", "rows"}.issubset(cols) or not has_refs:
-          db.executescript("DROP TABLE IF EXISTS files; DROP TABLE IF EXISTS message_refs; DROP TABLE IF EXISTS messages; VACUUM;")
-        db.executescript(SCHEMA)
-        db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
-        db.commit()
-    else:
-      db.executescript(SCHEMA)
-  except sqlite3.OperationalError as e:
-    if "fts5" in str(e).lower() or "trigram" in str(e).lower():
-      print(
-        f"ccsi: SQLite 3.34.0+ with FTS5 trigram is required (running {sys.executable} with SQLite {sqlite3.sqlite_version}): {e}",
-        file=sys.stderr,
-      )
-      sys.exit(2)
-    raise
-  return db
+    db.executescript(schema)
+  except sqlite3.OperationalError as exc:
+    if not any(term in str(exc).lower() for term in ("fts5", "trigram", "contentless_delete")):
+      raise
+    print(f"ccsi: SQLite 3.43+ with FTS5 trigram is required (running {sys.executable} with SQLite {sqlite3.sqlite_version}): {exc}",
+          file=sys.stderr)
+    sys.exit(2)
+
+
+def initialize_index(db):
+  execute_fts_schema(db, SCHEMA)
+  db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+  db.execute("INSERT INTO metadata VALUES ('extractor_version', ?)", (EXTRACTOR_VERSION,))
+  db.commit()
 
 
 def vendor_of(path):
@@ -116,11 +136,11 @@ def vendor_of(path):
   return "cc", ROOT
 
 
-def iter_files(vendors):
+def iter_files(vendors, onerror=None):
   for vendor, root in ROOTS:
     if vendor not in vendors or not os.path.isdir(root):
       continue
-    for dirpath, dirs, names in os.walk(root):
+    for dirpath, dirs, names in os.walk(root, onerror=onerror):
       # Prune mirrored Codex rollouts under <cc_root>/codex so they are not indexed twice.
       if vendor == "cc" and dirpath == root and "codex" in dirs:
         dirs.remove("codex")
@@ -129,10 +149,134 @@ def iter_files(vendors):
           yield vendor, os.path.join(dirpath, n)
 
 
-def read_jsonl_records(path, start_offset=0):
+_USE_DIR_FD = (os.stat in os.supports_dir_fd) and hasattr(os, "O_DIRECTORY")
+
+
+def iter_files_stat(vendors, onerror=None, onstat_error=None):
+  _open = os.open
+  _close = os.close
+  _scandir = os.scandir
+  _stat = os.stat
+  _s_isdir = stat.S_ISDIR
+  _sep = os.sep
+  _o_dir = getattr(os, "O_DIRECTORY", 0) | os.O_RDONLY
+  for vendor, root in ROOTS:
+    if vendor not in vendors or not os.path.isdir(root):
+      continue
+    prune_codex = vendor == "cc"
+    stack = [root]
+    while stack:
+      dirpath = stack.pop()
+      prefix = dirpath if dirpath.endswith(_sep) else dirpath + _sep
+      is_root = prune_codex and dirpath == root
+      if _USE_DIR_FD:
+        try:
+          dfd = _open(dirpath, _o_dir)
+        except OSError as exc:
+          if onerror is not None:
+            onerror(exc)
+          continue
+        try:
+          try:
+            it = _scandir(dfd)
+          except OSError as exc:
+            exc.filename = dirpath
+            if onerror is not None:
+              onerror(exc)
+            continue
+          with it:
+            for entry in it:
+              name = entry.name
+              if name.endswith(".jsonl"):
+                try:
+                  is_d = entry.is_dir(follow_symlinks=False)
+                except OSError:
+                  is_d = False
+                if is_d:
+                  if not (is_root and name == "codex"):
+                    stack.append(prefix + name)
+                  continue
+                try:
+                  st = _stat(name, dir_fd=dfd)
+                except FileNotFoundError:
+                  continue
+                except OSError as exc:
+                  if onstat_error is not None:
+                    onstat_error(exc, prefix + name)
+                  continue
+                if _s_isdir(st.st_mode):
+                  continue
+                yield vendor, prefix + name, st
+              else:
+                try:
+                  is_d = entry.is_dir(follow_symlinks=False)
+                except OSError:
+                  continue
+                if is_d and not (is_root and name == "codex"):
+                  stack.append(prefix + name)
+        finally:
+          _close(dfd)
+      else:
+        try:
+          it = _scandir(dirpath)
+        except OSError as exc:
+          if onerror is not None:
+            onerror(exc)
+          continue
+        with it:
+          for entry in it:
+            name = entry.name
+            if name.endswith(".jsonl"):
+              try:
+                is_d = entry.is_dir(follow_symlinks=False)
+              except OSError:
+                is_d = False
+              if is_d:
+                if not (is_root and name == "codex"):
+                  stack.append(entry.path)
+                continue
+              try:
+                st = entry.stat(follow_symlinks=True)
+              except FileNotFoundError:
+                continue
+              except OSError as exc:
+                if onstat_error is not None:
+                  onstat_error(exc, entry.path)
+                continue
+              if _s_isdir(st.st_mode):
+                continue
+              yield vendor, entry.path, st
+            else:
+              try:
+                is_d = entry.is_dir(follow_symlinks=False)
+              except OSError:
+                continue
+              if is_d and not (is_root and name == "codex"):
+                stack.append(entry.path)
+
+
+def parse_json_object(text):
+  try:
+    obj = json.loads(text)
+  except (json.JSONDecodeError, RecursionError):
+    return None, False
+  return (obj if isinstance(obj, dict) else None), True
+
+
+def read_jsonl_records(path, start_offset=0, indexed_identity=None, append_validator=None, nonblock=False):
   records = []
-  with open(path, "rb") as f:
+  opener = (lambda name, flags: os.open(name, flags | os.O_NONBLOCK)) if (indexed_identity is not None or nonblock) else None
+  with open(path, "rb", opener=opener) as f:
     st = os.fstat(f.fileno())
+    if indexed_identity is not None:
+      indexed_size, indexed_inode = indexed_identity
+      if not stat.S_ISREG(st.st_mode) or st.st_ino != indexed_inode or st.st_size < indexed_size:
+        return st, 0, records
+    elif nonblock and not stat.S_ISREG(st.st_mode):
+      raise OSError(errno.EINVAL, "not a regular file", path)
+    if append_validator is not None and start_offset > 0:
+      if not append_validator(f.fileno(), st):
+        return st, None, None
     if start_offset > 0:
       f.seek(start_offset)
     consumed = start_offset
@@ -140,32 +284,26 @@ def read_jsonl_records(path, start_offset=0):
       line_start = f.tell()
       raw = f.readline(st.st_size - line_start)
       if not raw:
+        st = os.fstat(f.fileno())
         break
       line_end = f.tell()
       text = raw.decode("utf-8", errors="replace")
+      obj, valid = parse_json_object(text)
       if raw.endswith(b"\n"):
         consumed = line_end
-        try:
-          obj = json.loads(text)
-        except json.JSONDecodeError:
-          continue
-        if isinstance(obj, dict):
+        if valid and obj is not None:
           records.append(obj)
       else:
-        try:
-          obj = json.loads(text)
-        except json.JSONDecodeError:
-          # Incomplete trailing line from a live writer: hold cursor at line_start
-          # so the next incremental pass reads the completed JSON object.
+        if not valid:
           break
         consumed = line_end
-        if isinstance(obj, dict):
+        if obj is not None:
           records.append(obj)
   return st, consumed, records
 
 
 def load_lines(path):
-  _, _, records = read_jsonl_records(path, 0)
+  _, _, records = read_jsonl_records(path, 0, nonblock=True)
   yield from records
 
 
@@ -423,89 +561,712 @@ def extract_rows(path, vendor=None, records=None):
   return rows
 
 
-def delete_file_messages(db, path):
-  db.execute("DELETE FROM messages WHERE rowid IN (SELECT mid FROM message_refs WHERE path = ?)", (path,))
-  db.execute("DELETE FROM message_refs WHERE path = ?", (path,))
+# Keep the preceding extractor available when introducing a new version so searches
+# use the same ordinal mapping until the rebuilt database replaces the old one.
+EXTRACTORS = {1: extract_rows}
+
+
+def delete_file_messages(db, path_id):
+  db.execute("DELETE FROM messages WHERE rowid IN (SELECT mid FROM message_refs WHERE path_id = ?)", (path_id,))
+  db.execute("DELETE FROM message_refs WHERE path_id = ?", (path_id,))
+
+
+def prune_deleted_files(db, vendors, known, unseen):
+  roots = [root for vendor, root in ROOTS if vendor in vendors]
+  root_prefixes = [(root, root + os.sep) for root in roots]
+  for path in unseen:
+    matching_roots = [root for root, pfx in root_prefixes if path.startswith(pfx)]
+    if not matching_roots:
+      continue
+    try:
+      os.stat(path)
+    except FileNotFoundError:
+      if any(os.path.isdir(root) for root in matching_roots):
+        entry = known.get(path)
+        if entry is not None and len(entry) >= 6:
+          path_id = entry[5]
+        else:
+          row = db.execute("SELECT path_id FROM paths WHERE path = ?", (path,)).fetchone()
+          if row is None:
+            continue
+          path_id = row[0]
+        delete_file_messages(db, path_id)
+        db.execute("DELETE FROM files WHERE path_id = ?", (path_id,))
+        db.execute("DELETE FROM paths WHERE path_id = ?", (path_id,))
+    except OSError:
+      continue
+
+
+def verify_append_boundary(fd, start_offset, size, path, vendor, expected_last):
+  if start_offset <= 0 or start_offset > size:
+    return False
+  prev_byte = pread_exact(fd, 1, start_offset - 1)
+  if prev_byte == b"\n":
+    line_end = start_offset - 1
+  elif prev_byte == b"}":
+    next_byte = pread_exact(fd, 1, start_offset) if start_offset < size else b""
+    if next_byte not in (b"\n", b"\r"):
+      return False
+    line_end = start_offset
+  else:
+    return False
+  win_start = max(0, line_end - 65536)
+  chunk = pread_exact(fd, line_end - win_start, win_start)
+  if chunk is None:
+    return False
+  lines = chunk.split(b"\n")
+  start_idx = 0 if win_start == 0 else 1
+  found_row = None
+  for raw in reversed(lines[start_idx:]):
+    if not raw:
+      continue
+    rows = parse_single_line_rows(path, vendor, raw)
+    if rows:
+      found_row = (rows[-1][2], rows[-1][3])
+      break
+  if found_row is not None:
+    return expected_last is not None and found_row == expected_last
+  if win_start == 0:
+    return expected_last is None
+  return False
+
+
+def _scan_worker_chunk(chunk_items, lo_key, hi_key, root_prefixes, db_con):
+  if lo_key is None and hi_key is None:
+    cur = db_con.execute(
+      "SELECT p.path, f.mtime, f.size, f.ino FROM files f CROSS JOIN paths p ON p.path_id = f.path_id"
+    )
+  elif lo_key is None:
+    cur = db_con.execute(
+      "SELECT p.path, f.mtime, f.size, f.ino FROM paths p JOIN files f USING (path_id) WHERE p.path < ?",
+      (hi_key,),
+    )
+  elif hi_key is None:
+    cur = db_con.execute(
+      "SELECT p.path, f.mtime, f.size, f.ino FROM paths p JOIN files f USING (path_id) WHERE p.path >= ?",
+      (lo_key,),
+    )
+  else:
+    cur = db_con.execute(
+      "SELECT p.path, f.mtime, f.size, f.ino FROM paths p JOIN files f USING (path_id) WHERE p.path >= ? AND p.path < ?",
+      (lo_key, hi_key),
+    )
+  known = {path: (mtime, size, ino) for path, mtime, size, ino in cur}
+  known_pop = known.pop
+  _open = os.open
+  _close = os.close
+  _scandir = os.scandir
+  _stat = os.stat
+  _s_isdir = stat.S_ISDIR
+  _sep = os.sep
+  _o_dir = getattr(os, "O_DIRECTORY", 0) | os.O_RDONLY
+
+  scanned = 0
+  changed = []
+  walk_errors = []
+  stat_errors = []
+
+  for key, is_dir, vendor, data in chunk_items:
+    if not is_dir:
+      mt, sz, ino = data
+      scanned += 1
+      prev = known_pop(key, None)
+      if prev is None or prev[0] != mt or prev[1] != sz or prev[2] != ino:
+        changed.append((vendor, key, mt, sz, ino, prev))
+      continue
+    stack = [data]
+    while stack:
+      dirpath = stack.pop()
+      prefix = dirpath if dirpath.endswith(_sep) else dirpath + _sep
+      try:
+        dfd = _open(dirpath, _o_dir)
+      except OSError as exc:
+        walk_errors.append((exc.errno, exc.strerror, dirpath))
+        continue
+      try:
+        try:
+          it = _scandir(dfd)
+        except OSError as exc:
+          walk_errors.append((exc.errno, exc.strerror, dirpath))
+          continue
+        with it:
+          for entry in it:
+            name = entry.name
+            if name.endswith(".jsonl"):
+              try:
+                is_d = entry.is_dir(follow_symlinks=False)
+              except OSError:
+                is_d = False
+              if is_d:
+                stack.append(prefix + name)
+                continue
+              try:
+                st = _stat(name, dir_fd=dfd)
+              except FileNotFoundError:
+                continue
+              except OSError as exc:
+                stat_errors.append((exc.errno, exc.strerror, prefix + name))
+                continue
+              if _s_isdir(st.st_mode):
+                continue
+              path = prefix + name
+              scanned += 1
+              prev = known_pop(path, None)
+              if prev is None or prev[0] != st.st_mtime or prev[1] != st.st_size or prev[2] != st.st_ino:
+                changed.append((vendor, path, st.st_mtime, st.st_size, st.st_ino, prev))
+            else:
+              try:
+                is_d = entry.is_dir(follow_symlinks=False)
+              except OSError:
+                continue
+              if is_d:
+                stack.append(prefix + name)
+      finally:
+        _close(dfd)
+
+  unseen = [p for p in known if any(p.startswith(pfx) for pfx in root_prefixes)]
+  return scanned, changed, unseen, walk_errors, stat_errors
+
+
+def _parallel_scan_diff(db, vendors, record_walk_error, record_read_error):
+  if not (_USE_DIR_FD and hasattr(os, "fork")) or db.in_transaction:
+    return None
+  db_list = db.execute("PRAGMA database_list").fetchone()
+  db_file = db_list[2] if db_list and len(db_list) >= 3 else ""
+  if not db_file or not os.path.isfile(db_file):
+    return None
+  max_pid = db.execute("SELECT max(path_id) FROM files").fetchone()[0]
+  if not max_pid or max_pid < 2000:
+    return None
+
+  _sep = os.sep
+  active_roots = [(vendor, root) for vendor, root in ROOTS if vendor in vendors and os.path.isdir(root)]
+  if not active_roots:
+    return None
+  root_prefixes = [root if root.endswith(_sep) else root + _sep for _, root in active_roots]
+  # Ensure roots do not nest/overlap so path range partitions are strictly disjoint.
+  for i, pfx_a in enumerate(root_prefixes):
+    for j, pfx_b in enumerate(root_prefixes):
+      if i != j and (pfx_a == pfx_b or pfx_a.startswith(pfx_b)):
+        return None
+
+  _open = os.open
+  _close = os.close
+  _scandir = os.scandir
+  _stat = os.stat
+  _s_isdir = stat.S_ISDIR
+  _o_dir = getattr(os, "O_DIRECTORY", 0) | os.O_RDONLY
+
+  top_items = []
+  for vendor, root in active_roots:
+    prefix = root if root.endswith(_sep) else root + _sep
+    prune_codex = vendor == "cc"
+    try:
+      dfd = _open(root, _o_dir)
+    except OSError as exc:
+      record_walk_error(exc)
+      continue
+    try:
+      try:
+        it = _scandir(dfd)
+      except OSError as exc:
+        exc.filename = root
+        record_walk_error(exc)
+        continue
+      with it:
+        for entry in it:
+          name = entry.name
+          if name.endswith(".jsonl"):
+            try:
+              is_d = entry.is_dir(follow_symlinks=False)
+            except OSError:
+              is_d = False
+            if is_d:
+              if not (prune_codex and name == "codex"):
+                dpath = prefix + name
+                top_items.append((dpath + _sep, True, vendor, dpath))
+              continue
+            try:
+              st = _stat(name, dir_fd=dfd)
+            except FileNotFoundError:
+              continue
+            except OSError as exc:
+              record_read_error(exc, prefix + name)
+              continue
+            if _s_isdir(st.st_mode):
+              continue
+            fpath = prefix + name
+            top_items.append((fpath, False, vendor, (st.st_mtime, st.st_size, st.st_ino)))
+          else:
+            try:
+              is_d = entry.is_dir(follow_symlinks=False)
+            except OSError:
+              continue
+            if is_d and not (prune_codex and name == "codex"):
+              dpath = prefix + name
+              top_items.append((dpath + _sep, True, vendor, dpath))
+    finally:
+      _close(dfd)
+
+  n_workers = min(os.cpu_count() or 1, 4, len(top_items) // 4)
+  if n_workers < 2:
+    return None
+
+  top_items.sort(key=lambda x: x[0])
+  n = len(top_items)
+  chunks = []
+  bounds = []
+  for i in range(n_workers):
+    start = (i * n) // n_workers
+    end = ((i + 1) * n) // n_workers
+    chunks.append(top_items[start:end])
+    bounds.append(top_items[start][0])
+
+  tmp_files = []
+  pids = []
+  fork_failed = False
+  for i in range(1, n_workers):
+    lo_k = bounds[i]
+    hi_k = bounds[i + 1] if i + 1 < n_workers else None
+    # Use an unlinked anonymous temp file instead of os.pipe() so large change/unseen batches
+    # (>64 KB) cannot deadlock a child waiting on the parent while parent scans chunk 0.
+    tf = tempfile.TemporaryFile()
+    w_fd = tf.fileno()
+    try:
+      pid = os.fork()
+    except OSError:
+      tf.close()
+      fork_failed = True
+      break
+    if pid == 0:
+      for prev_tf in tmp_files:
+        try:
+          prev_tf.close()
+        except OSError:
+          pass
+      try:
+        wdb = sqlite3.connect(db_file)
+        wdb.execute("PRAGMA query_only = ON")
+        try:
+          res = _scan_worker_chunk(chunks[i], lo_k, hi_k, root_prefixes, wdb)
+        finally:
+          wdb.close()
+        data = marshal.dumps(res)
+        mv = memoryview(data)
+        written = 0
+        total_len = len(mv)
+        while written < total_len:
+          written += os.write(w_fd, mv[written:])
+      except BaseException:
+        os._exit(1)
+      os._exit(0)
+    else:
+      tmp_files.append(tf)
+      pids.append(pid)
+
+  if fork_failed:
+    for pid in pids:
+      try:
+        os.waitpid(pid, 0)
+      except ChildProcessError:
+        pass
+    for tf in tmp_files:
+      tf.close()
+    return None
+
+  # Parent runs chunk 0 concurrently with forked children
+  total_scanned, all_changed, all_unseen, all_walk_errs, all_stat_errs = _scan_worker_chunk(
+    chunks[0], None, bounds[1], root_prefixes, db
+  )
+
+  worker_failed = False
+  for pid in pids:
+    _, status = os.waitpid(pid, 0)
+    if status != 0:
+      worker_failed = True
+
+  for tf in tmp_files:
+    try:
+      if not worker_failed:
+        tf.seek(0)
+        raw = tf.read()
+        if raw:
+          w_sc, w_ch, w_un, w_we, w_se = marshal.loads(raw)
+          total_scanned += w_sc
+          all_changed.extend(w_ch)
+          all_unseen.extend(w_un)
+          all_walk_errs.extend(w_we)
+          all_stat_errs.extend(w_se)
+        else:
+          worker_failed = True
+    finally:
+      tf.close()
+
+  if worker_failed:
+    return None
+
+  for err_no, msg, dpath in all_walk_errs:
+    record_walk_error(OSError(err_no, msg, dpath))
+  for err_no, msg, fpath in all_stat_errs:
+    record_read_error(OSError(err_no, msg, fpath), fpath)
+
+  return total_scanned, all_changed, all_unseen
+
+
+def update_index(db, vendors, indexed_paths=frozenset()):
+  next_mid = db.execute("SELECT coalesce(max(mid), 0) FROM message_refs").fetchone()[0]
+  automerge_tuned = False
+  scanned = updated = failed = 0
+  pending_delete_pids = []
+  pending_msgs = []
+  pending_refs = []
+  pending_files = []
+
+  def record_read_error(exc, path):
+    nonlocal failed
+    failed += 1
+    print(f"skip unreadable source: {exc}", file=sys.stderr)
+    if path in indexed_paths:
+      sys.exit("ccsi: rebuild could not read an indexed session; kept the existing index")
+
+  def record_walk_error(exc):
+    directory = exc.filename
+    if directory and any(path.startswith(directory + os.sep) for path in indexed_paths):
+      print(f"skip unreadable source: {exc}", file=sys.stderr)
+      sys.exit("ccsi: rebuild could not scan indexed sessions; kept the existing index")
+    record_read_error(exc, directory)
+
+  parallel_res = None if indexed_paths else _parallel_scan_diff(db, vendors, record_walk_error, record_read_error)
+  if parallel_res is not None:
+    scanned, changed_items, unseen_list = parallel_res
+    had_known = True
+    unseen_dict = {p: None for p in unseen_list}
+  else:
+    known = {
+      path: (mtime, size, ino)
+      for path, mtime, size, ino in db.execute(
+        "SELECT p.path, f.mtime, f.size, f.ino FROM files f CROSS JOIN paths p ON p.path_id = f.path_id"
+      )
+    }
+    had_known = bool(known)
+    known_pop = known.pop
+    changed_items = []
+    for vendor, path, st_pre in iter_files_stat(vendors, onerror=record_walk_error, onstat_error=record_read_error):
+      scanned += 1
+      prev_meta = known_pop(path, None)
+      if prev_meta is not None and prev_meta[0] == st_pre.st_mtime and prev_meta[1] == st_pre.st_size and prev_meta[2] == st_pre.st_ino:
+        continue
+      changed_items.append((vendor, path, st_pre.st_mtime, st_pre.st_size, st_pre.st_ino, prev_meta))
+    unseen_dict = known
+
+  def flush_pending():
+    nonlocal automerge_tuned
+    if not (pending_delete_pids or pending_msgs or pending_refs or pending_files):
+      return
+    if had_known and not automerge_tuned and (pending_delete_pids or pending_msgs):
+      db.execute("INSERT INTO messages(messages, rank) VALUES ('automerge', 16)")
+      automerge_tuned = True
+    if pending_delete_pids:
+      for pid in pending_delete_pids:
+        delete_file_messages(db, pid)
+      pending_delete_pids.clear()
+    if pending_msgs:
+      db.executemany("INSERT INTO messages (rowid, text) VALUES (?, ?)", pending_msgs)
+      pending_msgs.clear()
+    if pending_refs:
+      db.executemany(
+        "INSERT INTO message_refs (mid, path_id, ordinal, ts, role) VALUES (?, ?, ?, ?, ?)",
+        pending_refs,
+      )
+      pending_refs.clear()
+    if pending_files:
+      db.executemany(
+        "INSERT OR REPLACE INTO files (path_id, mtime, size, offset, ino, rows) VALUES (?, ?, ?, ?, ?, ?)",
+        pending_files,
+      )
+      pending_files.clear()
+
+  for vendor, path, pre_mtime, pre_size, pre_ino, prev_meta in changed_items:
+    if prev_meta is not None:
+      prev_extra = db.execute(
+        "SELECT f.offset, f.rows, p.path_id FROM paths p JOIN files f USING (path_id) WHERE p.path = ?",
+        (path,),
+      ).fetchone()
+      prev = (prev_meta[0], prev_meta[1], prev_extra[0], prev_meta[2], prev_extra[1], prev_extra[2]) if prev_extra else None
+    else:
+      prev = None
+    can_append = (
+      prev is not None
+      and prev[3] == pre_ino
+      and pre_size > prev[1]
+      and pre_mtime >= prev[0]
+      and prev[2] > 0
+    )
+    start_offset = prev[2] if can_append else 0
+    validator = None
+    if can_append:
+      expected_last = None
+      if prev[4] > 0:
+        expected_last = db.execute(
+          "SELECT ts, role FROM message_refs WHERE path_id = ? AND ordinal = ?",
+          (prev[5], prev[4] - 1),
+        ).fetchone()
+      validator = lambda fd, st, p=prev, cur_path=path, cur_vendor=vendor, el=expected_last: (
+        st.st_ino == p[3]
+        and st.st_size > p[1]
+        and st.st_mtime >= p[0]
+        and verify_append_boundary(fd, p[2], st.st_size, cur_path, cur_vendor, el)
+      )
+    try:
+      st, new_offset, records = read_jsonl_records(path, start_offset, append_validator=validator)
+      if (
+        new_offset is None
+        or (can_append and (st.st_ino != prev[3] or st.st_size <= prev[1] or st.st_mtime < prev[0]))
+        or new_offset > st.st_size
+      ):
+        can_append = False
+        st, new_offset, records = read_jsonl_records(path)
+        if new_offset > st.st_size:
+          st, new_offset, records = read_jsonl_records(path)
+        if new_offset > st.st_size:
+          new_offset = st.st_size
+      rows = EXTRACTORS[EXTRACTOR_VERSION](path, vendor, records=records)
+    except FileNotFoundError:
+      scanned -= 1
+      if prev_meta is not None:
+        unseen_dict[path] = prev_meta
+      continue
+    except OSError as exc:
+      record_read_error(exc, path)
+      continue
+    if prev is None:
+      path_id = db.execute("INSERT INTO paths (path, vendor) VALUES (?, ?)", (path, vendor)).lastrowid
+    else:
+      path_id = prev[5]
+      if not can_append:
+        pending_delete_pids.append(path_id)
+    base_rows = prev[4] if can_append else 0
+    for i, row in enumerate(rows):
+      mid = next_mid + i + 1
+      pending_msgs.append((mid, row[0]))
+      pending_refs.append((mid, path_id, base_rows + i, row[2], row[3]))
+    next_mid += len(rows)
+    pending_files.append((path_id, st.st_mtime, st.st_size, new_offset, st.st_ino, base_rows + len(rows)))
+    updated += 1
+    if updated % 500 == 0:
+      flush_pending()
+      db.commit()
+  prune_deleted_files(db, vendors, unseen_dict, unseen_dict)
+  flush_pending()
+  db.commit()
+  total = db.execute("SELECT coalesce(sum(rows), 0) FROM files").fetchone()[0]
+  return scanned, updated, failed, total
+
+
+def previously_indexed_paths(db, version):
+  if not db.execute("SELECT 1 FROM sqlite_schema WHERE name = 'files'").fetchone():
+    return set()
+  table = "paths" if version == SCHEMA_VERSION else "files"
+  if not db.execute("SELECT 1 FROM sqlite_schema WHERE name = ?", (table,)).fetchone():
+    return set()
+  return {path for (path,) in db.execute(f"SELECT path FROM {table}")}
+
+
+def require_roots_for_rebuild(roots):
+  missing = [root for root in roots if not os.path.isdir(root)]
+  if missing:
+    sys.exit(f"ccsi: kept the existing index; rebuild source unavailable: {', '.join(missing)}")
+
+
+def sqlite_sidecars(db_path):
+  return (db_path.with_name(db_path.name + suffix) for suffix in ("-wal", "-shm", "-journal"))
+
+
+def remove_sqlite_sidecars(db_path):
+  for sidecar in sqlite_sidecars(db_path):
+    sidecar.unlink(missing_ok=True)
+
+
+def has_v3_tables(db):
+  tables = {row[0] for row in db.execute("SELECT name FROM sqlite_schema WHERE type = 'table'")}
+  required = {"paths", "files", "message_refs", "metadata", "messages", "messages_data", "messages_idx", "messages_config"}
+  if not required.issubset(tables):
+    return False
+  db.execute("SELECT path_id, path, vendor FROM paths LIMIT 0")
+  db.execute("SELECT path_id, mtime, size, offset, ino, rows FROM files LIMIT 0")
+  db.execute("SELECT mid, path_id, ordinal, ts, role FROM message_refs LIMIT 0")
+  db.execute("SELECT key, value FROM metadata LIMIT 0")
+  db.execute("SELECT rowid FROM messages LIMIT 0")
+  return True
+
+
+def is_corruption_error(exc):
+  if isinstance(exc, sqlite3.IntegrityError):
+    return True
+  if isinstance(exc, sqlite3.OperationalError):
+    msg = str(exc).lower()
+    if "locked" in msg or "busy" in msg or "readonly" in msg:
+      return False
+    return any(
+      term in msg
+      for term in ("malformed", "not a database", "corrupt", "no such table", "no such column", "vtable", "sql logic error", "disk image")
+    )
+  return type(exc) is sqlite3.DatabaseError
+
+
+def parse_lock_timeout(raw_value):
+  raw = os.environ.get("CCSI_LOCK_TIMEOUT") if raw_value is None else raw_value
+  if raw is None or raw == "":
+    return 60.0
+  try:
+    value = float(raw)
+  except (TypeError, ValueError):
+    sys.exit(f"ccsi: invalid lock timeout: {raw}")
+  if not math.isfinite(value) or value < 0:
+    sys.exit(f"ccsi: lock timeout must be >= 0 (got: {raw})")
+  return value
+
+
+@contextmanager
+def acquire_index_lock(lock_path, timeout):
+  fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+  set_private_mode(lock_path, 0o600)
+  deadline = time.monotonic() + timeout
+  acquired = False
+  try:
+    while True:
+      try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        acquired = True
+        break
+      except OSError as exc:
+        if exc.errno not in (errno.EAGAIN, errno.EWOULDBLOCK):
+          raise
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+          holder = ""
+          try:
+            raw = os.pread(fd, 64, 0).decode("ascii", errors="ignore").strip()
+            if raw:
+              holder = f" (held by pid {raw})"
+          except OSError:
+            pass
+          sys.exit(f"ccsi: timed out after {timeout:g}s waiting for index lock {lock_path}{holder}")
+        time.sleep(min(0.05, remaining))
+    try:
+      os.ftruncate(fd, 0)
+      os.lseek(fd, 0, os.SEEK_SET)
+      os.write(fd, f"{os.getpid()}\n".encode("ascii"))
+    except OSError:
+      pass
+    yield fd
+  finally:
+    if acquired:
+      try:
+        os.ftruncate(fd, 0)
+      except OSError:
+        pass
+      try:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+      except OSError:
+        pass
+    os.close(fd)
+
+
+def ensure_index_can_be_replaced():
+  if DB_PATH.is_file():
+    with closing(sqlite3.connect(DB_PATH, timeout=0)) as db:
+      try:
+        mode = db.execute("PRAGMA journal_mode").fetchone()[0]
+      except sqlite3.DatabaseError as exc:
+        if not is_corruption_error(exc):
+          sys.exit(f"ccsi: kept the existing index; could not check its journal mode: {exc}")
+      else:
+        if mode == "wal":
+          # SQLite can leave WAL only after other users release the old database.
+          try:
+            mode = db.execute("PRAGMA journal_mode=DELETE").fetchone()[0]
+          except sqlite3.Error as exc:
+            sys.exit(f"ccsi: kept the existing WAL index; close other SQLite connections and retry: {exc}")
+          if mode != "delete":
+            sys.exit("ccsi: kept the existing WAL index; could not switch out of WAL mode")
+  # Leftover sidecars may still serve old connections or contain uncheckpointed data.
+  if any(os.path.lexists(sidecar) for sidecar in sqlite_sidecars(DB_PATH)):
+    sys.exit("ccsi: kept the existing index; SQLite sidecars remain, close other connections and retry")
+
+
+def rebuild_index(vendors, indexed_paths):
+  required_roots = [root for vendor, root in ROOTS if vendor in vendors
+                    and any(path.startswith(root + os.sep) for path in indexed_paths)]
+  require_roots_for_rebuild(required_roots)
+  staging = DB_PATH.with_suffix(".sqlite.rebuild")
+  remove_sqlite_sidecars(staging)
+  staging.unlink(missing_ok=True)
+  staging.touch(mode=0o600, exist_ok=False)
+  set_private_mode(staging, 0o600)
+  try:
+    with closing(sqlite3.connect(staging)) as db:
+      initialize_index(db)
+      counts = update_index(db, vendors, indexed_paths)
+    require_roots_for_rebuild(required_roots)
+    ensure_index_can_be_replaced()
+    os.replace(staging, DB_PATH)
+    return counts
+  finally:
+    staging.unlink(missing_ok=True)
+    remove_sqlite_sidecars(staging)
 
 
 def cmd_index(args):
   t0 = time.time()
+  lock_timeout = parse_lock_timeout(getattr(args, "lock_timeout", None))
   os.makedirs(DB_DIR, mode=0o700, exist_ok=True)
   set_private_mode(DB_DIR, 0o700)
   lock_path = os.path.join(DB_DIR, "index.lock")
-  with open(lock_path, "w") as lock_file:
-    set_private_mode(lock_path, 0o600)
-    fcntl.flock(lock_file, fcntl.LOCK_EX)
-    db = connect(upgrade=True)
-    known = {
-      row[0]: (row[1], row[2], row[3], row[4], row[5])
-      for row in db.execute("SELECT path, mtime, size, offset, ino, rows FROM files")
-    }
-    next_mid = db.execute(
-      "SELECT max(coalesce((SELECT max(mid) FROM message_refs), 0), coalesce((SELECT max(id) FROM messages_docsize), 0))"
-    ).fetchone()[0]
-    scanned = updated = failed = 0
-    for vendor, p in iter_files(set(args.vendor or VENDORS)):
+  vendors = set(args.vendor or VENDORS)
+  with acquire_index_lock(lock_path, lock_timeout):
+    existing = DB_PATH.is_file()
+    counts = None
+    indexed_paths = frozenset()
+    if existing:
+      set_private_mode(DB_PATH, 0o600)
       try:
-        st_pre = os.stat(p)
-      except OSError:
-        continue
-      scanned += 1
-      prev = known.get(p)
-      if prev is not None and prev[0] == st_pre.st_mtime and prev[1] == st_pre.st_size and prev[3] == st_pre.st_ino:
-        continue
-      can_append = (
-        prev is not None
-        and prev[3] == st_pre.st_ino
-        and st_pre.st_size > prev[1]
-        and prev[2] > 0
-      )
-      start_offset = prev[2] if can_append else 0
-      try:
-        st, new_offset, records = read_jsonl_records(p, start_offset)
-        if can_append and (st.st_ino != prev[3] or st.st_size <= prev[1]):
-          can_append = False
-          st, new_offset, records = read_jsonl_records(p, 0)
-        rows = extract_rows(p, vendor, records=records)
-      except OSError as e:
-        failed += 1
-        print(f"skip unreadable file: {p}: {e}", file=sys.stderr)
-        continue
-      if prev is not None and not can_append:
-        delete_file_messages(db, p)
-        base_rows = 0
-      else:
-        base_rows = prev[4] if can_append else 0
-      fts_rows = []
-      ref_rows = []
-      for text, rpath, ts, role in rows:
-        next_mid += 1
-        fts_rows.append((next_mid, text, rpath, ts, role))
-        ref_rows.append((next_mid, rpath))
-      if fts_rows:
-        db.executemany(
-          "INSERT INTO messages (rowid, text, path, ts, role) VALUES (?, ?, ?, ?, ?)",
-          fts_rows,
-        )
-        db.executemany(
-          "INSERT INTO message_refs (mid, path) VALUES (?, ?)",
-          ref_rows,
-        )
-      db.execute(
-        "INSERT OR REPLACE INTO files (path, mtime, size, offset, ino, rows) VALUES (?, ?, ?, ?, ?, ?)",
-        (p, st.st_mtime, st.st_size, new_offset, st.st_ino, base_rows + len(fts_rows)),
-      )
-      known[p] = (st.st_mtime, st.st_size, new_offset, st.st_ino, base_rows + len(fts_rows))
-      updated += 1
-      if updated % 500 == 0:
-        db.commit()
-    db.commit()
-    total = db.execute("SELECT coalesce(sum(rows), 0) FROM files").fetchone()[0]
+        with closing(sqlite3.connect(DB_PATH)) as db:
+          version = schema_version(db)
+          if version > SCHEMA_VERSION:
+            sys.exit("ccsi: the index was built by a newer ccsi version")
+          if version == SCHEMA_VERSION:
+            if not has_v3_tables(db):
+              raise sqlite3.DatabaseError("incomplete v3 schema")
+            if indexed_extractor_version(db) == EXTRACTOR_VERSION:
+              counts = update_index(db, vendors)
+            elif args.vendor:
+              sys.exit("ccsi: rebuilding the index requires all sources. Run ccsi index without --vendor.")
+            else:
+              indexed_paths = previously_indexed_paths(db, version)
+          elif args.vendor:
+            sys.exit("ccsi: rebuilding the index requires all sources. Run ccsi index without --vendor.")
+          else:
+            indexed_paths = previously_indexed_paths(db, version)
+      except sqlite3.DatabaseError as exc:
+        if is_corruption_error(exc):
+          if args.vendor:
+            sys.exit(f"ccsi: index database is corrupted ({exc}); run ccsi index without --vendor to rebuild")
+          print(f"ccsi: rebuilding corrupted index: {exc}", file=sys.stderr)
+          counts = None
+          indexed_paths = frozenset()
+        elif isinstance(exc, sqlite3.OperationalError) and ("locked" in str(exc).lower() or "busy" in str(exc).lower()):
+          sys.exit(f"ccsi: index database is busy: {exc}")
+        else:
+          raise
+    if counts is None:
+      counts = rebuild_index(vendors, indexed_paths)
+    scanned, updated, failed, total = counts
     print(f"scanned={scanned} updated={updated} failed={failed} rows={total} took={time.time()-t0:.1f}s")
 
 
 FTS_SYNTAX_RE = re.compile(r'["*()^:]|\b(?:AND|OR|NOT|NEAR(?:/\d+)?)\b')
-QUERY_TERM_RE = re.compile(r'"([^"]+)"|(\S+)')
+QUERY_TERM_RE = re.compile(r'"((?:[^"]|"")+)"|(\S+)')
 NEAR_OP_RE = re.compile(r"^NEAR(?:/\d+)?$")
 
 
@@ -523,12 +1284,17 @@ def escape_like(token):
   return "%" + token.replace("!", "!!").replace("%", "!%").replace("_", "!_") + "%"
 
 
+def escape_like_prefix(prefix):
+  return prefix.replace("!", "!!").replace("%", "!%").replace("_", "!_") + "%"
+
+
 def parse_search_query(query):
   has_long_term = False
   has_short_term = False
   for quoted, bare in QUERY_TERM_RE.findall(query):
     if quoted:
-      if len(quoted) >= 3:
+      unescaped = quoted.replace('""', '"')
+      if len(unescaped) >= 3:
         has_long_term = True
       else:
         has_short_term = True
@@ -551,74 +1317,741 @@ def parse_search_query(query):
   return query, []
 
 
-def cmd_search(args):
-  query = " ".join(args.query)
-  fts_query, short_tokens = parse_search_query(query)
-  if fts_query is None:
-    print(
-      f"query error: trigram index requires >=3-char terms (or plain space-separated mixed terms without boolean/quoted <3-char tokens; got: {query})",
-      file=sys.stderr,
-    )
-    sys.exit(2)
-  db = connect()
-  sql = (
-    "SELECT rowid, path, ts, role, snippet(messages, 0, '>>>', '<<<', '…', 64), text "
-    "FROM messages WHERE messages MATCH ?"
-  )
-  params = [fts_query]
-  for st in short_tokens:
-    sql += " AND +text LIKE ? ESCAPE '!'"
-    params.append(escape_like(st))
+def path_filters(args, path_column):
+  sql, params = "", []
   if args.vendor:
     roots = [root for vendor, root in ROOTS if vendor in args.vendor]
-    sql += " AND (" + " OR ".join("+path LIKE ?" for _ in roots) + ")"
-    params.extend(root + os.sep + "%" for root in roots)
-  for ex in getattr(args, "exclude_session", None) or ():
+    sql += " AND (" + " OR ".join(f"{path_column} LIKE ? ESCAPE '!'" for _ in roots) + ")"
+    params.extend(escape_like_prefix(root + os.sep) for root in roots)
+  for ex in args.exclude_session:
     if ex:
-      sql += " AND +path NOT LIKE ? ESCAPE '!'"
+      sql += f" AND {path_column} NOT LIKE ? ESCAPE '!'"
       params.append(escape_like(ex))
-  sql += " ORDER BY rank LIMIT ?"
-  params.append(args.k)
+  return sql, params
+
+
+def query_matches(db, sql, fts_query, params):
   try:
-    hits = db.execute(sql, params).fetchall()
-  except sqlite3.OperationalError as e:
-    if "locked" in str(e).lower() or "busy" in str(e).lower():
-      print(f"query error: {e}", file=sys.stderr)
-      sys.exit(1)
+    return db.execute(sql, [fts_query, *params]), fts_query
+  except sqlite3.OperationalError as exc:
+    if "locked" in str(exc).lower() or "busy" in str(exc).lower():
+      sys.exit(f"query error: {exc}")
+    fts_query = literal_query(fts_query)
     try:
-      hits = db.execute(sql, [literal_query(fts_query)] + params[1:]).fetchall()
-    except sqlite3.OperationalError as e2:
-      print(f"query error: {e2}", file=sys.stderr)
-      sys.exit(1)
-  ctx_n = getattr(args, "context", 0) or 0
-  for mid, path, ts, role, snip, full_text in hits:
-    vendor, root = vendor_of(path)
-    rel = os.path.relpath(path, root)
-    print(f"--- [{vendor}] {rel}  {ts}  [{role}]")
-    print(snip.replace("\n", " ")[:500])
-    if ctx_n > 0:
-      before_mids = [
-        r[0] for r in db.execute(
-          "SELECT mid FROM message_refs WHERE path = ? AND mid < ? ORDER BY mid DESC LIMIT ?",
-          (path, mid, ctx_n),
-        ).fetchall()
-      ][::-1]
-      after_mids = [
-        r[0] for r in db.execute(
-          "SELECT mid FROM message_refs WHERE path = ? AND mid > ? ORDER BY mid ASC LIMIT ?",
-          (path, mid, ctx_n),
-        ).fetchall()
-      ]
-      for cmid in before_mids:
-        crow = db.execute("SELECT ts, role, text FROM messages WHERE rowid = ?", (cmid,)).fetchone()
-        if crow:
-          print(f"  - [{crow[1]} {crow[0]}] {crow[2].replace(chr(10), ' ')[:300]}")
-      print(f"  > [{role} {ts}] {full_text.replace(chr(10), ' ')[:300]}")
-      for cmid in after_mids:
-        crow = db.execute("SELECT ts, role, text FROM messages WHERE rowid = ?", (cmid,)).fetchone()
-        if crow:
-          print(f"  + [{crow[1]} {crow[0]}] {crow[2].replace(chr(10), ' ')[:300]}")
-  if not hits:
+      return db.execute(sql, [fts_query, *params]), fts_query
+    except sqlite3.OperationalError as retry_error:
+      sys.exit(f"query error: {retry_error}")
+
+
+def print_hit(path, ts, role, snippet):
+  vendor, root = vendor_of(path)
+  rel = os.path.relpath(path, root)
+  print(f"--- [{vendor}] {rel}  {ts}  [{role}]")
+  print(snippet.replace("\n", " ")[:500])
+
+
+def print_context(marker, ts, role, text):
+  print(f"  {marker} [{role} {ts}] {text.replace(chr(10), ' ')[:300]}")
+
+
+def legacy_context(db, path, mid, count):
+  return db.execute("""
+    WITH before_hit AS (
+      SELECT mid FROM message_refs WHERE path = :path AND mid < :mid ORDER BY mid DESC LIMIT :count
+    ), after_hit AS (
+      SELECT mid FROM message_refs WHERE path = :path AND mid > :mid ORDER BY mid ASC LIMIT :count
+    ), context_rows AS (
+      SELECT mid FROM before_hit UNION ALL SELECT :mid UNION ALL SELECT mid FROM after_hit
+    )
+    SELECT context_rows.mid, ts, role, text
+    FROM context_rows CROSS JOIN messages ON messages.rowid = context_rows.mid
+    ORDER BY context_rows.mid
+  """, {"path": path, "mid": mid, "count": count})
+
+
+def search_legacy(db, args, fts_query, short_tokens):
+  # v2 searches can keep using the full-text copy while index builds v3 beside it.
+  sql = (
+    "SELECT rowid, path, ts, role, snippet(messages, 0, '>>>', '<<<', '…', 64) "
+    "FROM messages WHERE messages MATCH ?"
+  )
+  filters, path_params = path_filters(args, "+path")
+  sql += " AND +text LIKE ? ESCAPE '!'" * len(short_tokens)
+  sql += filters + " ORDER BY rank LIMIT ?"
+  params = [*(escape_like(token) for token in short_tokens), *path_params, args.k]
+  hits = query_matches(db, sql, fts_query, params)[0].fetchall()
+  for mid, path, ts, role, snip in hits:
+    print_hit(path, ts, role, snip)
+    if args.context > 0:
+      for context_mid, context_ts, context_role, text in legacy_context(db, path, mid, args.context):
+        marker = "-" if context_mid < mid else "+" if context_mid > mid else ">"
+        print_context(marker, context_ts, context_role, text)
+  return len(hits)
+
+
+SQLITE_LIKE_FOLD = str.maketrans("ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz")
+TS_RAW_RE = re.compile(r"\A[0-9A-Za-zT:.\-+_ ]+\Z")
+NUMERIC_TS_RE = re.compile(r"\A[+-]?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?\Z")
+TS_KEY_BYTES = b'"timestamp":"'
+PREAD_CHUNK_MAX = 64 * 1024 * 1024
+
+
+def pread_exact(fd, count, offset):
+  if count <= 0:
+    return b""
+  if count <= PREAD_CHUNK_MAX:
+    data = os.pread(fd, count, offset)
+    if len(data) == count:
+      return data
+    if not data:
+      return None
+    chunks = [data]
+    rem = count - len(data)
+    off = offset + len(data)
+  else:
+    chunks = []
+    rem = count
+    off = offset
+  while rem > 0:
+    ch = os.pread(fd, min(rem, PREAD_CHUNK_MAX), off)
+    if not ch:
+      return None
+    chunks.append(ch)
+    rem -= len(ch)
+    off += len(ch)
+  return b"".join(chunks)
+
+
+def short_match(text, tokens):
+  if not tokens:
+    return True
+  # SQLite's default LIKE folds ASCII only and stops at an embedded NUL.
+  folded = text.split("\0", 1)[0].translate(SQLITE_LIKE_FOLD)
+  return all(token.translate(SQLITE_LIKE_FOLD) in folded for token in tokens)
+
+
+def read_hit_rows(extractor, path, vendor, indexed_size, indexed_inode):
+  try:
+    _, _, records = read_jsonl_records(path, indexed_identity=(indexed_size, indexed_inode))
+  except OSError:
+    return []
+  return extractor(path, vendor, records=records)
+
+
+def probe_ts_pread(fd, size, offset):
+  cur = offset
+  if cur > 0:
+    while cur < size:
+      ch = os.pread(fd, min(32768, size - cur), cur)
+      if not ch:
+        return None, size
+      nl = ch.find(b"\n")
+      if nl != -1:
+        cur += nl + 1
+        break
+      cur += len(ch)
+  limit = min(size, cur + 524288)
+  scan_pos = cur
+  overlap = b""
+  while scan_pos < limit:
+    ch = os.pread(fd, min(32768, limit - scan_pos), scan_pos)
+    if not ch:
+      break
+    buf = overlap + ch
+    idx = buf.find(TS_KEY_BYTES)
+    if idx != -1:
+      start = idx + len(TS_KEY_BYTES)
+      end = buf.find(b'"', start, start + 40)
+      if end != -1 and end - start >= 19:
+        return buf[start:end], scan_pos - len(overlap) + idx
+    overlap = buf[-64:]
+    scan_pos += len(ch)
+  return None, cur
+
+
+def seek_ts_spans_pread(fd, size, ts_bytes):
+  # Binary search over file bytes for ts_bytes; returns list of (line_start, line_end, raw)
+  # or None on miss so caller falls back to full scan.
+  lo, hi = 0, size
+  for _ in range(18):
+    if hi - lo <= 32768:
+      break
+    mid = (lo + hi) // 2
+    mid_ts, mid_pos = probe_ts_pread(fd, size, mid)
+    if mid_ts is None:
+      hi = mid
+      continue
+    if mid_ts < ts_bytes:
+      lo = min(hi, max(mid, mid_pos))
+    elif mid_ts > ts_bytes:
+      hi = mid
+    else:
+      lo = max(0, mid_pos - 8192)
+      hi = min(size, mid_pos + 16384)
+      break
+  win_lo = max(0, lo - 16384)
+  win_hi = min(size, hi + 16384)
+  if win_hi <= win_lo:
+    return None
+  buf = pread_exact(fd, win_hi - win_lo, win_lo)
+  if buf is None:
+    return None
+  if win_hi < size and not buf.endswith(b"\n"):
+    cur = win_hi
+    extra = []
+    while cur < size:
+      ch = os.pread(fd, min(65536, size - cur), cur)
+      if not ch:
+        break
+      nl = ch.find(b"\n")
+      if nl != -1:
+        extra.append(ch[:nl + 1])
+        break
+      extra.append(ch)
+      cur += len(ch)
+    if extra:
+      buf += b"".join(extra)
+  pos = buf.find(ts_bytes, 0)
+  if pos == -1:
+    return None
+  spans = []
+  while pos != -1:
+    ls = buf.rfind(b"\n", 0, pos)
+    nl = buf.find(b"\n", pos)
+    le = nl + 1 if nl != -1 else len(buf)
+    if ls == -1 and win_lo > 0:
+      cur = win_lo
+      pfx = []
+      abs_ls = 0
+      while cur > 0:
+        step = max(0, cur - 65536)
+        ch = pread_exact(fd, cur - step, step)
+        if ch is None:
+          return None
+        rnl = ch.rfind(b"\n")
+        if rnl != -1:
+          pfx.append(ch[rnl + 1:])
+          abs_ls = step + rnl + 1
+          break
+        pfx.append(ch)
+        cur = step
+      pfx.reverse()
+      raw = b"".join(pfx) + buf[:le]
+    else:
+      abs_ls = win_lo + ls + 1
+      raw = buf[ls + 1:le]
+    spans.append((abs_ls, win_lo + le, raw))
+    pos = buf.find(ts_bytes, le)
+  return spans
+
+
+def parse_single_line_rows(path, vendor, raw):
+  if vendor == "cc" and b'"message"' not in raw and b"\\u" not in raw:
+    return []
+  obj, valid = parse_json_object(raw.decode("utf-8", errors="replace"))
+  if not valid or obj is None:
+    return []
+  return extract_rows(path, vendor, records=[obj])
+
+
+def collect_local_context_pread(fd, size, path, vendor, line_start, line_end, before_rows, after_rows, need_before, need_after):
+  collected_before = list(before_rows)
+  cur = line_start
+  tail_chunks = []
+  while len(collected_before) < need_before and cur > 0:
+    step = max(0, cur - 65536)
+    read_bytes = pread_exact(fd, cur - step, step)
+    if read_bytes is None:
+      return None, None
+    if step > 0:
+      nl = read_bytes.find(b"\n")
+      if nl == -1:
+        tail_chunks.append(read_bytes)
+        cur = step
+        continue
+      if tail_chunks:
+        tail_chunks.append(read_bytes[nl + 1:])
+        tail_chunks.reverse()
+        complete = b"".join(tail_chunks)
+      else:
+        complete = read_bytes[nl + 1:]
+      tail_chunks = [read_bytes[:nl + 1]]
+    else:
+      if tail_chunks:
+        tail_chunks.append(read_bytes)
+        tail_chunks.reverse()
+        complete = b"".join(tail_chunks)
+        tail_chunks = []
+      else:
+        complete = read_bytes
+    for raw in reversed(complete.split(b"\n")):
+      if not raw:
+        continue
+      rows = parse_single_line_rows(path, vendor, raw)
+      if rows:
+        collected_before = rows + collected_before
+        if len(collected_before) >= need_before:
+          break
+    cur = step
+  collected_before = collected_before[-need_before:] if need_before > 0 else []
+
+  collected_after = list(after_rows)
+  cur = line_end
+  head_chunks = []
+  while len(collected_after) < need_after and cur < size:
+    read_bytes = os.pread(fd, min(65536, size - cur), cur)
+    if not read_bytes:
+      break
+    cur += len(read_bytes)
+    if cur < size:
+      nl = read_bytes.rfind(b"\n")
+      if nl == -1:
+        head_chunks.append(read_bytes)
+        continue
+      if head_chunks:
+        head_chunks.append(read_bytes[:nl + 1])
+        complete = b"".join(head_chunks)
+      else:
+        complete = read_bytes[:nl + 1]
+      rem = read_bytes[nl + 1:]
+      head_chunks = [rem] if rem else []
+    else:
+      if head_chunks:
+        head_chunks.append(read_bytes)
+        complete = b"".join(head_chunks)
+        head_chunks = []
+      else:
+        complete = read_bytes
+    for raw in complete.split(b"\n"):
+      if not raw:
+        continue
+      rows = parse_single_line_rows(path, vendor, raw)
+      if rows:
+        collected_after.extend(rows)
+        if len(collected_after) >= need_after:
+          break
+  collected_after = collected_after[:need_after]
+  return collected_before, collected_after
+
+
+def resolve_or_prefilter_hit(db, dup_cache, path_id, path, vendor, ordinal, ts, role, short_tokens, indexed_mtime, indexed_size, indexed_inode, context_count, full_prefiltered=None):
+  # Returns ("invalid", None) if source failed identity/open check,
+  # ("reject", None) if proven unable to match short_tokens,
+  # ("direct", (text, before_rows, after_rows)) if unique (ts, role) in an unchanged file
+  # resolved the exact hit (and verified context neighbors when context_count > 0) without full parse,
+  # or ("full", None) to fall through to read_hit_rows.
+  try:
+    fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+  except OSError:
+    return "invalid", None
+  try:
+    try:
+      st = os.fstat(fd)
+    except OSError:
+      return "invalid", None
+    if not stat.S_ISREG(st.st_mode) or st.st_ino != indexed_inode or st.st_size < indexed_size:
+      return "invalid", None
+    ts_bytes = ts.encode("ascii")
+    unchanged = st.st_size == indexed_size and st.st_mtime == indexed_mtime
+    expected_tr_count = None
+    if unchanged:
+      dups = dup_cache.get(path_id)
+      if dups is None:
+        dups = {
+          (dts, drole): cnt
+          for dts, drole, cnt in db.execute(
+            "SELECT ts, role, count(*) FROM message_refs WHERE path_id = ? GROUP BY ts, role HAVING count(*) > 1",
+            (path_id,),
+          )
+        }
+        dup_cache[path_id] = dups
+      expected_tr_count = dups.get((ts, role), 1)
+    if st.st_size > 32768 and expected_tr_count is not None:
+      try:
+        spans = seek_ts_spans_pread(fd, st.st_size, ts_bytes)
+      except OSError:
+        spans = None
+      if spans is not None:
+        matched_entries = []
+        for ls, le, raw in spans:
+          rows = parse_single_line_rows(path, vendor, raw)
+          for r_idx, row in enumerate(rows):
+            if (ts, role) == (row[2], row[3]):
+              matched_entries.append((ls, le, rows, r_idx))
+        if len(matched_entries) == expected_tr_count:
+          if not any(short_match(line_rows[r_idx][0], short_tokens) for _, _, line_rows, r_idx in matched_entries):
+            return "reject", None
+          if expected_tr_count == 1:
+            ls, le, line_rows, r_idx = matched_entries[0]
+            text = line_rows[r_idx][0]
+            if context_count == 0:
+              return "direct", (text, (), ())
+            expected = db.execute(
+              "SELECT ordinal, ts, role FROM message_refs WHERE path_id = ? AND ordinal BETWEEN ? AND ? ORDER BY ordinal",
+              (path_id, max(0, ordinal - context_count), ordinal + context_count),
+            ).fetchall()
+            exp_before = [(ets, erole) for eo, ets, erole in expected if eo < ordinal]
+            exp_after = [(ets, erole) for eo, ets, erole in expected if eo > ordinal]
+            try:
+              cb, ca = collect_local_context_pread(
+                fd, st.st_size, path, vendor, ls, le,
+                line_rows[:r_idx], line_rows[r_idx + 1:],
+                len(exp_before), len(exp_after),
+              )
+            except OSError:
+              cb, ca = None, None
+            if cb is not None and [(r[2], r[3]) for r in cb] == exp_before and [(r[2], r[3]) for r in ca] == exp_after:
+              return "direct", (text, cb, ca)
+            return "full", None
+          return "full", None
+    if not short_tokens:
+      return "full", None
+    if full_prefiltered is not None and path in full_prefiltered:
+      return "full", None
+    if full_prefiltered is not None:
+      full_prefiltered.add(path)
+    try:
+      buf = pread_exact(fd, st.st_size, 0) if st.st_size > 0 else b""
+    except OSError:
+      return "full", None
+    if buf is None:
+      return "full", None
+  finally:
+    os.close(fd)
+  matched = []
+  pos = buf.find(ts_bytes, 0)
+  while pos != -1:
+    line_start = buf.rfind(b"\n", 0, pos) + 1
+    nl = buf.find(b"\n", pos)
+    line_end = nl + 1 if nl != -1 else len(buf)
+    obj, valid = parse_json_object(buf[line_start:line_end].decode("utf-8", errors="replace"))
+    if valid and obj is not None:
+      matched.append(obj)
+    pos = buf.find(ts_bytes, line_end)
+  rows = extract_rows(path, vendor, records=matched) if matched else []
+  matching_texts = [text for text, _, source_ts, source_role in rows if (ts, role) == (source_ts, source_role)]
+  if any(short_match(text, short_tokens) for text in matching_texts):
+    return "full", None
+  if expected_tr_count is not None:
+    if len(matching_texts) == expected_tr_count:
+      return "reject", None
+    return "full", None
+  if not matching_texts or b"\\u" in buf or NUMERIC_TS_RE.match(ts):
+    return "full", None
+  return "reject", None
+
+
+def snippet_for(temp, query, text):
+  temp.execute("INSERT OR REPLACE INTO excerpts (rowid, text) VALUES (1, ?)", (text,))
+  result = temp.execute(
+    "SELECT snippet(excerpts, 0, '>>>', '<<<', '…', 64) FROM excerpts WHERE excerpts MATCH ?",
+    (query,),
+  ).fetchone()
+  return result[0] if result else None
+
+
+def query_contentless_hits(db, args, fts_query):
+  filters, params = path_filters(args, "paths.path")
+  if args.vendor:
+    pmap = {
+      pid: (path, vendor, mtime, size, ino)
+      for pid, path, vendor, mtime, size, ino in db.execute(
+        "SELECT paths.path_id, paths.path, paths.vendor, files.mtime, files.size, files.ino "
+        "FROM paths JOIN files USING (path_id) WHERE 1=1" + filters,
+        params,
+      )
+    }
+    if 0 < len(pmap) <= 500:
+      pids = list(pmap)
+      placeholders = ",".join("?" * len(pids))
+      lo_mid, hi_mid = db.execute(
+        f"SELECT min(mid), max(mid) FROM message_refs WHERE path_id IN ({placeholders})",
+        pids,
+      ).fetchone()
+      if lo_mid is not None:
+        sql = (
+          "SELECT message_refs.path_id, ordinal, ts, role "
+          "FROM messages JOIN message_refs ON mid = messages.rowid "
+          f"WHERE messages MATCH ? AND messages.rowid >= ? AND messages.rowid <= ? "
+          f"AND message_refs.path_id IN ({placeholders}) ORDER BY rank"
+        )
+        cur, fts_query = query_matches(db, sql, fts_query, [lo_mid, hi_mid, *pids])
+        return (
+          (pid, *pmap[pid][:2], ordinal, ts, role, *pmap[pid][2:])
+          for pid, ordinal, ts, role in cur
+        ), fts_query
+  sql = (
+    "SELECT paths.path_id, paths.path, paths.vendor, ordinal, ts, role, files.mtime, files.size, files.ino "
+    "FROM messages JOIN message_refs ON mid = messages.rowid "
+    "JOIN paths USING (path_id) JOIN files USING (path_id) "
+    "WHERE messages MATCH ?"
+  )
+  return query_matches(db, sql + filters + " ORDER BY rank", fts_query, params)
+
+
+def search_contentless(db, extractor, args, fts_query, short_tokens):
+  if args.k == 0:
+    return 0
+  hits, fts_query = query_contentless_hits(db, args, fts_query)
+  by_path = {}
+  full_prefiltered = set()
+  dup_cache = {}
+  found = 0
+  with closing(sqlite3.connect(":memory:")) as temp:
+    temp.execute("CREATE VIRTUAL TABLE excerpts USING fts5(text, tokenize='trigram')")
+    for path_id, path, vendor, ordinal, ts, role, indexed_mtime, indexed_size, indexed_inode in hits:
+      if path not in by_path and extractor is extract_rows and ts and TS_RAW_RE.match(ts):
+        status, payload = resolve_or_prefilter_hit(
+          db, dup_cache, path_id, path, vendor, ordinal, ts, role, short_tokens,
+          indexed_mtime, indexed_size, indexed_inode, args.context, full_prefiltered,
+        )
+        if status == "invalid":
+          by_path[path] = []
+          continue
+        if status == "reject":
+          continue
+        if status == "direct":
+          direct_text, before_rows, after_rows = payload
+          snippet = snippet_for(temp, fts_query, direct_text)
+          if snippet is None:
+            continue
+          print_hit(path, ts, role, snippet)
+          if args.context > 0:
+            for adjacent, _, cts, crole in before_rows:
+              print_context("-", cts, crole, adjacent)
+            print_context(">", ts, role, direct_text)
+            for adjacent, _, cts, crole in after_rows:
+              print_context("+", cts, crole, adjacent)
+          found += 1
+          if found == args.k:
+            break
+          continue
+      if path not in by_path:
+        by_path[path] = read_hit_rows(extractor, path, vendor, indexed_size, indexed_inode)
+      rows = by_path[path]
+      if ordinal >= len(rows):
+        continue
+      text, _, source_ts, source_role = rows[ordinal]
+      if (ts, role) != (source_ts, source_role):
+        continue
+      if not short_match(text, short_tokens):
+        continue
+      snippet = snippet_for(temp, fts_query, text)
+      if snippet is None:
+        continue
+      print_hit(path, ts, role, snippet)
+      if args.context > 0:
+        for adjacent, _, cts, crole in rows[max(0, ordinal - args.context):ordinal]:
+          print_context("-", cts, crole, adjacent)
+        print_context(">", ts, role, text)
+        for adjacent, _, cts, crole in rows[ordinal + 1:ordinal + 1 + args.context]:
+          print_context("+", cts, crole, adjacent)
+      found += 1
+      if found == args.k:
+        break
+  return found
+
+
+def parse_short_scan_tokens(query):
+  if FTS_SYNTAX_RE.search(query):
+    return None
+  tokens = [t.strip() for t in query.split() if t.strip()]
+  if not tokens or not any(len(t) >= 2 for t in tokens):
+    return None
+  return tokens
+
+
+def short_snippet_for(text, tokens, radius=120):
+  folded = text.split("\0", 1)[0].translate(SQLITE_LIKE_FOLD)
+  hits = []
+  for token in tokens:
+    tf = token.translate(SQLITE_LIKE_FOLD)
+    idx = folded.find(tf)
+    if idx == -1:
+      return None
+    hits.append((idx, idx + len(token)))
+  hits.sort()
+  start = max(0, hits[0][0] - radius)
+  end = min(len(text), hits[0][1] + radius)
+  # Merge overlapping/adjacent highlight spans within [start, end]
+  spans = []
+  for a, b in hits:
+    if b <= start or a >= end:
+      continue
+    ca, cb = max(start, a), min(end, b)
+    if spans and ca <= spans[-1][1]:
+      spans[-1] = (spans[-1][0], max(spans[-1][1], cb))
+    else:
+      spans.append((ca, cb))
+  parts = []
+  cur = start
+  for a, b in spans:
+    if a > cur:
+      parts.append(text[cur:a])
+    parts.append(f">>>{text[a:b]}<<<")
+    cur = b
+  if cur < end:
+    parts.append(text[cur:end])
+  prefix = "…" if start > 0 else ""
+  suffix = "…" if end < len(text) else ""
+  return prefix + "".join(parts) + suffix
+
+
+SYNTH_TOKEN_BYTES = (b"[", b"]", "\u2014".encode("utf-8"))
+
+
+def file_may_contain_tokens(path, indexed_size, indexed_inode, token_bytes_list):
+  try:
+    fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+  except OSError:
+    return False
+  try:
+    try:
+      st = os.fstat(fd)
+    except OSError:
+      return False
+    if not stat.S_ISREG(st.st_mode) or st.st_ino != indexed_inode or st.st_size < indexed_size:
+      return False
+    buf = pread_exact(fd, st.st_size, 0) if st.st_size > 0 else b""
+    if buf is None:
+      return False
+  finally:
+    os.close(fd)
+  if b"\\u" in buf:
+    return True
+  if any(any(marker in tok for marker in SYNTH_TOKEN_BYTES) for tok in token_bytes_list):
+    return True
+  if b"\\" in buf and any(b"\\" in tok or b"/" in tok for tok in token_bytes_list):
+    return True
+  low = buf.lower()
+  return all(tok in low for tok in token_bytes_list)
+
+
+def search_short_scan_legacy(db, args, short_tokens):
+  if args.k == 0:
+    return 0
+  filters, path_params = path_filters(args, "+path")
+  sql = "SELECT rowid, path, ts, role, text FROM messages WHERE 1=1"
+  sql += " AND +text LIKE ? ESCAPE '!'" * len(short_tokens)
+  sql += filters + " ORDER BY ts DESC LIMIT ?"
+  params = [*(escape_like(token) for token in short_tokens), *path_params, args.k]
+  hits = db.execute(sql, params).fetchall()
+  found = 0
+  for mid, path, ts, role, text in hits:
+    snip = short_snippet_for(text, short_tokens)
+    if snip is None:
+      continue
+    print_hit(path, ts, role, snip)
+    if args.context > 0:
+      for context_mid, context_ts, context_role, ctext in legacy_context(db, path, mid, args.context):
+        marker = "-" if context_mid < mid else "+" if context_mid > mid else ">"
+        print_context(marker, context_ts, context_role, ctext)
+    found += 1
+  return found
+
+
+def search_short_scan_contentless(db, extractor, args, short_tokens):
+  if args.k == 0:
+    return 0
+  filters, params = path_filters(args, "paths.path")
+  sql = (
+    "SELECT paths.path, paths.vendor, files.size, files.ino "
+    "FROM paths JOIN files USING (path_id) WHERE 1=1" + filters
+    + " ORDER BY files.mtime DESC"
+  )
+  if args.scan_limit < 0:
+    sys.exit("query error: --scan-limit must be >= 0")
+  if args.scan_limit > 0:
+    sql += " LIMIT ?"
+    params.append(args.scan_limit)
+  token_bytes_list = [
+    t.translate(SQLITE_LIKE_FOLD).encode("utf-8")
+    for t in short_tokens
+  ]
+  found = 0
+  for path, vendor, indexed_size, indexed_inode in db.execute(sql, params):
+    if not file_may_contain_tokens(path, indexed_size, indexed_inode, token_bytes_list):
+      continue
+    rows = read_hit_rows(extractor, path, vendor, indexed_size, indexed_inode)
+    for ordinal in range(len(rows) - 1, -1, -1):
+      text, _, ts, role = rows[ordinal]
+      if not short_match(text, short_tokens):
+        continue
+      snip = short_snippet_for(text, short_tokens)
+      if snip is None:
+        continue
+      print_hit(path, ts, role, snip)
+      if args.context > 0:
+        for adjacent, _, cts, crole in rows[max(0, ordinal - args.context):ordinal]:
+          print_context("-", cts, crole, adjacent)
+        print_context(">", ts, role, text)
+        for adjacent, _, cts, crole in rows[ordinal + 1:ordinal + 1 + args.context]:
+          print_context("+", cts, crole, adjacent)
+      found += 1
+      if found == args.k:
+        return found
+  return found
+
+
+def cmd_search(args):
+  if args.k < 0:
+    sys.exit("query error: -k must be >= 0")
+  if args.context < 0:
+    sys.exit("query error: -C/--context must be >= 0")
+  if args.scan_limit < 0:
+    sys.exit("query error: --scan-limit must be >= 0")
+  query = " ".join(args.query)
+  fts_query, short_tokens = parse_search_query(query)
+  short_scan_tokens = None
+  if fts_query is None:
+    if args.short_scan:
+      short_scan_tokens = parse_short_scan_tokens(query)
+    if short_scan_tokens is None:
+      print(
+        f"query error: trigram index requires >=3-char terms (or plain space-separated mixed terms without boolean/quoted <3-char tokens; use --short-scan for 2-char CJK/short-term bounded scan; got: {query})",
+        file=sys.stderr,
+      )
+      sys.exit(2)
+  if not DB_PATH.is_file():
+    if fts_query is not None:
+      with closing(sqlite3.connect(":memory:")) as db:
+        execute_fts_schema(db, "CREATE VIRTUAL TABLE messages USING fts5("
+                              "text, path UNINDEXED, ts UNINDEXED, role UNINDEXED, tokenize='trigram')")
+        search_legacy(db, args, fts_query, short_tokens)
+    print("(no hits)")
+    return
+  try:
+    with closing(sqlite3.connect(DB_PATH.resolve().as_uri() + "?mode=ro", uri=True)) as db:
+      db.execute("BEGIN")
+      version = schema_version(db)
+      if short_scan_tokens is not None:
+        if version < SCHEMA_VERSION:
+          if not db.execute("SELECT 1 FROM sqlite_schema WHERE name = 'messages'").fetchone():
+            sys.exit("ccsi: index database is empty or corrupted; run ccsi index to rebuild")
+          found = search_short_scan_legacy(db, args, short_scan_tokens)
+        else:
+          if version == SCHEMA_VERSION and not has_v3_tables(db):
+            sys.exit("ccsi: index database is corrupted or incomplete; run ccsi index to rebuild")
+          extractor = EXTRACTORS.get(indexed_extractor_version(db)) if version == SCHEMA_VERSION else None
+          if extractor is None:
+            sys.exit("ccsi: incompatible index version. Run ccsi index or use the matching ccsi version.")
+          found = search_short_scan_contentless(db, extractor, args, short_scan_tokens)
+      elif version < SCHEMA_VERSION:
+        if not db.execute("SELECT 1 FROM sqlite_schema WHERE name = 'messages'").fetchone():
+          sys.exit("ccsi: index database is empty or corrupted; run ccsi index to rebuild")
+        found = search_legacy(db, args, fts_query, short_tokens)
+      else:
+        if version == SCHEMA_VERSION and not has_v3_tables(db):
+          sys.exit("ccsi: index database is corrupted or incomplete; run ccsi index to rebuild")
+        extractor = EXTRACTORS.get(indexed_extractor_version(db)) if version == SCHEMA_VERSION else None
+        if extractor is None:
+          sys.exit("ccsi: incompatible index version. Run ccsi index or use the matching ccsi version.")
+        found = search_contentless(db, extractor, args, fts_query, short_tokens)
+  except sqlite3.DatabaseError as exc:
+    if isinstance(exc, sqlite3.OperationalError) and ("locked" in str(exc).lower() or "busy" in str(exc).lower()):
+      sys.exit(f"query error: {exc}")
+    sys.exit(f"ccsi: index database is corrupted or unreadable ({exc}); run ccsi index to rebuild")
+  if not found:
     print("(no hits)")
 
 
@@ -654,6 +2087,7 @@ def main():
   sub = ap.add_subparsers(dest="cmd", required=True)
   p_index = sub.add_parser("index", help="build or incrementally update the index")
   p_index.add_argument("--vendor", action="append", choices=VENDORS, help="restrict to one vendor (default all)")
+  p_index.add_argument("--lock-timeout", type=float, default=None, help="seconds to wait for index lock before exiting (default 60 or CCSI_LOCK_TIMEOUT)")
   p_index.set_defaults(fn=cmd_index)
   p_search = sub.add_parser("search", help="full-text search indexed messages")
   p_search.add_argument("query", nargs="+")
@@ -661,6 +2095,8 @@ def main():
   p_search.add_argument("--vendor", action="append", choices=VENDORS, help="restrict hits to one vendor")
   p_search.add_argument("--exclude-session", action="append", default=[], help="exclude session paths containing this substring")
   p_search.add_argument("-C", "--context", type=int, default=0, help="show N surrounding indexed messages from the same file")
+  p_search.add_argument("--short-scan", action="store_true", help="fall back to bounded recency-ordered scan when all query terms are <3 chars (e.g., 2-char CJK)")
+  p_search.add_argument("--scan-limit", type=int, default=400, help="max most-recent indexed files to scan in --short-scan mode (0 = unlimited, default 400)")
   p_search.set_defaults(fn=cmd_search)
   p_events = sub.add_parser("events", help="stream normalized events as JSONL (vendor, session, ts, cwd, role, kind, tool, model, text)")
   p_events.add_argument("--vendor", action="append", choices=VENDORS)

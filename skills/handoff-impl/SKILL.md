@@ -1,7 +1,7 @@
 ---
 # 本檔在契約測試底下；跑法：bash ~/.claude/skills/handoff-impl/scripts/tests/friction-hardening.test.sh && cd ~/.claude/skills/handoff-impl && skill-up-run run evals/eval.yaml --output-dir ~/Desktop/projects/.claude/trials/skill-up-cli/eval-runs
 name: handoff-impl
-description: 跨 session 實作委外信道（handoff 單在 ~/.claude/handoffs/*.md，發單 session 驗收、另一 session 實作；信道預設手動搬單，自動接力屬未穩定實驗路徑、僅使用者明確要求實驗才走）。Use when 使用者說「開 handoff 單」「把這個實作交給 GPT / codex / 另一個 session 做」「自動派給 codex」「接單」「GPT 說他好了、驗收」，或 /handoff-impl（帶任務描述 = 開單；無參數 = 掃待辦單自動定角色）。Do not use for：同 session 派 subagent（Agent tool 直接派）、同一工作斷點續命（save/resume-session）、產 spec 或 plan（既有 brainstorming / writing-plans 流程）、快速第二意見或卡關救援（codex:rescue）、研究 / review / spec 撰寫類委外（非實作、另案設計）。
+description: 跨 session 實作委外信道（發單 session 驗收、另一 session 實作，預設手動搬單）。Use when 使用者說「開 handoff 單」「把這個實作交給 GPT / codex / 另一個 session 做」「自動派給 codex」「接單」「GPT 說他好了、驗收」，或 /handoff-impl（帶任務描述 = 開單；無參數 = 掃待辦單自動定角色）。Do not use for：同 session 派 subagent（Agent tool）、同一工作斷點續命（save/resume-session）、產 spec 或 plan（brainstorm / to-spec / to-tickets）、快速第二意見或卡關救援（codex:rescue）、研究 / review / spec 撰寫類委外。
 ---
 
 # handoff-impl — 跨 session 實作委外信道

@@ -2,7 +2,6 @@
 
 import importlib.util
 import json
-import os
 import re
 import subprocess
 import sys
@@ -187,6 +186,9 @@ class RangeTargetMaterialsTest(unittest.TestCase):
     self.assertEqual(result["status"], "OK", result)
     execution = result["executions"][0]
     prompt = execution["prompt"]
+    self.assertEqual(Path(execution["argv"][0]).name, "open-seat.py")
+    self.assertEqual(execution["argv"][1], "pr-review-gemini-pro")
+    self.assertEqual(Path(execution["finish_argv"][0]).name, "finish-seat.py")
     diff_file = self.target["review_diff"]["file"]
     self.assertIn(diff_file, prompt)
     self.assertNotIn("sha256", prompt)
@@ -261,13 +263,16 @@ class PrReviewGeminiWebTest(unittest.TestCase):
     result = run_cli(SCRIPT, "materials", self.channel_payload(
       "gemini-pro", preparation_path=finalized["preparation_path"], confirmation=True))
     self.assertEqual(result["status"], "OK")
-    self.assertEqual(len(result["executions"]), 2)
+    self.assertEqual(len(result["executions"]), 1)
     self.assertEqual(result["dispatch_call_count"], 1)
-    primary, execution = result["executions"]
+    (primary,) = result["executions"]
+    self.assertEqual(primary["command"], "python3")
     self.assertEqual(primary["role"], "primary")
-    self.assertEqual(primary["via"], "ccp-gemini-argon")
-    self.assertEqual(primary["requested_model"], "google/gemini-4-argon:high")
-    self.assertEqual(primary["argv"][primary["argv"].index("-p") + 1], primary["prompt"])
+    self.assertEqual(primary["via"], "pr-review-gemini-pro")
+    self.assertEqual(primary.get("requested_model"), "group/gemini-pro:xhigh")
+    self.assertEqual(Path(primary["argv"][0]).name, "open-seat.py")
+    self.assertEqual(primary["argv"][1], "pr-review-gemini-pro")
+    self.assertEqual(Path(primary["finish_argv"][0]).name, "finish-seat.py")
     self.assertEqual(primary["cwd"], self.prepared["targets"][0]["review_root"])
     primary_dirs = [primary["argv"][index + 1] for index, arg in enumerate(primary["argv"])
                     if arg == "--add-dir"]
@@ -275,14 +280,7 @@ class PrReviewGeminiWebTest(unittest.TestCase):
       [target["review_root"] for target in self.prepared["targets"]]
       + [target["materials"]["root"] for target in self.prepared["targets"]])
     self.assertEqual(sorted(primary_dirs), expected_dirs)
-    self.assertEqual(execution["role"], "fallback")
-    self.assertIn("Argon 端點不通", execution["run_if"])
-    self.assertEqual(execution["prompt"], primary["prompt"])
-    self.assertEqual(execution["command"], "agy")
-    argv = execution["argv"]
-    print_args = [arg for arg in argv if str(arg).startswith("--print=")]
-    self.assertEqual(len(print_args), 1)
-    prompt_value = print_args[0].split("=", 1)[1]
+    prompt_value = primary["prompt"]
     self.assertIn("DO NOT ASK FOR CONFIRMATION", prompt_value)
     self.assertFalse(prompt_value.endswith(".txt"))
     for target in self.prepared["targets"]:
@@ -290,19 +288,13 @@ class PrReviewGeminiWebTest(unittest.TestCase):
       self.assertIn(target["head"], prompt_value)
       self.assertIn(target["base"], prompt_value)
       self.assertIn(target["review_root"], prompt_value)
-    add_dir_values = [argv[index + 1] for index, arg in enumerate(argv) if arg == "--add-dir"]
-    self.assertEqual(sorted(add_dir_values), expected_dirs)
-    self.assertTrue(any(arg == "--dangerously-skip-permissions" for arg in argv))
-    model_arg = next(arg for arg in argv if str(arg).startswith("--model"))
-    self.assertEqual(model_arg.split("=", 1)[1], "Gemini 4 Argon (High)")
-    self.assertEqual(execution["requested_model"], "Gemini 4 Argon (High)")
-    self.assertEqual(execution["stdin"], "/dev/null")
-    self.assertEqual(execution["prompt"], prompt_value)
-    self.assertNotIn("prompt_file", execution)
+    self.assertIn("<brief-file>", primary["argv"])
+    self.assertEqual(primary["stdin"], "/dev/null")
+    self.assertNotIn("prompt_file", primary)
     self.assertNotIn("prompt_file", result)
     packet_path = Path(result["packet_path"])
     packet = json.loads(packet_path.read_text())
-    self.assertEqual(packet["executions"][0]["prompt"], prompt_value)
+    self.assertEqual(packet["executions"], [primary])
     self.assertEqual(list(packet_path.parent.glob("*-prompt.txt")), [])
     self.assertEqual(len(result["targets"]), 2)
 
@@ -344,22 +336,6 @@ class PrReviewGeminiWebTest(unittest.TestCase):
       "gemini-pro", preparation_path=finalized["preparation_path"], confirmation=True))
     self.assertEqual(result["status"], "NOT_DISPATCHABLE")
     self.assertEqual(result["reason"], "seat-not-selected")
-    self.assertEqual(result["executions"], [])
-    self.assertEqual(result["dispatch_call_count"], 0)
-
-  def test_flash_without_model_is_model_unavailable(self):
-    finalized = run_cli(TARGETS_SCRIPT, "finalize", {
-      "preparation_path": self.prepared["preparation_path"],
-      "selection": [{"seat": "agy", "angle": "Gemini Flash"}],
-    })
-    saved = os.environ.pop("GEMINI_FLASH_MODEL", None)
-    try:
-      result = run_cli(SCRIPT, "materials", self.channel_payload(
-        "gemini-flash", preparation_path=finalized["preparation_path"], confirmation=True))
-    finally:
-      if saved is not None:
-        os.environ["GEMINI_FLASH_MODEL"] = saved
-    self.assertEqual(result["status"], "MODEL_UNAVAILABLE")
     self.assertEqual(result["executions"], [])
     self.assertEqual(result["dispatch_call_count"], 0)
 
@@ -416,27 +392,31 @@ class PrReviewGeminiWebTest(unittest.TestCase):
       "gemini-pro", preparation_path=adjudicated["preparation_path"], confirmation=True))
     self.assertEqual(result["status"], "OK")
     self.assertEqual(result["dispatch_call_count"], 1)
-    self.assertEqual([item["role"] for item in result["executions"]], ["primary", "fallback"])
+    self.assertEqual([item["role"] for item in result["executions"]], ["primary"])
 
-  def test_selection_and_model_are_kept_and_no_extra_channel_appears(self):
+  def test_flash_uses_only_its_catalog_seat_without_an_agy_interface(self):
     finalized = run_cli(TARGETS_SCRIPT, "finalize", {
       "preparation_path": self.prepared["preparation_path"],
       "selection": [{"seat": "agy", "angle": "Gemini Flash"}],
     })
     result = run_cli(SCRIPT, "materials", self.channel_payload(
       "gemini-flash", preparation_path=finalized["preparation_path"],
-      model="gemini-3.8-flash-high", confirmation=True))
+      interface={"agy": False}, confirmation=True))
     self.assertEqual(result["status"], "OK")
     self.assertEqual(result["channel"], "gemini-flash")
     self.assertEqual(result["angle"], "Gemini Flash")
     self.assertEqual(result["seat"], "agy")
-    self.assertEqual(result["model"], "gemini-3.8-flash-high")
-    execution = result["executions"][0]
-    model_arg = next(arg for arg in execution["argv"] if str(arg).startswith("--model"))
-    self.assertEqual(model_arg.split("=", 1)[1], "gemini-3.8-flash-high")
-    commands = {item["command"] for item in result["executions"]}
-    self.assertEqual(commands, {"agy"})
-
+    self.assertEqual(result["model"], "group/gemini-flash:xhigh")
+    self.assertEqual(result["dispatch_call_count"], 1)
+    self.assertEqual(len(result["executions"]), 1)
+    (primary,) = result["executions"]
+    self.assertEqual(primary["command"], "python3")
+    self.assertEqual(primary["role"], "primary")
+    self.assertEqual(primary["via"], "pr-review-gemini-flash")
+    self.assertEqual(primary.get("requested_model"), "group/gemini-flash:xhigh")
+    self.assertEqual(Path(primary["argv"][0]).name, "open-seat.py")
+    self.assertEqual(primary["argv"][1], "pr-review-gemini-flash")
+    self.assertEqual(Path(primary["finish_argv"][0]).name, "finish-seat.py")
   def test_findings_map_uniquely_across_targets_and_ambiguity_is_never_guessed(self):
     saas_root = self.target("11")["review_root"]
     dash_root = self.target("707")["review_root"]
@@ -446,7 +426,7 @@ class PrReviewGeminiWebTest(unittest.TestCase):
     })
     packet = run_cli(SCRIPT, "materials", self.channel_payload(
       "gemini-pro", preparation_path=finalized["preparation_path"], confirmation=True))
-    reply = {"status": "ok", "model": "gemini-4-argon-high", "output": json.dumps([
+    reply = {"status": "ok", "model": packet["model"], "output": json.dumps([
       {"severity": "HIGH", "file": f"{dash_root}/shared.ts", "line": 1, "line_end": 1,
        "title": "value dropped", "body": "shared value collides across targets",
        "confidence": 0.8, "anchor": "export const shared = 2"},
@@ -507,17 +487,17 @@ class PrReviewGeminiWebTest(unittest.TestCase):
 
     timeout = run_cli(SCRIPT, "collect", {
       "packet_path": packet["packet_path"],
-      "reply": {"status": "error", "reason": "timeout", "model": "gemini-4-argon-high", "output": ""},
+      "reply": {"status": "error", "reason": "timeout", "model": packet["model"], "output": ""},
     })
     self.assertEqual(timeout["status"], "FAILED")
     self.assertEqual(timeout["reason"], "timeout")
 
     packet_flash = run_cli(SCRIPT, "materials", self.channel_payload(
-      "gemini-flash", model="gemini-3.8-flash-high", confirmation=True,
+      "gemini-flash", confirmation=True,
       preparation_path=self.finalized_flash()["preparation_path"]))
     parse_fail = run_cli(SCRIPT, "collect", {
       "packet_path": packet_flash["packet_path"],
-      "reply": {"status": "ok", "model": "gemini-3.8-flash-high",
+      "reply": {"status": "ok", "model": packet_flash["model"],
                 "output": "I have some prose findings, trust me."},
     })
     self.assertEqual(parse_fail["status"], "FAILED")
@@ -536,7 +516,7 @@ class PrReviewGeminiWebTest(unittest.TestCase):
     })
     packet = run_cli(SCRIPT, "materials", self.channel_payload(
       "gemini-pro", preparation_path=finalized["preparation_path"], confirmation=True))
-    reply = {"status": "ok", "model": "gemini-4-argon-high", "output": json.dumps([
+    reply = {"status": "ok", "model": packet["model"], "output": json.dumps([
       {"severity": "HIGH", "file": f"{self.target('11')['review_root']}/a.ts", "line": 2,
        "line_end": 2, "title": "no guard", "body": "b is added without a guard",
        "confidence": 0.9, "anchor": "const b = 2"},
@@ -559,7 +539,7 @@ class PrReviewGeminiWebTest(unittest.TestCase):
     self.assertIn("| gemini |", draft)
     self.assertIn("F-01", draft)
 
-  def test_argon_primary_runs_read_only_without_user_hooks_or_mcp(self):
+  def test_gemini_primary_lets_the_catalog_set_permissions(self):
     finalized = run_cli(TARGETS_SCRIPT, "finalize", {
       "preparation_path": self.prepared["preparation_path"],
       "selection": [{"seat": "agy", "angle": "Gemini Pro"}],
@@ -567,34 +547,91 @@ class PrReviewGeminiWebTest(unittest.TestCase):
     result = run_cli(SCRIPT, "materials", self.channel_payload(
       "gemini-pro", preparation_path=finalized["preparation_path"], confirmation=True))
     argv = result["executions"][0]["argv"]
-    self.assertEqual(argv[argv.index("--permission-mode") + 1], "dontAsk")
-    self.assertEqual(json.loads(argv[argv.index("--settings") + 1]), {"disableAllHooks": True})
-    self.assertIn("--strict-mcp-config", argv)
-    self.assertEqual(argv[argv.index("--setting-sources") + 1], "local")
+    self.assertEqual(argv[1], "pr-review-gemini-pro")
+    flags = {arg.split("=", 1)[0] for arg in argv}
+    with self.subTest(flag="--permission-mode"):
+      self.assertNotIn("--permission-mode", flags)
+    with self.subTest(flag="--allow-tool"):
+      self.assertNotIn("--allow-tool", flags)
     self.assertNotIn("--dangerously-skip-permissions", argv)
-    allowed = argv[argv.index("--allowedTools") + 1:argv.index("--add-dir")]
-    self.assertFalse({"Edit", "Write", "Bash"} & set(allowed))
-    self.assertTrue(all(not tool.startswith("Bash(") or tool.startswith("Bash(git ") for tool in allowed))
 
-  def test_collect_accepts_the_magpie_and_the_agy_argon_names_only(self):
+  def test_collect_accepts_only_usable_seat_answers_from_a_seat_result(self):
     finalized = run_cli(TARGETS_SCRIPT, "finalize", {
       "preparation_path": self.prepared["preparation_path"],
       "selection": [{"seat": "agy", "angle": "Gemini Pro"}],
     })
     packet = run_cli(SCRIPT, "materials", self.channel_payload(
       "gemini-pro", preparation_path=finalized["preparation_path"], confirmation=True))
-    for model in ("google/gemini-4-argon:high", "Gemini 4 Argon (High)"):
-      with self.subTest(model=model):
+    target = self.prepared["targets"][0]
+    seat_result = {
+      "seat_id": "pr-review-gemini-pro", "status": "success", "opinion_usable": True,
+      "answer": json.dumps([{"file": str(Path(target["review_root"]) / "src/example.py"),
+                             "line_start": 7, "severity": "HIGH", "title": "Fixture finding"}]),
+      "checks": {"served_model": {"passed": True, "turns": [
+        {"role": "main", "served_model": "fixture-new-served-model"},
+      ]}},
+    }
+    for status, usable in (("success", True), ("failed", False)):
+      with self.subTest(status=status):
         result = run_cli(SCRIPT, "collect", {
           "packet_path": packet["packet_path"],
-          "reply": {"status": "ok", "model": model, "output": "[]"},
+          "seat_result": {**seat_result, "status": status, "opinion_usable": usable},
         })
-        self.assertEqual(result["status"], "OK")
-    other = run_cli(SCRIPT, "collect", {
-      "packet_path": packet["packet_path"],
-      "reply": {"status": "ok", "model": "google/gemini-3.8-flash:high", "output": "[]"},
+        self.assertEqual(result["status"], "OK" if usable else "FAILED")
+        self.assertEqual(result["reported_model"], "fixture-new-served-model" if usable else "")
+        self.assertEqual(
+          [(finding["target_identity"], finding["file"], finding["line"]) for finding in result["findings"]],
+          [(target["target_identity"], "src/example.py", 7)] if usable else [],
+        )
+
+  def test_collect_preserves_failed_seat_checks_and_rejects_malformed_results(self):
+    finalized = run_cli(TARGETS_SCRIPT, "finalize", {
+      "preparation_path": self.prepared["preparation_path"],
+      "selection": [{"seat": "agy", "angle": "Gemini Pro"}],
     })
-    self.assertEqual(other["reason"], "model-mismatch")
+    packet = run_cli(SCRIPT, "materials", self.channel_payload(
+      "gemini-pro", preparation_path=finalized["preparation_path"], confirmation=True))
+    seat_result = {
+      "seat_id": "pr-review-gemini-pro", "status": "success", "opinion_usable": True,
+      "answer": json.dumps([{"target": packet["targets"][0], "file": "src/example.py", "line": 7}]),
+    }
+    for case, changes, reason_parts in (
+      ("failed checks", {"status": "failed", "opinion_usable": False, "checks": {
+        "served_model": {"passed": True, "turns": [{"role": "main", "served_model": "fixture-model"}]},
+        "tool_allowlist": {"passed": False, "violations": [{"tool": "Edit"}, {"tool": "Write"}]},
+        "terminal_cleanup": {"passed": False},
+      }}, ("tool_allowlist", "terminal_cleanup", "Edit", "Write")),
+      ("null checks", {"checks": None}, ("invalid checks",)),
+      ("null turns", {"checks": {"served_model": {"passed": True, "turns": None}}}, ("invalid served_model.turns",)),
+    ):
+      with self.subTest(case=case):
+        result = run_cli(SCRIPT, "collect", {"packet_path": packet["packet_path"],
+                                            "seat_result": {**seat_result, **changes}})
+        self.assertEqual(result["status"], "FAILED")
+        self.assertEqual(result["findings"], [])
+        self.assertEqual(result["failed_channels"], [{"channel": "gemini-pro", "reason": result["reason"]}])
+        for part in reason_parts:
+          self.assertIn(part, result["reason"])
+
+  def test_collect_names_failed_checks_and_keeps_valid_violation_tools(self):
+    finalized = run_cli(TARGETS_SCRIPT, "finalize", {
+      "preparation_path": self.prepared["preparation_path"],
+      "selection": [{"seat": "agy", "angle": "Gemini Pro"}],
+    })
+    packet = run_cli(SCRIPT, "materials", self.channel_payload(
+      "gemini-pro", preparation_path=finalized["preparation_path"], confirmation=True))
+    result = run_cli(SCRIPT, "collect", {"packet_path": packet["packet_path"], "seat_result": {
+      "seat_id": "pr-review-gemini-pro", "status": "success", "opinion_usable": True, "answer": "[]",
+      "checks": {
+        "tool_allowlist": {"passed": False, "violations": [None, {"tool": "Edit"}, [], {"tool": "Write"}]},
+        "terminal_cleanup": None,
+        "review_method": {"passed": 1, "violations": "malformed"},
+        "served_model": {"passed": True, "violations": None},
+      },
+    }})
+    self.assertEqual(result["status"], "FAILED")
+    self.assertEqual(result["findings"], [])
+    self.assertEqual(result["reason"], "seat-failed: tool_allowlist (Edit, Write); terminal_cleanup; review_method")
 
   def test_reports_never_claim_runtime_model_verification(self):
     finalized = run_cli(TARGETS_SCRIPT, "finalize", {
@@ -603,8 +640,9 @@ class PrReviewGeminiWebTest(unittest.TestCase):
     })
     packet = run_cli(SCRIPT, "materials", self.channel_payload(
       "gemini-pro", preparation_path=finalized["preparation_path"], confirmation=True))
-    reply = {"status": "ok", "model": "gemini-4-argon-high", "output": "[]"}
+    reply = {"status": "ok", "model": packet["model"], "output": "[]"}
     result = run_cli(SCRIPT, "collect", {"packet_path": packet["packet_path"], "reply": reply})
+    self.assertEqual(result["status"], "OK")
     self.assertNotIn("observed_model", json.dumps(result))
     self.assertIn("reported_model", json.dumps(result))
 
@@ -678,7 +716,6 @@ class SpecContextTest(unittest.TestCase):
     saas_id = "github:github.com/acme/saas#11"
     dash_id = "github:github.com/acme/dashboard#707"
     self.assertEqual({saas_id, dash_id}, {target["target_identity"] for target in prepared["targets"]})
-    os.environ.setdefault("GEMINI_FLASH_MODEL", "flash-test-model")
     for channel, prompt in self.channel_prompts(prepared).items():
       with self.subTest(channel=channel):
         self.assertEqual(prompt.count(SPEC_PREFACE), 1)
@@ -705,7 +742,6 @@ class SpecContextTest(unittest.TestCase):
 
   def test_every_channel_says_no_spec_attached_when_state_has_none(self):
     prepared = self.prepared_with([], [], "run-nospec")
-    os.environ.setdefault("GEMINI_FLASH_MODEL", "flash-test-model")
     for channel, prompt in self.channel_prompts(prepared).items():
       with self.subTest(channel=channel):
         self.assertIn("no spec attached", prompt)
@@ -753,7 +789,6 @@ class TargetDiffFileTest(unittest.TestCase):
     self.addCleanup(self._tmp.cleanup)
     self.fx = Fixture(self._tmp.name)
     self.prepared = self.fx.prepare()
-    os.environ.setdefault("GEMINI_FLASH_MODEL", "flash-test-model")
 
   def materials(self, channel, seat, angle, preparation_path=None):
     finalized = run_cli(TARGETS_SCRIPT, "finalize", {
@@ -790,7 +825,7 @@ class TargetDiffFileTest(unittest.TestCase):
             target["checkout"], target["authored_diff_base"], target["head"]))
           self.assertTrue(path.read_text().strip())
 
-  def test_prompt_tells_argon_to_read_the_file_instead_of_running_git(self):
+  def test_prompt_tells_gemini_pro_to_read_the_file_instead_of_running_git(self):
     for channel, result in self.gemini_results().items():
       with self.subTest(channel=channel):
         prompt = result["executions"][0]["prompt"]
@@ -807,13 +842,6 @@ class TargetDiffFileTest(unittest.TestCase):
           with self.subTest(channel=channel, role=execution.get("role"), target=target["target_identity"]):
             self.assertIn(str(self.diff_path_in(prompt, target).parent), add_dirs)
             self.assertIn(target["review_root"], add_dirs)
-
-  def test_both_pro_executions_share_the_same_prompt_and_diff_files(self):
-    result = self.materials("gemini-pro", "agy", "Gemini Pro")
-    primary, fallback = result["executions"]
-    self.assertEqual(primary["prompt"], fallback["prompt"])
-    self.assertEqual(primary["argv"][primary["argv"].index("-p") + 1], fallback["prompt"])
-    self.assertNotIn("Bash(git -C", json.dumps(primary["argv"]))
 
   def test_cancel_removes_the_diff_files_with_the_other_materials(self):
     result = self.materials("gemini-pro", "agy", "Gemini Pro")
@@ -865,6 +893,181 @@ class TargetDiffFileTest(unittest.TestCase):
     self.assertEqual(result["reason_codes"], ["TARGET_DIFF_WRITE_FAILED"])
     self.assertEqual(result["failed_targets"], [broken["target_identity"]])
     self.assertNotIn("executions", result)
+
+
+class GeminiWebBoundaryHardeningTest(unittest.TestCase):
+  def setUp(self):
+    self._tmp = tempfile.TemporaryDirectory()
+    self.addCleanup(self._tmp.cleanup)
+    self.fx = Fixture(self._tmp.name)
+    self.prepared = self.fx.prepare()
+    self.finalized = run_cli(TARGETS_SCRIPT, "finalize", {
+      "preparation_path": self.prepared["preparation_path"],
+      "selection": [{"seat": "agy", "angle": "Gemini Pro"}],
+    })
+    self.packet = run_cli(SCRIPT, "materials", {
+      "preparation_path": self.finalized["preparation_path"],
+      "channel": "gemini-pro",
+      "confirmation": True,
+    })
+    self.assertEqual(self.packet["status"], "OK", self.packet)
+
+  def _run_raw(self, mode, raw_text):
+    proc = subprocess.run(
+      [sys.executable, str(SCRIPT), mode],
+      input=raw_text,
+      capture_output=True,
+      text=True,
+    )
+    self.assertNotIn("Traceback", proc.stderr)
+    return proc.returncode, json.loads(proc.stdout)
+
+  def test_collect_handles_non_dict_finding_items_without_crashing(self):
+    target = self.prepared["targets"][0]
+    reply = {
+      "status": "ok",
+      "model": self.packet["model"],
+      "output": json.dumps([
+        "not-a-dict",
+        None,
+        42,
+        {
+          "severity": "HIGH",
+          "file": f"{target['review_root']}/a.ts",
+          "line_start": 2,
+          "line_end": 2,
+          "title": "valid finding",
+          "body": "real issue",
+          "confidence": 0.9,
+          "anchor": "const b = 2",
+        },
+      ]),
+    }
+    rc, result = self._run_raw("collect", json.dumps({
+      "packet_path": self.packet["packet_path"],
+      "reply": reply,
+    }))
+    self.assertEqual(rc, 0)
+    self.assertEqual(result["status"], "OK")
+    self.assertEqual(len(result["findings"]), 1)
+    self.assertEqual(len(result["unmapped_findings"]), 3)
+    for item in result["unmapped_findings"]:
+      self.assertNotIn("target_identity", item)
+
+  def test_map_finding_rejects_empty_root_and_path_traversal_even_with_target(self):
+    target = self.prepared["targets"][0]
+    tid = target["target_identity"]
+    reply = {
+      "status": "ok",
+      "model": self.packet["model"],
+      "output": json.dumps([
+        {"severity": "HIGH", "target": tid, "file": "", "line": 1, "title": "empty"},
+        {"severity": "HIGH", "target": tid, "file": "   ", "line": 1, "title": "blank"},
+        {"severity": "HIGH", "target": tid, "file": ".", "line": 1, "title": "dot"},
+        {"severity": "HIGH", "target": tid, "file": "../../etc/passwd", "line": 1, "title": "traversal"},
+        {"severity": "HIGH", "target": tid, "file": target["review_root"], "line": 1, "title": "root-dir"},
+        {"severity": "HIGH", "file": target["review_root"], "line": 1, "title": "abs-root-dir"},
+      ]),
+    }
+    result = run_cli(SCRIPT, "collect", {"packet_path": self.packet["packet_path"], "reply": reply})
+    self.assertEqual(result["status"], "OK")
+    self.assertEqual(result["findings"], [])
+    self.assertEqual(len(result["unmapped_findings"]), 6)
+
+  def test_non_dict_payloads_and_corrupted_packet_return_structured_errors(self):
+    for mode in ("materials", "collect", "merge"):
+      for raw in ("[]", "null", '"text"'):
+        with self.subTest(mode=mode, raw=raw):
+          rc, data = self._run_raw(mode, raw)
+          self.assertEqual(rc, 1)
+          self.assertEqual(data["status"], "ERROR")
+          self.assertEqual(data["reason_codes"], ["INVALID_INPUT_JSON"])
+
+    bad_packet = Path(self._tmp.name) / "bad.packet.json"
+    for content in ("[]", json.dumps({"channel": "unknown", "targets": []}), json.dumps({"channel": "gemini-pro", "targets": "not-list"})):
+      bad_packet.write_text(content)
+      rc, data = self._run_raw("collect", json.dumps({"packet_path": str(bad_packet), "reply": {}}))
+      self.assertEqual(data["status"], "ERROR")
+      self.assertIn("PACKET_INVALID", data["reason_codes"])
+
+    rc, data = self._run_raw("collect", json.dumps({
+      "packet_path": self.packet["packet_path"],
+      "reply": "not-a-dict",
+    }))
+    self.assertEqual(data["status"], "FAILED")
+
+    rc, data = self._run_raw("materials", json.dumps({
+      "preparation_path": self.finalized["preparation_path"],
+      "channel": "web-gpt",
+      "interface": "not-a-dict",
+      "confirmation": True,
+    }))
+    self.assertEqual(data["status"], "ERROR")
+
+    empty_state_path = Path(self._tmp.name) / "empty-targets.json"
+    state = json.loads(Path(self.finalized["preparation_path"]).read_text())
+    state["targets"] = []
+    empty_state_path.write_text(json.dumps(state))
+    rc, data = self._run_raw("materials", json.dumps({
+      "preparation_path": str(empty_state_path),
+      "channel": "gemini-pro",
+      "confirmation": True,
+    }))
+    self.assertEqual(data["status"], "ERROR")
+    self.assertEqual(data["reason_codes"], ["NO_TARGETS"])
+
+    rc, data = self._run_raw("merge", json.dumps({"channel_results": "not-a-list"}))
+    self.assertEqual(data["status"], "OK")
+    self.assertEqual(data["findings"], [])
+
+  def test_parse_output_second_fence_uppercase_json_and_blank_served_model(self):
+    target = self.prepared["targets"][0]
+    fenced_second = (
+      "Here is a quick snippet:\n"
+      "```ts\nconst x = 1;\n```\n"
+      "Final output:\n"
+      "```JSON\n"
+      + json.dumps([{"severity": "LOW", "file": f"{target['review_root']}/a.ts", "line_start": 1, "title": "note"}])
+      + "\n```"
+    )
+    result = run_cli(SCRIPT, "collect", {
+      "packet_path": self.packet["packet_path"],
+      "reply": {"status": "ok", "model": self.packet["model"], "output": fenced_second},
+    })
+    self.assertEqual(result["status"], "OK", result)
+    self.assertEqual(len(result["findings"]), 1)
+
+    blank_model = run_cli(SCRIPT, "collect", {
+      "packet_path": self.packet["packet_path"],
+      "seat_result": {
+        "seat_id": "pr-review-gemini-pro",
+        "status": "success",
+        "opinion_usable": True,
+        "answer": "[]",
+        "checks": {"served_model": {"passed": True, "turns": [
+          {"role": "main", "served_model": "   "},
+        ]}},
+      },
+    })
+    self.assertEqual(blank_model["status"], "FAILED")
+    self.assertIn("missing main served model", blank_model["reason"])
+
+  def test_seat_result_with_success_status_but_opinion_usable_false_is_rejected(self):
+    unusable = run_cli(SCRIPT, "collect", {
+      "packet_path": self.packet["packet_path"],
+      "seat_result": {
+        "seat_id": "pr-review-gemini-pro",
+        "status": "success",
+        "opinion_usable": False,
+        "answer": "[]",
+        "checks": {"served_model": {"passed": True, "turns": [
+          {"role": "main", "served_model": "group/gemini-pro:xhigh"},
+        ]}},
+      },
+    })
+    self.assertEqual(unusable["status"], "FAILED")
+    self.assertEqual(unusable["reason"], "seat-failed")
+    self.assertEqual(unusable["findings"], [])
 
 
 if __name__ == "__main__":

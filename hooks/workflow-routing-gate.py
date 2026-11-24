@@ -9,7 +9,7 @@
 # 判不出來（讀不到 scriptPath、具名 workflow 找不到檔、tokenizer 例外）一律放行：本 gate 是提示型偏嚴，
 # 誤攔會擋掉每日 digest／本機分析，代價高於漏攔。
 # 停用開關：touch ~/.claude/hooks/workflow-routing-gate.off
-# Codex 端不搬：Codex 已於 2026-09-20 停用，且 Workflow tool 是 CC 專屬。
+# Codex 端不搬：Workflow tool 是 CC 專屬。
 
 import json
 import sys

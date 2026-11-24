@@ -103,6 +103,17 @@
         ]
       },
       {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/contract-test-receipt-gate.sh",
+            "timeout": 35,
+            "statusMessage": "自動跑契約測試並寫收據..."
+          }
+        ]
+      },
+      {
         "matcher": "Agent",
         "hooks": [
           {
@@ -139,12 +150,12 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "Read|Edit|Write|MultiEdit|Bash|Skill|Agent|Workflow|mcp__lcu__js",
+        "matcher": "Read",
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ~/.claude/hooks/question-tool-conflict-gate.py",
-            "timeout": 5
+            "command": "/opt/homebrew/bin/python3 -I ~/.claude/hooks/read-image-shrink.py",
+            "timeout": 30
           }
         ]
       },
@@ -154,6 +165,16 @@
           {
             "type": "command",
             "command": "/usr/bin/python3 -I ~/.claude/hooks/dotenv-read-gate.py",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "Bash|Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/python3 -IB ~/.claude/hooks/auto-mode-write-guard.py",
             "timeout": 5
           }
         ]
@@ -185,6 +206,17 @@
         "hooks": [
           {
             "type": "command",
+            "command": "~/.claude/hooks/contract-test-preflight-gate.sh",
+            "timeout": 10,
+            "statusMessage": "檢查契約測試考卷..."
+          }
+        ]
+      },
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
             "command": "python3 ~/.claude/hooks/pr-review-report-write-gate.py",
             "timeout": 10
           }
@@ -202,6 +234,11 @@
             "type": "command",
             "command": "python3 ~/.claude/hooks/code-search-root-gate.py",
             "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/agent-contract-validator-gate.sh",
+            "timeout": 15
           },
           {
             "type": "command",
@@ -293,6 +330,12 @@
             "command": "python3 ~/.claude/hooks/ticket-yagni.py gate",
             "timeout": 15,
             "statusMessage": "檢查票關閉前的 YAGNI verdict..."
+          },
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/always-on-size-gate.py",
+            "timeout": 5,
+            "statusMessage": "檢查常駐規則淨增體積上限..."
           }
         ]
       },
@@ -320,6 +363,11 @@
             "command": "~/.claude/hooks/ledger-bootstrap.sh",
             "timeout": 10,
             "statusMessage": "檢查新 repo ledger bootstrap..."
+          },
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/gpt-convergence-reminder.sh",
+            "timeout": 5
           }
         ]
       },
@@ -359,6 +407,15 @@
         "hooks": [
           {
             "type": "command",
+            "command": "~/.claude/hooks/contract-test-receipt-gate.sh",
+            "timeout": 35
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
             "command": "~/.claude/hooks/matt-tdd-gate.sh",
             "timeout": 15
           }
@@ -381,6 +438,15 @@
             "timeout": 5
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/herdr-worker-stop-gate.sh",
+            "timeout": 10
+          }
+        ]
       }
     ],
     "UserPromptSubmit": [
@@ -388,7 +454,25 @@
         "hooks": [
           {
             "type": "command",
+            "command": "python3 -IB ~/.claude/hooks/auto-mode-inject.py",
+            "timeout": 3
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
             "command": "python3 ~/.claude/hooks/auto-memory-jev.py deliver",
+            "timeout": 3
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/opus-chinese-nudge.py",
             "timeout": 3
           }
         ]

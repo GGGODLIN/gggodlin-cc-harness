@@ -117,9 +117,9 @@
 
 | 檔 | 處數 | 實值 | 換代重校時必改 |
 |---|---|---|---|
-| `agents/` 12 檔 | 23 行 | opus×6（python/typescript/code/architecture/security/spec-compliance-reviewer）、sonnet×6（docs-lookup／deep-explore／chrome-fetcher／semble-search／parallel-search／url-fetcher）；effort xhigh×5、high×1、low×5 | ✅ 全部。**2026-07-25 alias 位移的受災面就是這 6 個 opus 檔**（零本地改動整隊換裝 claude-opus-5） |
-| `workflows/` | 21 處 | `model: 'opus'`×7、`effort: 'xhigh'`×6、`model: 'sonnet'`×4、`model: 'haiku'`×3、`model: 'inherit'`×1 | ✅ opus 那 7 處同受 alias 位移影響；haiku 3 處照 SSOT「機械一律 workflow 寫死」屬刻意 |
-| `settings.json` | 7 處 | `model: "opus[1m]"`（← alias、位移入口）、`fallbackModel: ["claude-opus-4-7[1m]","claude-sonnet-4-6[1m]"]`（← 釘死具體 id）、`effortLevel: "xhigh"`、`CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS: "5"`、deny `Agent(Explore)`／`Agent(model:haiku)` | ✅ `model` 用 alias 是刻意（維持浮動 alias 拍板）、但**它就是 2026-07-25 靜默換裝的單點**；fallbackModel 釘死 id 反而不受位移影響 |
+| `agents/` 25 檔 | 50 行 | opus×14、sonnet×8、haiku×3（fable×0）；effort xhigh×1、high×14、medium×10（2026-11-17 換代 review 重算；2026-07-25 基準為 12 檔 23 行） | ✅ 全部。**2026-07-25 alias 位移的受災面就是 opus 檔** |
+| `workflows/` | 107 處 | `effort: 'high'`×37、`model: 'opus'`×24、`model: 'sonnet'`×24、`model: 'haiku'`×8、`effort: 'medium'`×7、`model: 'routed-judge'`×4、`model: 'inherit'`×2、`model: 'swe2max-pool'`×1（2026-11-17 重算；2026-07-25 基準為 21 處） | ✅ opus 處同受 alias 位移影響；haiku 處照 SSOT「機械一律 workflow 寫死」屬刻意 |
+| `settings.json` | 17 處 | `model: "opus"`（← alias、位移入口）、`effortLevel: "xhigh"`、`modelSettings` 14 個模型檔位（含 `claude-fable-5-2` `high`）、`CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS: "5"`、deny `Agent(Explore)`／`Agent(general-purpose)`／`Agent(claude)`（`fallbackModel` 與 `Agent(model:haiku)` deny 已拆除，2026-11-17 重算） | ✅ `model` 用浮動 alias 屬刻意，為靜默換裝檢查點 |
 
 觀察：**alias（浮動）與釘死 id 在同一份 settings.json 並存**——主 model 走 alias 會靜默換代、fallback 釘 id 不會。這個不對稱是換代 review 的固定檢查項。
 
@@ -184,6 +184,7 @@ printf "skills含參數檔 %s\n"     "$(grep -rl -E "model: *['\"]?(haiku|sonnet
 ```
 
 **對帳基準（2026-07-25 首次盤點、harness_sha `bdfb403c7f51-dirty`——與 L2 baseline 產生時同值，U2 刪 inline 後注入面內容回到位元組級一致）**：CLAUDE.md規則行 76／fact-check條 11／dispatch規則行 19／performance行 3／routing-SSOT段 15／agents參數行 23／workflows參數處 21／skills含參數檔 12。
+**2026-11-17 模型換代對帳快照（CC `2.1.325`）**：CLAUDE.md規則行 55／fact-check條 14（編號共 17 條）／dispatch規則行 29／performance行 1／routing-SSOT段 21／agents參數行 50／workflows參數處 107／skills含參數檔 6。
 
 **3. 對不上就增量重算、不重做全量。** 數字有差 → grep 出當前規則行清單、diff 對照本檔 a 段 slug 清單、只對「新出現／消失」的規則做 y/n 判斷。首輪全量盤點實耗約 40 分鐘；增量通常 < 5 分鐘。
 

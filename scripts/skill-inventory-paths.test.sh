@@ -163,7 +163,7 @@ PY
   printf '%s\n' "$fixture_root/delegate-browser-e2e/SKILL.md" "$fixture_root/old/SKILL.md" > "$fixture_root/paths"
   mkdir -p "$fixture_root/delegate-browser-e2e" "$fixture_root/old" "$fixture_root/state"
   touch "$fixture_root/delegate-browser-e2e/SKILL.md" "$fixture_root/old/SKILL.md"
-  printf '%s\n' "$fixture_root/old/SKILL.md" > "$fixture_root/state/seen"
+  printf '%s\t\n' "$fixture_root/old/SKILL.md" > "$fixture_root/state/seen"
   python3 - "$fixture_root/last_run" "$fixture_root/delegate-browser-e2e/SKILL.md" "$fixture_root/old/SKILL.md" <<'PY'
 from pathlib import Path
 import os
@@ -176,13 +176,20 @@ os.utime(old, (90, 90))
 PY
   PATHS_FILE="$fixture_root/paths" SEEN_PATHS="$fixture_root/state/seen" LAST_RUN="$fixture_root/last_run" CHANGED_FILE="$fixture_root/changed" bash "$TMP/selection.sh"
   if grep -Fxq "$fixture_root/delegate-browser-e2e/SKILL.md" "$fixture_root/changed" && ! grep -Fxq "$fixture_root/old/SKILL.md" "$fixture_root/changed"; then
-    printf '%s\n' "$fixture_root/delegate-browser-e2e/SKILL.md" >> "$fixture_root/state/seen"
+    printf '%s\t\n' "$fixture_root/delegate-browser-e2e/SKILL.md" >> "$fixture_root/state/seen"
     PATHS_FILE="$fixture_root/paths" SEEN_PATHS="$fixture_root/state/seen" LAST_RUN="$fixture_root/last_run" CHANGED_FILE="$fixture_root/changed-again" bash "$TMP/selection.sh"
-    if [ ! -s "$fixture_root/changed-again" ]; then
+    cat > "$fixture_root/old/SKILL.md" <<'SKILL_EOF'
+---
+description: Updated trigger description
+---
+Body text
+SKILL_EOF
+    PATHS_FILE="$fixture_root/paths" SEEN_PATHS="$fixture_root/state/seen" LAST_RUN="$fixture_root/last_run" CHANGED_FILE="$fixture_root/changed-desc" bash "$TMP/selection.sh"
+    if [ ! -s "$fixture_root/changed-again" ] && grep -Fxq "$fixture_root/old/SKILL.md" "$fixture_root/changed-desc"; then
       echo "PASS incremental selection handles unseen then old seen path"
       ((pass++))
     else
-      echo "FAIL incremental selection retained old seen path: $(<"$fixture_root/changed-again")"
+      echo "FAIL incremental selection retained old seen path or missed updated description"
       ((fail++))
     fi
   else

@@ -39,10 +39,10 @@ if args[:2] == ["pane", "get"]:
   emit({"result": {"pane": {"pane_id": "w1:p1", "workspace_id": "w1"}}})
 elif args[:2] == ["tab", "create"]:
   emit({"result": {"root_pane": {"pane_id": "w1:p2"}, "tab": {"tab_id": "w1:t2"}}})
-elif args[:2] == ["agent", "start"]:
+elif args[:2] in (["pane", "run"], ["pane", "wait-output"], ["agent", "rename"]):
   emit({"ok": True})
 elif args[:2] == ["agent", "list"]:
-  emit({"result": {"agents": [{"name": worker, "pane_id": worker_pane, "agent_session": {"value": worker_session}}, {"name": "main", "pane_id": "w1:p1", "agent_session": {"value": main_session}}]}})
+  emit({"result": {"agents": [{"agent": "claude", "agent_status": "working", "name": worker, "pane_id": worker_pane, "agent_session": {"value": worker_session}}, {"name": "main", "pane_id": "w1:p1", "agent_session": {"value": main_session}}]}})
 elif args[:2] == ["agent", "get"]:
   target = args[2]
   if target == "w1:p1" and os.environ.get("STUB_MAIN_LOOKUP_FAIL"):
@@ -251,13 +251,27 @@ class HerdrWatcherIdentityTest(unittest.TestCase):
   def install_hc(self):
     hc_stub = '''#!/usr/bin/env python3
 import json, os, sys
+from pathlib import Path
 args = sys.argv[1:]
 with open(os.environ["STUB_LOG"], "a") as log:
   log.write(json.dumps({"bin": "hc", "args": args}) + "\\n")
+seq_path = os.environ.get("HC_SEQ_FILE")
+if seq_path and Path(seq_path).exists() and args[:1] in (["wait"], ["get"]):
+  seq = json.loads(Path(seq_path).read_text())
+  key = args[0]
+  items = seq.get(key) or []
+  if items:
+    nxt = items.pop(0) if len(items) > 1 else items[0]
+    Path(seq_path).write_text(json.dumps(seq))
+    if nxt.get("_exit"):
+      sys.exit(nxt["_exit"])
+    print(json.dumps(nxt))
+    sys.exit(0)
 if args[:1] == ["wait"]:
   if os.environ.get("HC_WAIT_FAIL"):
     sys.exit(1)
-  print(json.dumps({"terminal": args[1], "ended": True, "reason": os.environ.get("HC_WAIT_REASON", "status"), "status": {"state": os.environ.get("HC_WAIT_STATE", "done")}}))
+  turn = int(os.environ["HC_WAIT_TURN"]) if "HC_WAIT_TURN" in os.environ else 1
+  print(json.dumps({"terminal": args[1], "ended": True, "reason": os.environ.get("HC_WAIT_REASON", "status"), "status": {"state": os.environ.get("HC_WAIT_STATE", "done")}, "turn": turn}))
 elif args[:1] == ["get"]:
   state = "finished" if os.environ.get("HC_PARENT_DEAD") else "live"
   print(json.dumps({"address": args[1], "state": state}))
@@ -301,6 +315,49 @@ else:
     self.assertNotEqual(result.returncode, 0)
     self.assertEqual(self.hc_sends(), [])
     self.assertIn("未送達", self.log.read_text())
+
+  def test_herdr_core_working_transition_retries_wait_without_false_unverified(self):
+    seq = self.root / "hc-seq.json"
+    seq.write_text(json.dumps({
+      "wait": [
+        {"terminal": "t9", "ended": True, "reason": "status", "status": "working", "turn": 5},
+        {"terminal": "t9", "ended": True, "reason": "status", "status": "done", "turn": 5},
+      ],
+      "get": [{"address": "t3", "state": "live"}],
+    }))
+    result = self.watch_hc(HC_SEQ_FILE=str(seq), HC_WAIT_TRANSITION_SLEEP="0.01")
+    self.assertEqual(result.returncode, 0, result.stderr)
+    self.assertEqual(len(self.hc_sends()), 1)
+    self.assertIn("stopped, status=done", self.hc_sends()[0])
+    self.assertNotIn("未驗證", self.hc_sends()[0])
+
+  def test_herdr_core_rearm_on_already_notified_turn_waits_for_background_task(self):
+    first = self.watch_hc(HC_WAIT_TURN="2")
+    self.assertEqual(first.returncode, 0, first.stderr)
+    self.assertEqual(len(self.hc_sends()), 1)
+    seq = self.root / "hc-seq.json"
+    seq.write_text(json.dumps({
+      "wait": [
+        {"terminal": "t9", "ended": True, "reason": "status", "status": "done", "turn": 2},
+        {"terminal": "t9", "ended": True, "reason": "status", "status": "done", "turn": 2},
+      ],
+      "get": [
+        {"address": "t9", "state": "live", "status": {"state": "done"}, "turn": 2},
+        {"address": "t9", "state": "live", "status": {"state": "working"}, "turn": 2},
+        {"address": "t3", "state": "live"},
+      ],
+    }))
+    second = self.watch_hc(HC_SEQ_FILE=str(seq), HC_AWAIT_NEXT_TURN_INTERVAL="0.01", HC_AWAIT_NEXT_TURN_POLLS="5")
+    self.assertEqual(second.returncode, 0, second.stderr)
+    self.assertEqual(len(self.hc_sends()), 2)
+    self.assertTrue(all("stopped, status=done" in msg for msg in self.hc_sends()))
+
+  def test_herdr_core_rearm_after_new_turn_already_finished_notifies_immediately(self):
+    first = self.watch_hc(HC_WAIT_TURN="2")
+    self.assertEqual(first.returncode, 0, first.stderr)
+    second = self.watch_hc(HC_WAIT_TURN="3")
+    self.assertEqual(second.returncode, 0, second.stderr)
+    self.assertEqual(len(self.hc_sends()), 2)
 
 
 if __name__ == "__main__":

@@ -2,6 +2,21 @@
 
 公開版 harness 的變更紀錄。每一節對應一次發布；「Unreleased」是已整備、尚未推上公開 repo 的候選。只記對讀者有意義的變動，不逐檔列 diff。
 
+## 2026-11-25
+
+### 新增
+- **規則體積與自動模式守門員（3 支）**：新增 `hooks/always-on-size-gate.py`（防止修改常駐規則檔超過字數上限）、`hooks/auto-mode-write-guard.py` 與 `hooks/auto-mode-inject.py`（搭配 `scripts/auto-mode/`，保護人控自動模式開關並在啟用時注入決策與停手規範），均附測試與 `install/hooks/*.md`。
+- **契約測試與日常防錯守門員（7 支）**：公開已穩定常駐的 `hooks/contract-test-preflight-gate.sh`、`hooks/contract-test-receipt-gate.sh`、`hooks/agent-contract-validator-gate.sh`（修改受控檔與提交前強制核對契約測試）、`hooks/read-image-shrink.py`（讀大圖前自動縮圖省用量）、`hooks/opus-chinese-nudge.py`（背景通知喚醒後維持繁中提醒）、`hooks/gpt-convergence-reminder.sh`（GPT 主模型收斂提醒）與 `hooks/herdr-worker-stop-gate.sh`（防止 Herdr 主控漏收背景子代理），均附測試與安裝說明。
+- **三支成熟流程技能**：新增 `skills/deep-check/`（全專案深度健檢單一入口）、`skills/hillclimb/`（單指標多輪爬山調優）與 `skills/software-factory/`（無人值守軟體工廠設計流程與自動化盤點腳本）。
+
+### 變更
+- **審查與實作流程強化**：更新 `commands/pr-review.md`、`commands/review-spec.md`、`commands/advisor.md`、`skills/implement/SKILL.md` 與 `skills/agent-dispatch/`，包含多目標審查容量預檢、唯讀單席開收席規範、交付段補第一步操作指引，以及統一的開席權限與失敗不自動退路規則。
+- **收尾與共用帳本分工**：更新 `commands/self-closeout.md`、`commands/git-closeout.md` 與 `scripts/closeout-provenance.py`，優先採點名直交（`git commit --only`）避免干擾並行工作樹，共用帳本統一交由 `/git-closeout` 處理。
+- **既有守門員與本機分析加固**：強化 `hooks/pipestatus-zsh-gate.py`、`hooks/code-search-root-gate.py`、`hooks/lcu-browser-routing-gate.py`、`hooks/auto-memory-jev.py`、`cc-session-index` 與 `workflows/local-analysis.js`（含工作習慣週報與多支每日檢查腳本回歸測試）。
+
+### 移除
+- 移除已退役的 `hooks/question-tool-conflict-gate.py`（含測試與安裝說明）及 11 支已停用的舊版輔助與審計腳本（`distill-index.sh`、`friction-outcome-packet.py`、`semble-adoption.py`、`severity-baseline.py`、`skill-verify-adoption-review.sh`、`validate-doc-claims.py` 等）。
+
 ## 2026-11-10
 
 ### 新增

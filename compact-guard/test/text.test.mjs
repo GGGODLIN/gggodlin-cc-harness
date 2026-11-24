@@ -363,3 +363,28 @@ test("quoted multiline secret values are fully redacted after Unicode newline no
   assert.match(packet, /> safe-paragraph-before\n> NPM_TOKEN=\[REDACTED\]\n> safe-paragraph-after/);
   assert.match(packet, /> safe-unterminated-before\n> JWT_SECRET=\[REDACTED\]/);
 });
+
+test("truncation never leaves lone UTF-16 surrogates at excerpt boundaries", () => {
+  const emojiStream = "🚀".repeat(1200);
+  const evidence = selectEvidence([message("emoji", "assistant", 0, emojiStream)]);
+  assert.equal(evidence[0].text.isWellFormed(), true);
+});
+
+test("last 3 user turns and their short-reply assistant referents survive dense earlier filler", () => {
+  const filler = Array.from({ length: 12 }, (_, index) =>
+    message(`filler-${index}`, "assistant", index, `Decision verdict conclusion approved ${index}: ${"z".repeat(700)}`)
+  );
+  const evidence = selectEvidence([
+    ...filler,
+    message("q1", "assistant", 12, "Options: a. keep b. drop"),
+    message("u1", "user", 13, "a,a"),
+    message("a1", "assistant", 14, "Applied a,a."),
+    message("u2", "user", 15, "Also preserve exact line numbers in the next check."),
+    message("a2", "assistant", 16, "Done.")
+  ]);
+  const ids = evidence.map(({ id }) => id);
+  assert.ok(ids.includes("u1"));
+  assert.ok(ids.includes("q1"));
+  assert.ok(ids.includes("u2"));
+  assert.ok(ids.includes("a2"));
+});

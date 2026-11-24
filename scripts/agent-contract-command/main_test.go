@@ -8,6 +8,7 @@ import (
   "os"
   "path/filepath"
   "reflect"
+  "slices"
   "strings"
   "testing"
 )
@@ -305,7 +306,7 @@ func TestLiteralShellRecursionIsBounded(t *testing.T) {
 }
 
 func TestProtocolErrorsAreNotNoCommit(t *testing.T) {
-  tests := []string{`{`, `null`, `[]`, `{}`, `{"command":null}`, `{"command":2}`, `{"command":true}`, `{"command":[]}`, `{"command":"pwd"} {}`, `{"command":"git commit -m '"}`, `{"command":"if true; then"}`}
+  tests := []string{`{`, `null`, `[]`, `{}`, `{"command":null}`, `{"command":2}`, `{"command":true}`, `{"command":[]}`, `{"command":"pwd"} {}`, `{"command":"pwd"} garbage`, `{"command":"git commit -m '"}`, `{"command":"if true; then"}`}
   for i, text := range tests {
     t.Run(fmt.Sprintf("error_%02d", i), func(t *testing.T) {
       _, status, stderr := observe(t, text)
@@ -330,4 +331,356 @@ func TestInputIsNotExecutedOrRead(t *testing.T) {
   got := command(t, "git commit -F "+marker+"; touch "+marker)
   if !got.HasCommit || got.Denial != nil { t.Fatalf("unexpected classification: %+v", got) }
   if _, err := os.Stat(marker); !os.IsNotExist(err) { t.Fatalf("input executed: %v", err) }
+}
+
+func TestOnlyCommitClassification(t *testing.T) {
+  allow := []string{
+    `git commit --only -m "x" -- skills/demo/SKILL.md`,
+    `git -C /tmp/repo commit -o -m "x" -- a.md b.md`,
+    `git commit --only -m "x" skills/demo/SKILL.md`,
+  }
+  for _, text := range allow {
+    got := command(t, text)
+    if !got.HasCommit || !got.OnlyCommit || got.Denial != nil {
+      t.Fatalf("expected OnlyCommit=true for %q: %+v", text, got)
+    }
+  }
+  reject := []string{
+    `git commit -m "x" -- skills/demo/SKILL.md`,
+    `git commit --only -m "x"`,
+    `git commit --only --amend -m "x" -- a.md`,
+    `git commit --only --include -m "x" -- a.md`,
+    `git commit --only -a -m "x" -- a.md`,
+    `git commit --only --no-only -m "x" -- a.md`,
+    `git add a.md && git commit --only -m "x" -- a.md`,
+    `echo bad > skills/demo/SKILL.md && git commit --only -m "x" -- skills/demo/SKILL.md`,
+    `git status && git commit --only -m "x" -- a.md`,
+    `(git commit --only -m "x" -- a.md)`,
+    `git --glob-pathspecs commit --only -m "x" -- a.md`,
+    `(echo bad > skills/demo/SKILL.md) && git commit --only -m "x" -- skills/demo/SKILL.md`,
+    `git commit --only -m "$(echo bad > skills/demo/SKILL.md; echo x)" -- skills/demo/SKILL.md`,
+    "git commit --only -F - -- skills/demo/SKILL.md <<EOF\n$(echo bad > skills/demo/SKILL.md; echo x)\nEOF",
+    `> skills/demo/SKILL.md && git commit --only -m x -- skills/demo/SKILL.md`,
+    `(> skills/demo/SKILL.md) && git commit --only -m x -- skills/demo/SKILL.md`,
+    `git commit --only -m x -- skills/demo/SKILL.md > skills/demo/SKILL.md`,
+  }
+  for _, text := range reject {
+    got := command(t, text)
+    if got.OnlyCommit {
+      t.Fatalf("expected OnlyCommit=false for %q: %+v", text, got)
+    }
+  }
+}
+
+func TestDefectF1XargsTrailingPlaceholder(t *testing.T) {
+  denied := []string{
+    `printf 'commit -m real' | xargs git`,
+    `printf 'commit -m real' | xargs git -C /repo`,
+    `printf 'git commit -m real' | xargs env`,
+    `printf 'commit -m real' | xargs command git`,
+  }
+  for _, text := range denied {
+    t.Run(text, func(t *testing.T) {
+      got := command(t, text)
+      if got.Denial == nil {
+        t.Fatalf("expected Denial != nil for %q; got %+v", text, got)
+      }
+    })
+  }
+  t.Run("xargs_git_add_before_commit", func(t *testing.T) {
+    got := command(t, `printf 'add .claude/a' | xargs git; git commit -m note`)
+    if !got.HasCommit || (!got.AutoStage && got.Denial == nil) {
+      t.Fatalf("expected AutoStage or Denial for xargs git; got %+v", got)
+    }
+  })
+}
+
+func TestDefectF2CommitNoValueOptionPathspec(t *testing.T) {
+  cases := []string{
+    `git commit -m x --no-template .claude/agents/bad.md`,
+    `git commit -m x --no-fixup .claude/agents/bad.md`,
+    `git commit -m x --no-squash .claude/agents/bad.md`,
+    `git commit -m x --no-file .claude/agents/bad.md`,
+    `git commit -m x --no-author .claude/agents/bad.md`,
+  }
+  for _, text := range cases {
+    t.Run(text, func(t *testing.T) {
+      got := command(t, text)
+      if !got.HasCommit || (got.Denial == nil && !slices.Contains(got.Pathspecs, ".claude/agents/bad.md")) {
+        t.Fatalf("expected Denial != nil or pathspec captured for %q; got %+v", text, got)
+      }
+    })
+  }
+}
+
+func TestDefectF3ScopedAndConditionalCD(t *testing.T) {
+  evasions := []string{
+    `false && cd /tmp/harmless; git commit -m real`,
+    `true || cd /tmp/harmless && git commit -m real`,
+    `true | cd /tmp/harmless; git commit -m real`,
+    `cd /tmp/harmless | git commit -m real`,
+    `cd /tmp/harmless & git commit -m real`,
+    `coproc cd /tmp/harmless; git commit -m real`,
+    `env cd /tmp/harmless; git commit -m real`,
+    `exec cd /tmp/harmless; git commit -m real`,
+  }
+  for _, text := range evasions {
+    t.Run(text, func(t *testing.T) {
+      got := command(t, text)
+      if !got.HasCommit {
+        t.Fatalf("expected HasCommit=true for %q; got %+v", text, got)
+      }
+      if got.Denial == nil && got.CDTarget != nil && *got.CDTarget == "/tmp/harmless" {
+        t.Fatalf("must not allow /tmp/harmless as CDTarget for %q; got %+v", text, got)
+      }
+    })
+  }
+  externalCD := []string{
+    `/usr/bin/cd /tmp/harmless; git commit -m real`,
+    `command /usr/bin/cd /tmp/harmless; git commit -m real`,
+    `exec /usr/bin/cd /tmp/harmless; git commit -m real`,
+  }
+  for _, text := range externalCD {
+    t.Run(text, func(t *testing.T) {
+      got := command(t, text)
+      if !got.HasCommit || got.CDTarget != nil {
+        t.Fatalf("expected HasCommit=true and CDTarget=nil for %q; got %+v", text, got)
+      }
+    })
+  }
+  t.Run("preserve_cd_and_commit", func(t *testing.T) {
+    got := command(t, `cd /repo && git commit -m real`)
+    if !got.HasCommit || got.Denial != nil || got.CDTarget == nil || *got.CDTarget != "/repo" {
+      t.Fatalf("expected CDTarget=/repo Denial=nil; got %+v", got)
+    }
+  })
+}
+
+func TestDefectF4PushdPopdDirStack(t *testing.T) {
+  t.Run("pushd_commit", func(t *testing.T) {
+    got := command(t, `pushd /repo && git commit -m real`)
+    if !got.HasCommit || (got.Denial == nil && (got.CDTarget == nil || *got.CDTarget != "/repo")) {
+      t.Fatalf("expected Denial != nil or CDTarget=/repo; got %+v", got)
+    }
+  })
+  t.Run("popd_commit", func(t *testing.T) {
+    got := command(t, `popd && git commit -m real`)
+    if !got.HasCommit || got.Denial == nil {
+      t.Fatalf("expected HasCommit=true and Denial != nil; got %+v", got)
+    }
+  })
+  t.Run("preserve_pushd_readonly", func(t *testing.T) {
+    got := command(t, `pushd /repo && git status`)
+    if got.HasCommit || got.Denial != nil {
+      t.Fatalf("expected HasCommit=false and Denial=nil; got %+v", got)
+    }
+  })
+}
+
+func TestDefectF5CrossQuoteBracketGlob(t *testing.T) {
+  denied := []string{
+    `/usr/bin/['g']it commit -m real`,
+    `/bin/['b']ash -c 'git commit -m real'`,
+    `git commit -m real ['.']claude/agents/bad.md`,
+    `git commit -m real ["."]claude/agents/bad.md`,
+  }
+  for _, text := range denied {
+    t.Run(text, func(t *testing.T) {
+      got := command(t, text)
+      if got.Denial == nil {
+        t.Fatalf("expected Denial != nil for %q; got %+v", text, got)
+      }
+    })
+  }
+  t.Run("escaped_bracket_literal_allowed", func(t *testing.T) {
+    got := command(t, `git commit -m real \['.']claude/agents/bad.md`)
+    if !got.HasCommit || got.Denial != nil {
+      t.Fatalf("escaped bracket should remain static literal; got %+v", got)
+    }
+  })
+}
+
+func TestDefectF6QuotedAssignInDeclClause(t *testing.T) {
+  cases := []string{
+    `export "GIT_DIR=/repo/.git"; git commit -m selector`,
+    `declare 'GIT_INDEX_FILE=/tmp/idx'; git commit -m selector`,
+    `declare -x "GIT_DIR=/repo/.git"; git commit -m selector`,
+    `readonly 'GIT_WORK_TREE=/repo'; git commit -m selector`,
+    `export GIT_"DIR"=/repo/.git; git commit -m selector`,
+    `export "GIT_DIR+=/repo/.git"; git commit -m selector`,
+    `declare -x 'GIT_DIR+=/repo/.git'; git commit -m selector`,
+    `export "$X"; git commit -m selector`,
+  }
+  for _, text := range cases {
+    t.Run(text, func(t *testing.T) {
+      got := command(t, text)
+      if !got.HasCommit || got.Denial == nil || !strings.Contains(*got.Denial, "Git selector") {
+        t.Fatalf("expected HasCommit=true and Git selector denial for %q; got %+v", text, got)
+      }
+    })
+  }
+}
+
+func TestDefectF7BareDoubleDashStdin(t *testing.T) {
+  cases := []string{
+    `echo 'git commit -m nested' | bash --`,
+    `echo 'git commit -m nested' | bash --norc --`,
+  }
+  for _, text := range cases {
+    t.Run(text, func(t *testing.T) {
+      got := command(t, text)
+      if got.Denial == nil || !strings.Contains(*got.Denial, "shell stdin command") {
+        t.Fatalf("expected shell stdin command denial for %q; got %+v", text, got)
+      }
+    })
+  }
+  t.Run("preserve_bash_double_dash_script", func(t *testing.T) {
+    got := command(t, `bash -- script.sh`)
+    if got.HasCommit || got.Denial != nil {
+      t.Fatalf("expected HasCommit=false Denial=nil for bash -- script.sh; got %+v", got)
+    }
+  })
+}
+
+func TestDefectF8IndexMutatingGitCommands(t *testing.T) {
+  cases := []string{
+    `git rm .claude/hooks/agent-contract-validator-gate.sh && git commit -m note`,
+    `git mv README.md .claude/agents/bad.md && git commit -m note`,
+    `git update-index --add .claude/a && git commit -m note`,
+    `git read-tree HEAD && git commit -m note`,
+    `git apply --cached p.patch && git commit -m note`,
+  }
+  for _, text := range cases {
+    t.Run(text, func(t *testing.T) {
+      got := command(t, text)
+      if !got.HasCommit || got.Denial == nil {
+        t.Fatalf("expected HasCommit=true and Denial != nil for %q; got %+v", text, got)
+      }
+    })
+  }
+  t.Run("preserve_standalone_git_rm", func(t *testing.T) {
+    got := command(t, `git rm foo`)
+    if got.HasCommit || got.Denial != nil {
+      t.Fatalf("expected HasCommit=false and Denial=nil for git rm foo; got %+v", got)
+    }
+  })
+}
+
+func TestDefectF9TildeTargetGlobAndBrace(t *testing.T) {
+  t.Run("cd_tilde_glob", func(t *testing.T) {
+    got := command(t, `cd ~/repo* && git commit -m real`)
+    if !got.HasCommit || got.Denial == nil || !strings.Contains(*got.Denial, "dynamic cd target") {
+      t.Fatalf("expected dynamic cd target denial; got %+v", got)
+    }
+  })
+  t.Run("git_c_tilde_brace", func(t *testing.T) {
+    got := command(t, `git -C ~/{a,b} commit -m real`)
+    if !got.HasCommit || got.Denial == nil || !strings.Contains(*got.Denial, "dynamic git -C target") {
+      t.Fatalf("expected dynamic git -C target denial; got %+v", got)
+    }
+  })
+  t.Run("preserve_cd_tilde", func(t *testing.T) {
+    got := command(t, `cd ~ && git commit -m real`)
+    if !got.HasCommit || got.Denial != nil || got.CDTarget == nil || *got.CDTarget != "~" {
+      t.Fatalf("expected CDTarget=~ Denial=nil; got %+v", got)
+    }
+  })
+  t.Run("preserve_cd_tilde_repo", func(t *testing.T) {
+    got := command(t, `cd ~/repo && git commit -m real`)
+    if !got.HasCommit || got.Denial != nil || got.CDTarget == nil || *got.CDTarget != "~/repo" {
+      t.Fatalf("expected CDTarget=~/repo Denial=nil; got %+v", got)
+    }
+  })
+}
+
+func TestDefectA1ShellCOptionParsing(t *testing.T) {
+  cases := []string{
+    `bash -c -- 'git commit -m nested'`,
+    `sh -c -- 'git commit -m nested'`,
+    `zsh -c -- 'git commit -m nested'`,
+    `bash -c -e 'git commit -m nested'`,
+    `bash -c -o pipefail 'git commit -m nested'`,
+    `bash -c - 'git commit -m nested'`,
+  }
+  for _, text := range cases {
+    t.Run(text, func(t *testing.T) {
+      got := command(t, text)
+      if !got.HasCommit || got.Denial == nil || !strings.Contains(*got.Denial, "nested shell commit command") {
+        t.Fatalf("expected nested shell commit command denial for %q; got %+v", text, got)
+      }
+    })
+  }
+}
+
+func TestDefectA2ShellStdinWithPositionalArgs(t *testing.T) {
+  cases := []string{
+    `echo 'git commit -m nested' | bash -s arg1`,
+    `echo 'git commit -m nested' | sh -s arg1`,
+    `echo 'git commit -m nested' | bash -s -- arg1`,
+    `echo 'git commit -m nested' | bash -is arg1`,
+  }
+  for _, text := range cases {
+    t.Run(text, func(t *testing.T) {
+      got := command(t, text)
+      if got.Denial == nil || !strings.Contains(*got.Denial, "shell stdin command") {
+        t.Fatalf("expected shell stdin command denial for %q; got %+v", text, got)
+      }
+    })
+  }
+}
+
+func TestDefectA4FuncDeclContextAndSelectors(t *testing.T) {
+  t.Run("func_cd_before_commit", func(t *testing.T) {
+    got := command(t, `f() { cd /repo; }; f; git commit -m real`)
+    if !got.HasCommit || got.Denial == nil {
+      t.Fatalf("expected HasCommit=true and Denial != nil; got %+v", got)
+    }
+  })
+  t.Run("func_export_git_dir_before_commit", func(t *testing.T) {
+    got := command(t, `f() { export GIT_DIR=/repo/.git; }; f; git commit -m real`)
+    if !got.HasCommit || got.Denial == nil {
+      t.Fatalf("expected HasCommit=true and Denial != nil; got %+v", got)
+    }
+  })
+  t.Run("func_cd_readonly_allowed", func(t *testing.T) {
+    got := command(t, `f() { cd /repo; }; f; git status`)
+    if got.HasCommit || got.Denial != nil {
+      t.Fatalf("expected HasCommit=false and Denial=nil; got %+v", got)
+    }
+  })
+  t.Run("nested_func_cd_before_commit", func(t *testing.T) {
+    got := command(t, `f() { g() { cd /repo; }; g; }; f; git commit -m real`)
+    if !got.HasCommit || got.Denial == nil {
+      t.Fatalf("expected HasCommit=true and Denial != nil; got %+v", got)
+    }
+  })
+  t.Run("nested_func_cd_readonly_allowed", func(t *testing.T) {
+    got := command(t, `f() { g() { cd /repo; }; g; }; f; git status`)
+    if got.HasCommit || got.Denial != nil {
+      t.Fatalf("expected HasCommit=false and Denial=nil; got %+v", got)
+    }
+  })
+}
+
+func TestTopMutationsEdgeCases(t *testing.T) {
+  t.Run("M4_child_does_not_overwrite_staged", func(t *testing.T) {
+    got := command(t, `git add .claude/a; sh -c 'pwd'; git commit -m note`)
+    if !got.HasCommit || got.Denial != nil || !got.AutoStage {
+      t.Fatalf("expected HasCommit=true Denial=nil AutoStage=true; got %+v", got)
+    }
+  })
+  t.Run("M5_git_c_core_bare_false_rejected", func(t *testing.T) {
+    got := command(t, `git -c core.bare=false commit -m real`)
+    if !got.HasCommit || got.Denial == nil || !strings.Contains(*got.Denial, "Git selector") {
+      t.Fatalf("expected HasCommit=true and Git selector denial; got %+v", got)
+    }
+  })
+  t.Run("Sol2_command_p_double_dash_allowed", func(t *testing.T) {
+    for _, cmd := range []string{`command -p -- git status`, `command -p -- /usr/bin/git log -1`} {
+      got := command(t, cmd)
+      if got.HasCommit || got.Denial != nil {
+        t.Fatalf("%s: expected HasCommit=false Denial=nil; got %+v", cmd, got)
+      }
+    }
+  })
 }

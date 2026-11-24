@@ -1,9 +1,9 @@
 // 本檔在契約測試底下；跑法：node --test ~/.claude/skills/implement/scripts/tests/tdd-policy.test.mjs
 import assert from 'node:assert/strict'
 import { spawn, spawnSync } from 'node:child_process'
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 
@@ -23,7 +23,7 @@ const createFixture = () => {
   }
 }
 
-const run = (fixture, action, extra = []) => spawnSync(process.execPath, [
+const run = (fixture, action, extra = [], timeout) => spawnSync(process.execPath, [
   policy,
   action,
   '--session', fixture.session,
@@ -34,7 +34,8 @@ const run = (fixture, action, extra = []) => spawnSync(process.execPath, [
   env: {
     ...process.env,
     MATT_TDD_ROOT: fixture.state
-  }
+  },
+  timeout
 })
 
 const init = fixture => run(fixture, 'init', ['--tickets', fixture.tickets])
@@ -382,6 +383,41 @@ test('combined tasks artifact reports only the first malformed numeric heading',
   assert.match(result.stderr, /expected canonical shape: ## <NN> — <title>/)
 })
 
+test('combines and sorts tickets from a Markdown source while preserving their decisions', () => {
+  const fixture = createFixture()
+  writeFileSync(fixture.tickets, `# Release checklist
+
+### 12 - Documentation
+**tests:** waived${'  '}
+**test waiver:** generated-only
+**test waiver approved:** ticket-breakdown-user-approved
+
+## 2 — Output
+**TESTS:** required
+**TEST SEAM:** \`  CLI output  \`
+`)
+  const result = init(fixture)
+  assert.equal(result.status, 0, result.stderr)
+  assert.deepEqual(JSON.parse(result.stdout), {
+    status: 'started', testing_mode: 'tdd', required_count: 1, tdd_required_count: 1,
+    manifest: manifestPath(fixture), ticket_count: 2
+  })
+  assert.deepEqual(JSON.parse(readFileSync(manifestPath(fixture), 'utf8')).tickets, [
+    { id: '02', decision: 'required', seam: 'CLI output' },
+    { id: '12', decision: 'waived', reason: 'generated-only', approval: 'ticket-breakdown-user-approved' }
+  ])
+})
+
+test('a valid spaced heading does not take the place of the first malformed heading in diagnostics', () => {
+  const fixture = createFixture()
+  const valid = requiredTicket.replace(/^# 01 — Required behavior/, '##  01  —  Required behavior')
+  const malformed = '## 02 Missing separator near # 03 — Example'
+  writeFileSync(fixture.tickets, `${valid}\n${malformed}\n`)
+  const result = init(fixture)
+  assert.equal(result.status, 1, result.stderr)
+  assert.equal(result.stderr, `malformed ticket section: ${fixture.tickets}: line 9: "${malformed}"; expected canonical shape: ## <NN> — <title>\n`)
+})
+
 test('manifest validation requires string ticket ids and rejects logical duplicates', () => {
   const nonString = createFixture()
   mkdirSync(join(nonString.state, nonString.session, nonString.run), { recursive: true })
@@ -425,6 +461,49 @@ test('dot session and run ids are rejected and resolved run stays under root', (
   }
 })
 
+test('without a root override the manifest is placed beneath the subprocess home', () => {
+  const fixture = createFixture()
+  const fixtureHome = join(fixture.root, 'fixture-home')
+  mkdirSync(fixtureHome)
+  const env = { ...process.env, HOME: fixtureHome, USERPROFILE: fixtureHome }
+  delete env.MATT_TDD_ROOT
+  const result = spawnSync(process.execPath, [
+    policy, 'not-started', '--session', fixture.session, '--run', fixture.run, '--reason', 'user-deferred'
+  ], { encoding: 'utf8', env })
+  const expected = join(fixtureHome, '.claude', 'logs', 'matt-tdd', fixture.session, fixture.run, 'decision.json')
+  assert.equal(result.status, 0, result.stderr)
+  assert.equal(JSON.parse(result.stdout).manifest, expected)
+  assert.equal(JSON.parse(readFileSync(expected, 'utf8')).reason, 'user-deferred')
+})
+
+test('a second decision for the same run preserves the first decision', () => {
+  const fixture = createFixture()
+  writeFileSync(fixture.tickets, requiredTicket)
+  const first = init(fixture)
+  assert.equal(first.status, 0, first.stderr)
+  const stored = readFileSync(manifestPath(fixture), 'utf8')
+  const second = run(fixture, 'not-started', ['--reason', 'user-deferred'])
+  assert.equal(second.status, 1, second.stderr)
+  assert.equal(second.stderr, 'decision manifest already exists for this session run\n')
+  assert.equal(second.stdout, '')
+  assert.equal(readFileSync(manifestPath(fixture), 'utf8'), stored)
+})
+
+test('decision creation restricts every control directory to its owner', () => {
+  const fixture = createFixture()
+  const dirs = [fixture.state, join(fixture.state, fixture.session), join(fixture.state, fixture.session, fixture.run)]
+  mkdirSync(dirs[2], { recursive: true })
+  for (const path of dirs) chmodSync(path, 0o755)
+  const result = run(fixture, 'not-started', ['--reason', 'prerequisite-blocked'])
+  assert.equal(result.status, 0, result.stderr)
+  assert.deepEqual(dirs.map(path => lstatSync(path).mode & 0o777), [0o700, 0o700, 0o700])
+  assert.equal(lstatSync(manifestPath(fixture)).mode & 0o777, 0o600)
+  assert.deepEqual(readdirSync(dirs[2]), ['decision.json'])
+  assert.deepEqual(JSON.parse(result.stdout), {
+    status: 'not-started', manifest: manifestPath(fixture), reason: 'prerequisite-blocked'
+  })
+})
+
 test('manifest creation is atomic create-once under concurrency', async () => {
   const fixture = createFixture()
   writeFileSync(fixture.tickets, requiredTicket)
@@ -445,6 +524,10 @@ test('manifest creation is atomic create-once under concurrency', async () => {
   })
   const results = await Promise.all(Array.from({ length: 12 }, launch))
   assert.equal(results.filter(result => result.status === 0).length, 1, JSON.stringify(results))
+  for (const result of results.filter(result => result.status !== 0)) {
+    assert.equal(result.status, 1, result.stderr)
+    assert.equal(result.stderr, 'decision manifest already exists for this session run\n')
+  }
   const manifest = JSON.parse(readFileSync(manifestPath(fixture), 'utf8'))
   assert.equal(manifest.session_id, fixture.session)
   assert.equal(manifest.run_id, fixture.run)
@@ -700,4 +783,406 @@ test('not-started output does not invent a testing mode', () => {
   const consumed = run(fixture, 'consume')
   assert.equal(consumed.status, 0, consumed.stderr)
   assert.equal('testing_mode' in JSON.parse(consumed.stdout), false)
+})
+
+test('session and run identifiers must consist entirely of supported characters', () => {
+  for (const [label, value] of [['session', '!sample'], ['session', 'sample!'], ['run', '!run'], ['run', 'run!']]) {
+    const fixture = createFixture()
+    fixture[label] = value
+    const result = run(fixture, 'not-started', ['--reason', 'preflight-only'])
+    assert.equal(result.status, 1, result.stderr)
+    assert.equal(result.stderr, `${label} contains unsupported characters\n`)
+    assert.equal(existsSync(fixture.state), false)
+  }
+})
+
+test('a malformed CLI invocation reports the offending argument or action', () => {
+  const cases = [
+    ['validate', [], 'missing --session'],
+    ['validate', ['--session', 'sample'], 'missing --run'],
+    ['init', ['--session', 'sample', '--run', 'run-1'], 'missing --tickets'],
+    ['validate', ['session'], 'unexpected argument: session'],
+    ['validate', ['--session'], 'missing value for --session'],
+    ['validate', ['--session', 'invalid!', '--run', 'run-1'], 'session contains unsupported characters'],
+    ['validate', ['--session', '--run', 'run-1'], 'missing value for --session'],
+    ['validate', ['--session', 'sample', '--session', 'another'], 'duplicate argument: --session'],
+    ['inspect', [], 'unknown action: inspect'],
+    [undefined, [], 'unknown action: ']
+  ]
+  const fixture = createFixture()
+  for (const [action, args, message] of cases) {
+    const result = spawnSync(process.execPath, [policy, ...(action === undefined ? [] : [action]), ...args], {
+      encoding: 'utf8', env: { ...process.env, MATT_TDD_ROOT: fixture.state }
+    })
+    assert.equal(result.status, 1, result.stderr)
+    assert.equal(result.stderr, `${message}\n`)
+    assert.equal(result.stdout, '')
+  }
+  assert.equal(existsSync(fixture.state), false)
+})
+
+test('validation requires a decision for this run with a legal status and ticket list', () => {
+  const cases = [
+    [{ status: 'paused' }, 'decision manifest status is invalid'],
+    [{ run_id: 'different-run' }, 'decision manifest is not bound to this session run'],
+    [{ session_id: 'different-session' }, 'decision manifest is not bound to this session run'],
+    [{ tickets: {} }, 'decision manifest tickets are malformed'],
+    [{ tickets: [] }, 'started manifest must cover at least one ticket'],
+    [{ tickets: [null] }, 'decision manifest ticket is malformed'],
+    [{ tickets: [{ id: 'a1', decision: 'required', seam: 'CLI output' }] }, 'decision manifest ticket is malformed'],
+    [{ tickets: [{ id: '01', decision: 'pending' }] }, 'ticket 01: decision must be required or waived'],
+    [{ tickets: [{ id: '01', decision: 'required', seam: '   ' }] }, 'ticket 01: required TDD needs a non-empty seam'],
+    [{ tickets: [{ id: '01', decision: 'waived', reason: 'pending', approval: 'ticket-breakdown-user-approved' }] }, 'ticket 01: waiver is invalid or unapproved'],
+    [{ tickets: [{ id: '01', decision: 'waived', reason: 'docs-only', approval: 'pending' }] }, 'ticket 01: waiver is invalid or unapproved']
+  ]
+  for (const [changes, message] of cases) {
+    const fixture = createFixture()
+    const original = writeStartedManifest(fixture, changes)
+    const result = run(fixture, 'consume')
+    assert.equal(result.status, 1, result.stderr)
+    assert.equal(result.stderr, `${message}\n`)
+    assert.equal(result.stdout, '')
+    assert.equal(readFileSync(manifestPath(fixture), 'utf8'), original)
+  }
+})
+
+test('the closed reason vocabulary round-trips through validate and consume', () => {
+  for (const reason of ['preflight-only', 'prerequisite-blocked', 'user-deferred']) {
+    const fixture = createFixture()
+    const created = run(fixture, 'not-started', ['--reason', reason])
+    assert.equal(created.status, 0, created.stderr)
+    assert.deepEqual(JSON.parse(created.stdout), { status: 'not-started', manifest: manifestPath(fixture), reason })
+    const validated = run(fixture, 'validate')
+    assert.equal(validated.status, 0, validated.stderr)
+    assert.deepEqual(JSON.parse(validated.stdout), {
+      status: 'not-started', valid: true, required_count: 0, ticket_count: 0, manifest: manifestPath(fixture)
+    })
+    const consumed = run(fixture, 'consume')
+    assert.equal(consumed.status, 0, consumed.stderr)
+    assert.deepEqual(JSON.parse(consumed.stdout), { status: 'not-started', consumed: true, required_count: 0, ticket_count: 0 })
+  }
+  for (const reason of ['docs-only', 'generated-only', 'no-stable-seam', 'non-executable-artifact']) {
+    const fixture = createFixture()
+    writeFileSync(fixture.tickets, waivedTicket({ reason }))
+    const created = init(fixture)
+    assert.equal(created.status, 0, created.stderr)
+    assert.deepEqual(JSON.parse(readFileSync(manifestPath(fixture), 'utf8')).tickets, [
+      { id: '02', decision: 'waived', reason, approval: 'ticket-breakdown-user-approved' }
+    ])
+  }
+})
+
+test('ticket source diagnostics name mislocated files and directories', () => {
+  const fixture = createFixture()
+  const cases = [
+    [join(fixture.root, 'openspec', 'changes', 'change', 'notes.md'), 'file', 'openspec/changes/<change>/tasks.md'],
+    [join(fixture.root, 'archive', 'changes', 'change', 'tasks.md'), 'file', 'openspec/changes/<change>/tasks.md'],
+    [join(fixture.root, 'openspec', 'changes', 'change', 'notes', 'tasks.md'), 'file', 'openspec/changes/<change>/tasks.md'],
+    [join(fixture.root, '.scratch', 'feature', 'notes'), 'directory', '.scratch/<feature>/issues'],
+    [join(fixture.root, 'archive', 'feature', 'issues'), 'directory', '.scratch/<feature>/issues'],
+    [join(fixture.root, '.scratch', 'feature', 'draft', 'issues'), 'directory', '.scratch/<feature>/issues'],
+  ]
+  for (const [path, type, expected] of cases) {
+    fixture.tickets = path
+    if (type === 'file') {
+      mkdirSync(dirname(path), { recursive: true })
+      writeFileSync(path, requiredTicket)
+    } else {
+      mkdirSync(path, { recursive: true })
+      writeFileSync(join(path, '01.md'), requiredTicket)
+    }
+    const result = init(fixture)
+    assert.equal(result.status, 1, result.stderr)
+    assert.equal(result.stderr, `ticket path must be a canonical ticket source: ${expected}\n`)
+    assert.equal(result.stdout, '')
+  }
+  assert.equal(existsSync(fixture.state), false)
+})
+
+test('non-regular ticket sources report their path before reading content', () => {
+  const fixture = createFixture()
+  const issues = join(fixture.root, '.scratch', 'feature', 'issues')
+  mkdirSync(issues, { recursive: true })
+  const entry = join(issues, '01.md')
+  const fifo = spawnSync('mkfifo', [entry], { encoding: 'utf8' })
+  assert.equal(fifo.status, 0, fifo.error?.message ?? fifo.stderr)
+
+  const source = run(fixture, 'init', ['--tickets', entry], 5000)
+  assert.equal(source.status, 1, source.error?.message ?? source.stderr)
+  assert.equal(source.stderr, `ticket path must be a file or directory: ${entry}\n`)
+
+  const nested = run(fixture, 'init', ['--tickets', issues], 5000)
+  assert.equal(nested.status, 1, nested.error?.message ?? nested.stderr)
+  assert.equal(nested.stderr, `ticket directory entry must be a regular Markdown file: ${entry}\n`)
+  assert.equal(existsSync(fixture.state), false)
+})
+
+test('a linked ticket source is rejected before opening the linked file', () => {
+  const fixture = createFixture()
+  const original = join(fixture.root, 'original.md')
+  writeFileSync(original, requiredTicket)
+  symlinkSync(original, fixture.tickets)
+  const result = init(fixture)
+  assert.equal(result.status, 1, result.stderr)
+  assert.equal(result.stderr, `ticket path must not be a symlink: ${fixture.tickets}\n`)
+  assert.equal(existsSync(fixture.state), false)
+})
+
+test('a scratch ticket source includes nested Markdown tickets and ignores other files', () => {
+  const fixture = createFixture()
+  fixture.tickets = join(fixture.root, '.scratch', 'feature', 'issues')
+  const nested = join(fixture.tickets, 'documentation')
+  mkdirSync(nested, { recursive: true })
+  writeFileSync(join(fixture.tickets, '01.md'), requiredTicket)
+  writeFileSync(join(nested, '02.md'), waivedTicket())
+  writeFileSync(join(nested, 'meeting.txt'), 'Meeting notes\n')
+  const result = init(fixture)
+  assert.equal(result.status, 0, result.stderr)
+  const manifest = JSON.parse(readFileSync(manifestPath(fixture), 'utf8'))
+  assert.deepEqual(manifest.tickets.map(ticket => ticket.id), ['01', '02'])
+})
+
+test('ticket sources report missing, empty, or semantically invalid input', () => {
+  const fixture = createFixture()
+  const missing = init(fixture)
+  assert.equal(missing.status, 1)
+  assert.equal(missing.stderr, `ticket path does not exist: ${fixture.tickets}\n`)
+  const cases = [
+    [requiredTicket.replace('**TDD:** required', '**TDD:** ``'), 'ticket 01: TDD classification is required'],
+    [requiredTicket.replace('**TDD:** required', '**TDD:** pending'), 'ticket 01: TDD must be required or waived'],
+    [`${requiredTicket}\n**TDD waiver:** docs-only\n`, 'ticket 01: required TDD forbids waiver fields'],
+    [`${requiredTicket}\n**TDD waiver approved:** ticket-breakdown-user-approved\n`, 'ticket 01: required TDD forbids waiver fields'],
+    [`${requiredTicket}\n${requiredTicket.replace(/^# 01/, '# 0001')}`, 'duplicate ticket id: 01']
+  ]
+  for (const [content, message] of cases) {
+    writeFileSync(fixture.tickets, content)
+    const result = init(fixture)
+    assert.equal(result.status, 1, result.stderr)
+    assert.equal(result.stderr, `${message}\n`)
+    assert.equal(result.stdout, '')
+  }
+  writeFileSync(fixture.tickets, requiredTicket.replace('**Status:** ready-for-agent', '**Tests:** required'))
+  const mixed = init(fixture)
+  assert.equal(mixed.status, 1, mixed.stderr)
+  assert.equal(mixed.stderr, 'ticket 01: mixed TDD and Tests fields\n')
+  fixture.tickets = join(fixture.root, '.scratch', 'feature', 'issues')
+  mkdirSync(join(fixture.tickets, 'notes'), { recursive: true })
+  writeFileSync(join(fixture.tickets, 'notes', 'readme.txt'), 'Supporting notes\n')
+  const empty = init(fixture)
+  assert.equal(empty.status, 1)
+  assert.equal(empty.stderr, 'no ticket headings found\n')
+  assert.equal(existsSync(fixture.state), false)
+})
+
+test('ticket headings accept flexible spacing and ignore non-headings', () => {
+  const fixture = createFixture()
+  writeFileSync(fixture.tickets, `# Checklist
+
+Background text mentions # 99 — Example only.
+
+##  2  —  Output
+**Tests:** required
+**Test seam:** \`CLI output\` with notes
+
+###  3 - Documentation
+**Tests:** required
+**Test seam:** compare \`summary\`
+`)
+  const result = init(fixture)
+  assert.equal(result.status, 0, result.stderr)
+  assert.deepEqual(JSON.parse(readFileSync(manifestPath(fixture), 'utf8')).tickets, [
+    { id: '02', decision: 'required', seam: '`CLI output` with notes' },
+    { id: '03', decision: 'required', seam: 'compare `summary`' }
+  ])
+})
+
+test('manifest validation preserves distinct numeric IDs with internal zeroes', () => {
+  const fixture = createFixture()
+  const ticket = id => ({ id, decision: 'required', seam: 'CLI output' })
+  writeStartedManifest(fixture, { tickets: [ticket('101'), ticket('11')] })
+  const distinct = run(fixture, 'validate')
+  assert.equal(distinct.status, 0, distinct.stderr)
+  assert.equal(JSON.parse(distinct.stdout).ticket_count, 2)
+
+  writeStartedManifest(fixture, { tickets: [ticket('0011'), ticket('11')] })
+  const duplicate = run(fixture, 'validate')
+  assert.equal(duplicate.status, 1, duplicate.stderr)
+  assert.equal(duplicate.stderr, 'duplicate ticket id: 11\n')
+
+  const source = createFixture()
+  const markdown = id => requiredTicket.replace(/^# 01/, `## ${id}`)
+  writeFileSync(source.tickets, `${markdown('101')}\n${markdown('11')}`)
+  const initialized = init(source)
+  assert.equal(initialized.status, 0, initialized.stderr)
+  const manifest = JSON.parse(readFileSync(manifestPath(source), 'utf8'))
+  assert.deepEqual(manifest.tickets.map(row => row.id), ['101', '11'])
+})
+
+test('unknown testing modes are diagnosed before loading the ticket source', () => {
+  const fixture = createFixture()
+  const result = initMode(fixture, 'pending')
+  assert.equal(result.status, 1, result.stderr)
+  assert.equal(result.stderr, 'testing-mode must be tdd or regression-closeout\n')
+  assert.equal(existsSync(fixture.state), false)
+})
+
+test('an existing run directory link is rejected without writing into its destination', () => {
+  const fixture = createFixture()
+  const destination = join(fixture.root, 'sample-directory')
+  mkdirSync(destination)
+  const sessionDir = join(fixture.state, fixture.session)
+  mkdirSync(sessionDir, { recursive: true })
+  const runDir = join(sessionDir, fixture.run)
+  symlinkSync(destination, runDir, 'dir')
+  const result = run(fixture, 'not-started', ['--reason', 'preflight-only'])
+  assert.equal(result.status, 1, result.stderr)
+  assert.equal(result.stderr, `control directory must be a regular directory: ${runDir}\n`)
+  assert.deepEqual(readdirSync(destination), [])
+})
+
+test('a second decision cannot replace a malformed control file', () => {
+  const fixture = createFixture()
+  writeStartedManifest(fixture)
+  chmodSync(manifestPath(fixture), 0o644)
+  const result = run(fixture, 'not-started', ['--reason', 'preflight-only'])
+  assert.equal(result.status, 1, result.stderr)
+  assert.equal(result.stderr, 'manifest must be owner-only\n')
+  assert.deepEqual(readdirSync(dirname(manifestPath(fixture))), ['decision.json'])
+})
+
+test('a directory at the decision path is diagnosed as an invalid control file', () => {
+  const fixture = createFixture()
+  mkdirSync(manifestPath(fixture), { recursive: true })
+  const result = run(fixture, 'validate')
+  assert.equal(result.status, 1, result.stderr)
+  assert.equal(result.stderr, `manifest must be a regular control file: ${manifestPath(fixture)}\n`)
+  assert.equal(result.stdout, '')
+})
+
+test('manifest diagnostics distinguish malformed decisions from ticket schema errors', () => {
+  const cases = [
+    [null, 'decision manifest is malformed'],
+    [[], 'decision manifest is malformed'],
+    ['decision', 'decision manifest is malformed'],
+    [{ contract: 'unrecognized' }, 'decision manifest contract is invalid'],
+    [{ status: 'not-started', reason: 'pending', tickets: [] }, 'not-started manifest needs a closed reason and no tickets'],
+    [{ status: 'not-started', reason: 'user-deferred', tickets: [], extra: true }, 'not-started manifest has unexpected fields'],
+    [{ status: 'not-started', reason: 'user-deferred', tickets: [{}] }, 'not-started manifest needs a closed reason and no tickets'],
+    [{ tickets: [[]] }, 'decision manifest ticket is malformed'],
+    [{ tickets: ['ticket'] }, 'decision manifest ticket is malformed'],
+    [{ tickets: [{ id: '1a', decision: 'required', seam: 'CLI output' }] }, 'decision manifest ticket is malformed'],
+    [{ tickets: [{ id: '01', decision: 'required', seam: 1 }] }, 'ticket 01: required TDD needs a non-empty seam'],
+    [{ extra: true }, 'started manifest has unexpected fields'],
+    [{ tickets: [{ id: '01', decision: 'required', extra: true }] }, 'ticket 01 has unexpected fields'],
+    [{ tickets: [{ id: '02', decision: 'waived', approval: 'ticket-breakdown-user-approved', extra: true }] }, 'ticket 02 has unexpected fields']
+  ]
+  for (const [value, message] of cases) {
+    const fixture = createFixture()
+    const valid = JSON.parse(writeStartedManifest(fixture))
+    const stored = `${JSON.stringify(value !== null && typeof value === 'object' && !Array.isArray(value) ? { ...valid, ...value } : value)}\n`
+    writeFileSync(manifestPath(fixture), stored)
+    const result = run(fixture, 'consume')
+    assert.equal(result.status, 1, result.stderr)
+    assert.equal(result.stderr, `${message}\n`)
+    assert.equal(result.stdout, '')
+    assert.equal(readFileSync(manifestPath(fixture), 'utf8'), stored)
+  }
+})
+
+test('manifest and ticket validation reject extra unknown fields and missing required fields', () => {
+  const cases = [
+    [
+      'started manifest with extra unknown key',
+      (fixture) => ({
+        contract: 'MATT_TDD_DECISION v1',
+        status: 'started',
+        session_id: fixture.session,
+        run_id: fixture.run,
+        tickets: [{ id: '01', decision: 'required', seam: 'CLI output' }],
+        unexpected_top_level: true
+      })
+    ],
+    [
+      'not-started manifest with extra unknown key',
+      (fixture) => ({
+        contract: 'MATT_TDD_DECISION v1',
+        status: 'not-started',
+        reason: 'preflight-only',
+        session_id: fixture.session,
+        run_id: fixture.run,
+        tickets: [],
+        testing_mode: 'tdd'
+      })
+    ],
+    [
+      'required ticket with extra unknown key',
+      (fixture) => ({
+        contract: 'MATT_TDD_DECISION v1',
+        status: 'started',
+        session_id: fixture.session,
+        run_id: fixture.run,
+        tickets: [{ id: '01', decision: 'required', seam: 'CLI output', extra: 1 }]
+      })
+    ],
+    [
+      'waived ticket with extra unknown key',
+      (fixture) => ({
+        contract: 'MATT_TDD_DECISION v1',
+        status: 'started',
+        session_id: fixture.session,
+        run_id: fixture.run,
+        tickets: [{ id: '01', decision: 'waived', reason: 'docs-only', approval: 'ticket-breakdown-user-approved', extra: 1 }]
+      })
+    ],
+    [
+      'required ticket missing seam key',
+      (fixture) => ({
+        contract: 'MATT_TDD_DECISION v1',
+        status: 'started',
+        session_id: fixture.session,
+        run_id: fixture.run,
+        tickets: [{ id: '01', decision: 'required' }]
+      })
+    ],
+    [
+      'waived ticket missing approval key',
+      (fixture) => ({
+        contract: 'MATT_TDD_DECISION v1',
+        status: 'started',
+        session_id: fixture.session,
+        run_id: fixture.run,
+        tickets: [{ id: '01', decision: 'waived', reason: 'docs-only' }]
+      })
+    ],
+    [
+      'required ticket with same key count but wrong key name',
+      (fixture) => ({
+        contract: 'MATT_TDD_DECISION v1',
+        status: 'started',
+        session_id: fixture.session,
+        run_id: fixture.run,
+        tickets: [{ id: '01', decision: 'required', wrong_key: 'CLI output' }]
+      })
+    ],
+    [
+      'not-started manifest with same key count but wrong key name',
+      (fixture) => ({
+        contract: 'MATT_TDD_DECISION v1',
+        status: 'not-started',
+        wrong_key: 'preflight-only',
+        session_id: fixture.session,
+        run_id: fixture.run,
+        tickets: []
+      })
+    ]
+  ]
+
+  for (const [label, buildManifest] of cases) {
+    const fixture = createFixture()
+    mkdirSync(join(fixture.state, fixture.session, fixture.run), { recursive: true })
+    writeFileSync(manifestPath(fixture), `${JSON.stringify(buildManifest(fixture), null, 2)}\n`, { mode: 0o600 })
+    const result = run(fixture, 'validate')
+    assert.notEqual(result.status, 0, `${label}: expected non-zero exit`)
+    assert.match(result.stderr, /has unexpected fields/, `${label}: expected assertExactKeys error, got: ${result.stderr}`)
+  }
 })

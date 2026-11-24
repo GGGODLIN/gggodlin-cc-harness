@@ -51,6 +51,6 @@ Hold the bar the template sets: open the URL before asking for its value, use `a
 - 2026-11-04 graft 上游 `template.sh` 修正（Readline 行編輯、EOF 空輸入 `return 1`、`_clear` 防 `tput` 非零退出、`.env` `0600` 建立與 symlink 保留、`run_wizard` 函數包裹），保留本地 H1–H4 四塊安全補丁。
 - 2026-08-11 graft 上游 `wizard-no-minutes`（移除 `TOTAL_MINUTES`／time-remaining 整套），四塊本地補丁零衝突。**目前 pin 只看 frontmatter `upstream-pinned`，本節不記 hash。**
 - 2026-08-06 fork 自 mattpocock/skills v1.2.2（`8b36d4f`）。本地 template.sh 對上游打了四個補丁（B 組實測抓洞、8/8 test pass）：H1 無 TTY 直接 exit 64（防無人輸入時假成功寫空值）；H2 write_env 含空格／#／引號的值加雙引號轉義、拒絕換行、_existing 反解引號保 round-trip；H3 首次寫 `.env` 前驗 gitignore、未忽略要 confirm 否則 exit 65；H4 set_secret／set_var 一律顯式 `--repo`（`WIZARD_GH_REPO` 可覆寫）＋逐筆 confirm 帶 repo 與帳號名（雙帳號環境防推錯）。上游 template.sh 有更新時不可直接覆蓋、要 graft 保這四塊。
-- 規模門檻（description 也有）：少於 4 個人工步驟、或沒有值要落地 → 不生成，走 dispatch-and-verify 的文字清單出口。
+- 規模門檻（description 也有）：少於 4 個人工步驟、或沒有值要落地 → 不生成，照 `~/.claude/references/dispatch-and-verify-examples.md` 的 human blocker 慣例直接在聊天列出具體動作（含命令／路徑）等使用者執行。
 - 註解界線：`STAGES` 標記線以上是 vendor 函式庫（上游明令 never hand-edit、註解原樣保留＝「不寫註解」規則的 vendor 例外）；線以下由 Claude 生成的 stages 照使用者規則**不寫註解**、不要照抄範例段的註解風格。
 - 不加 Self-Verify 段：產出驗證已內建在流程 step 4（bash -n＋靜態追蹤），再疊 subagent 對表是重複。

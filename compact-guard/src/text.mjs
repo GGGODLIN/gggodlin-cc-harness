@@ -68,8 +68,9 @@ const truncate = (text, limit) => {
   }
   const contentLimit = Math.max(0, limit - TRUNCATION_MARKER.length - 1);
   const headLength = Math.floor(contentLimit * 4 / 9);
-  const head = text.slice(0, headLength).trimEnd();
-  const tail = text.slice(text.length - (contentLimit - headLength)).trimStart();
+  const head = text.slice(0, headLength).replace(/[\uD800-\uDBFF]$/u, "").trimEnd();
+  const tail = text.slice(text.length - (contentLimit - headLength))
+    .replace(/^[\uDC00-\uDFFF]/u, "").trimStart();
   return `${head}${TRUNCATION_MARKER}\n${tail}`;
 };
 
@@ -108,6 +109,17 @@ const safeSingleLine = (value, fallback, limit = 160) => {
   return normalized || fallback;
 };
 
+export const normalizeTimestamp = (value) => {
+  if (typeof value !== "string" && (typeof value !== "number" || !Number.isFinite(value))) {
+    return null;
+  }
+  if (typeof value === "string" && value.trim().length === 0) {
+    return null;
+  }
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+};
+
 const normalizedEvidenceEntry = (entry, position, options, deriveCategory) => {
   if (!entry || !ALLOWED_ROLES.has(entry.role) || typeof entry.text !== "string") {
     return null;
@@ -124,7 +136,9 @@ const normalizedEvidenceEntry = (entry, position, options, deriveCategory) => {
     id: safeSingleLine(entry.id, `message:${position}`, 200),
     role: entry.role,
     category,
-    timestamp: entry.timestamp == null ? null : safeSingleLine(entry.timestamp, "unknown", 120),
+    timestamp: deriveCategory
+      ? normalizeTimestamp(entry.timestamp)
+      : entry.timestamp == null ? null : safeSingleLine(entry.timestamp, "unknown", 120),
     text,
     hash: sha256(text),
     index: Number.isSafeInteger(entry.index) ? entry.index : position
@@ -158,6 +172,7 @@ const renderEvidenceBlock = (entry) => [
 
 // 「可以」「a」這類短答單獨留下時讀不出在回答什麼；把它緊接著回應的那則 assistant 一起優先保留。
 const SHORT_REPLY_CHARACTERS = 20;
+const RECENT_USER_TURNS = 3;
 
 const questionAnsweredBy = (entries, reply) => {
   if (!reply || reply.text.trim().length > SHORT_REPLY_CHARACTERS) {
@@ -181,9 +196,16 @@ const prioritizeEvidence = (entries) => {
       candidates.push(latest);
     }
   }
-  const question = questionAnsweredBy(entries, candidates.find((entry) => entry.role === "user"));
-  if (question) {
-    candidates.push(question);
+  const recentUsers = entries
+    .filter((entry) => entry.role === "user")
+    .toSorted((left, right) => right.index - left.index)
+    .slice(0, RECENT_USER_TURNS);
+  for (const reply of recentUsers) {
+    candidates.push(reply);
+    const question = questionAnsweredBy(entries, reply);
+    if (question) {
+      candidates.push(question);
+    }
   }
   candidates.push(...entries.toSorted((left, right) => score(right) - score(left)));
   return candidates;

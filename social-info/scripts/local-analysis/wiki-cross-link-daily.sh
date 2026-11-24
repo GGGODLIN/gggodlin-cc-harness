@@ -68,7 +68,7 @@ marker 實際格式 = frontmatter 扁平 scalar：`wiki_cross_link: declined-<re
 - **為什麼**: <短解釋>
 - **建議 action**（選一）:
   - A. 補 `[[<slug>]]` wikilink
-  - B. 標 `wiki_cross_link.<pair>: declined`（plain mention 真的指普通詞）
+  - B. 標 `wiki_cross_link: declined-<reason>-<date>`（plain mention 真的指普通詞）
 - **One-liner**:
   ```
   sed -i '' 's/<mention>/[[<slug>]]/g' <file>

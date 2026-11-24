@@ -7,7 +7,7 @@ fail() {
   printf '%s\n' "$*" >&2
   exit 2
 }
-[ "$#" -ge 3 ] || fail "usage: start-worker.sh <worker name> <worktree path> <brief file> [--harness claude|codex|pi] [--recipe JSON] [--label L] [--model M] [--effort E] [--log-dir D] [--no-watch]"
+[ "$#" -ge 3 ] || fail "usage: start-worker.sh <worker name> <worktree path> <brief file> [--harness claude|codex|pi] [--recipe JSON | --launcher NAME] [--label L] [--model M] [--effort E] [--agent NAME] [--inline-brief] [--log-dir D] [--no-watch]"
 NAME="$1"
 CWD="$2"
 BRIEF="$3"
@@ -15,8 +15,18 @@ shift 3
 LABEL="$NAME"
 HARNESS="claude"
 MODEL=""
+MODEL_SET=0
 EFFORT=""
 RECIPE=""
+RECIPE_SET=0
+LAUNCHER=""
+AGENT=""
+AGENT_JSON=""
+INLINE_BRIEF=0
+PERMISSION_MODE=""
+ALLOWED_TOOLS=()
+ADD_DIRS=()
+RESUME=""
 LOGDIR=""
 WATCH=1
 while [ "$#" -gt 0 ]; do
@@ -29,6 +39,12 @@ while [ "$#" -gt 0 ]; do
     --recipe)
       [ "$#" -ge 2 ] || fail "missing value for --recipe"
       RECIPE="$2"
+      RECIPE_SET=1
+      shift 2
+      ;;
+    --launcher)
+      [ "$#" -ge 2 ] && [ -n "$2" ] || fail "missing value for --launcher"
+      LAUNCHER="$2"
       shift 2
       ;;
     --label)
@@ -39,6 +55,7 @@ while [ "$#" -gt 0 ]; do
     --model)
       [ "$#" -ge 2 ] || fail "missing value for --model"
       MODEL="$2"
+      MODEL_SET=1
       shift 2
       ;;
     --effort)
@@ -46,10 +63,39 @@ while [ "$#" -gt 0 ]; do
       EFFORT="$2"
       shift 2
       ;;
+    --agent)
+      [ "$#" -ge 2 ] || fail "missing value for --agent"
+      AGENT="$2"
+      shift 2
+      ;;
     --log-dir)
       [ "$#" -ge 2 ] || fail "missing value for --log-dir"
       LOGDIR="$2"
       shift 2
+      ;;
+    --permission-mode)
+      [ "$#" -ge 2 ] && [ -n "$2" ] || fail "missing value for --permission-mode"
+      PERMISSION_MODE="$2"
+      shift 2
+      ;;
+    --allow-tool)
+      [ "$#" -ge 2 ] && [ -n "$2" ] || fail "missing value for --allow-tool"
+      ALLOWED_TOOLS+=("$2")
+      shift 2
+      ;;
+    --add-dir)
+      [ "$#" -ge 2 ] && [[ "$2" = /* ]] && [ -d "$2" ] || fail "--add-dir requires an existing absolute directory"
+      ADD_DIRS+=("$2")
+      shift 2
+      ;;
+    --resume)
+      [ "$#" -ge 2 ] && [ -n "$2" ] || fail "missing value for --resume"
+      RESUME="$2"
+      shift 2
+      ;;
+    --inline-brief)
+      INLINE_BRIEF=1
+      shift
       ;;
     --no-watch)
       WATCH=0
@@ -60,6 +106,78 @@ while [ "$#" -gt 0 ]; do
       ;;
   esac
 done
+reference_prompt() {
+  printf '[main] Read %s and follow it. Ask your questions in plain text and stop; do not assume answers.' "$BRIEF"
+}
+
+# 終端只收啟動命令。雙引號內的 cat 輸出是單一位置參數，不會再被 shell 解析。
+# inline 保留給不能用工具讀方法組的外殼。路徑與 flags 要先排除 PTY 控制字元，shell 引用不保護這一層。
+build_launch_cmd() {
+  python3 -I -c '
+import shlex, sys
+from pathlib import Path
+
+inline, brief, reference, agent_json, *argv = sys.argv[1:]
+if any(ord(c) < 32 or ord(c) == 127 for part in [brief, agent_json, *argv] for c in part):
+  sys.exit("terminal launch path or option contains a control character")
+if inline == "1":
+  try:
+    with Path(brief).open("rb") as stream:
+      if argv[0] == "pi" and stream.read(1) == b"@":
+        sys.exit("pi inline brief cannot begin with @ (pi interprets it as a file argument)")
+  except OSError:
+    sys.exit("could not open inline brief")
+  prompt = f"\"$(cat {shlex.quote(brief)})\""
+else:
+  prompt = shlex.quote(reference)
+quoted = [shlex.quote(a) for a in argv]
+if agent_json:
+  index = argv.index("--agent")
+  quoted[index:index] = ["--agents", f"\"$(cat {shlex.quote(agent_json)})\""]
+print(" ".join(quoted) + " -- " + prompt)
+' "$INLINE_BRIEF" "$BRIEF" "$(reference_prompt)" "$AGENT_JSON" "${LAUNCHER:-$KIND}" ${START_ARGS[@]+"${START_ARGS[@]}"}
+}
+
+write_inline_agent() {
+  python3 -I - "$HERE/../../../agents" "$AGENT" "$AGENT_JSON" <<'PY'
+import json
+import re
+import sys
+from pathlib import Path
+
+root, agent, destination = sys.argv[1:]
+if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]*", agent):
+  sys.exit("invalid inline agent name")
+path = Path(root).resolve() / f"{agent}.md"
+try:
+  text = path.read_text(encoding="utf-8")
+except FileNotFoundError:
+  sys.exit(f"agent definition not found: {path}")
+except (OSError, UnicodeError):
+  sys.exit(f"could not read agent definition: {path}")
+try:
+  import yaml
+except ImportError:
+  sys.exit("PyYAML is required to load inline agent frontmatter")
+frontmatter = re.match(r"\A---\n(.*?)^---[ \t]*(?:\n|\Z)", text, re.DOTALL | re.MULTILINE)
+try:
+  metadata = yaml.safe_load(frontmatter[1]) if frontmatter else None
+except yaml.YAMLError:
+  sys.exit(f"invalid agent frontmatter: {path}")
+description = metadata.get("description") if isinstance(metadata, dict) else None
+if not isinstance(description, str) or not description.strip():
+  sys.exit(f"agent definition lacks a non-empty frontmatter description: {path}")
+prompt = text[frontmatter.end():]
+if not prompt.strip():
+  sys.exit(f"agent definition has an empty prompt body: {path}")
+definition = {"description": description, "prompt": prompt}
+if "model" in metadata:
+  if not isinstance(metadata["model"], str) or not metadata["model"].strip():
+    sys.exit(f"agent definition has an invalid model: {path}")
+  definition["model"] = metadata["model"]
+Path(destination).write_text(json.dumps({agent: definition}), encoding="utf-8")
+PY
+}
 # 每個外殼決定 Herdr kind、必填配方與傳給 canonical 執行檔的參數；
 # 新外殼在這裡加一個分支，start_herdr 之後不必再動。
 KIND=""
@@ -69,7 +187,22 @@ PI_UUID=""
 PI_PICK="${PI_PICK_BIN:-pi-pick}"
 CC_PICK="${CC_PICK_BIN:-cc-pick}"
 UNSET_NAMES=()
+if [ -n "$LAUNCHER" ]; then
+  [ "$HARNESS" = claude ] || fail "--launcher is only supported for --harness claude"
+  [ "$RECIPE_SET" -eq 0 ] || fail "--launcher cannot be combined with --recipe"
+  [ "$MODEL_SET" -eq 0 ] || fail "--launcher cannot be combined with --model"
+fi
 [ -z "$RECIPE" ] || [ "$HARNESS" = pi ] || [ "$HARNESS" = claude ] || fail "--recipe is not supported for --harness $HARNESS"
+[ -z "$AGENT" ] || [ "$HARNESS" = claude ] || fail "--agent is only supported for --harness claude"
+[ "${#ALLOWED_TOOLS[@]}" -eq 0 ] || [ "$PERMISSION_MODE" = tool-allowlist ] || fail "--allow-tool requires tool-allowlist mode"
+[ "${#ADD_DIRS[@]}" -eq 0 ] || [ "$PERMISSION_MODE" = tool-allowlist ] || fail "--add-dir requires tool-allowlist mode"
+if [ -n "$PERMISSION_MODE" ]; then
+  python3 "$HERE/seat_permissions.py" "$HARNESS" "$PERMISSION_MODE" ${ALLOWED_TOOLS[@]+"${ALLOWED_TOOLS[@]}"} >/dev/null || fail "invalid seat permissions"
+fi
+if [ -n "$RESUME" ]; then
+  [ "$HARNESS" = codex ] && [ "$PERMISSION_MODE" = codex-read-only ] || fail "--resume is only supported for read-only Codex seats"
+  [[ "$RESUME" =~ ^[A-Za-z0-9_-]+$ ]] || fail "invalid resume session id"
+fi
 
 # pi-pick 的 dry-run 是配方的唯一驗證者；它失敗就一律不建 tab。
 # 成功時把 args 與 environment 攤成 NUL 分隔的 A／E 項目，bash 3.2 沒有 mapfile 所以逐項 read。
@@ -116,7 +249,7 @@ for a in d["args"]:
 for k, v in d["environment"].items():
   w(b"E\0" + (k + "=" + v).encode() + b"\0")
 ')
-  # --approve：沒帶時 pi 對有 .pi/settings.json 的 worktree 跳信任框，Herdr 卻回報 idle，brief 會被打進確認框。
+  # 沒帶 --approve 時，有 .pi/settings.json 的 worktree 會卡在信任對話框，首則訊息無法開始。
   START_ARGS+=(--approve --session-id "$PI_UUID")
 }
 
@@ -171,14 +304,35 @@ for k in d["unset"]:
 case "$HARNESS" in
   claude)
     KIND=claude
-    if [ -n "$RECIPE" ]; then
-      [ -z "$MODEL" ] && [ -z "$EFFORT" ] || fail "--model/--effort do not apply with --recipe for --harness claude; model and effort are slots in the --recipe JSON"
+    if [ -n "$LAUNCHER" ]; then
+      [ -z "$AGENT" ] || START_ARGS+=(--agent "$AGENT")
+      [ -z "$EFFORT" ] || START_ARGS+=(--effort "$EFFORT")
+      # The selected launcher must own its model slots even when the parent shell had another mapping.
+      UNSET_NAMES+=(ANTHROPIC_MODEL ANTHROPIC_DEFAULT_FABLE_MODEL ANTHROPIC_DEFAULT_OPUS_MODEL
+                    ANTHROPIC_DEFAULT_SONNET_MODEL ANTHROPIC_DEFAULT_HAIKU_MODEL CLAUDE_CODE_SUBAGENT_MODEL)
+    elif [ -n "$RECIPE" ]; then
+      [ -n "$AGENT" ] || { [ -z "$MODEL" ] && [ -z "$EFFORT" ]; } || fail "--model/--effort do not apply with --recipe for --harness claude without --agent; pass --agent to override --model/--effort, or omit them to use the --recipe model slots"
       command -v "$CC_PICK" >/dev/null 2>&1 || fail "cc-pick not found ($CC_PICK); cannot validate the claude recipe"
       prepare_claude_launch
+      if [ -n "$AGENT" ]; then
+        # 定義檔的 model:／effort: 會蓋掉配方的 ANTHROPIC_MODEL，不釘回去 worker 會靠定義檔靜默換模型。
+        agent_model="$MODEL"
+        if [ -z "$agent_model" ]; then
+          for e in ${TAB_ENV_ARGS[@]+"${TAB_ENV_ARGS[@]}"}; do
+            case "$e" in ANTHROPIC_MODEL=*) agent_model="${e#ANTHROPIC_MODEL=}" ;; esac
+          done
+        fi
+        [ -n "$agent_model" ] || fail "--agent with --recipe needs a model: the recipe sets no ANTHROPIC_MODEL, so pass --model"
+        START_ARGS+=(--agent "$AGENT" --model "$agent_model")
+        [ -z "$EFFORT" ] || START_ARGS+=(--effort "$EFFORT")
+        MODEL=""
+        EFFORT=""
+      fi
     else
       MODEL="${MODEL:-opus[1m]}"
       EFFORT="${EFFORT:-high}"
       START_ARGS=(--model "$MODEL" --effort "$EFFORT")
+      [ -z "$AGENT" ] || START_ARGS+=(--agent "$AGENT")
     fi
     # Herdr 新分頁不繼承 main 的 CLAUDE_CONFIG_DIR；沒帶過去就落在預設 ~/.claude，
     # 那份登入失效時 worker 一開就回 Login expired。main 在跑就代表它的設定目錄是登入中的。
@@ -190,7 +344,13 @@ case "$HARNESS" in
     command -v codex >/dev/null 2>&1 || fail "codex executable not found in PATH; cannot start a codex worker"
     KIND=codex
     # check_for_update_on_startup=false：否則 Codex 啟動先跳更新選單，Herdr 回 agent_not_ready。
-    START_ARGS=(-m "$MODEL" -c "model_reasoning_effort=$EFFORT" -c check_for_update_on_startup=false --dangerously-bypass-approvals-and-sandbox)
+    if [ "$PERMISSION_MODE" = codex-read-only ]; then
+      START_ARGS=(-m "$MODEL" -c "model_reasoning_effort=$EFFORT" -c check_for_update_on_startup=false -s read-only -a never)
+      [ -z "$RESUME" ] || START_ARGS=(resume "$RESUME" "${START_ARGS[@]}")
+    else
+      START_ARGS=(-m "$MODEL" -c "model_reasoning_effort=$EFFORT" -c check_for_update_on_startup=false --dangerously-bypass-approvals-and-sandbox)
+    fi
+    [ -z "${CODEX_HOME:-}" ] || TAB_ENV_ARGS+=(--env "CODEX_HOME=$CODEX_HOME")
     ;;
   pi)
     [ -n "$RECIPE" ] || fail "--harness pi requires --recipe (a pi-pick recipe JSON)"
@@ -204,11 +364,28 @@ case "$HARNESS" in
     fail "unknown harness: $HARNESS"
     ;;
 esac
+if [ -n "$PERMISSION_MODE" ]; then
+  while IFS= read -r -d '' permission_arg; do
+    START_ARGS+=("$permission_arg")
+  done < <(python3 "$HERE/seat_permissions.py" "$HARNESS" "$PERMISSION_MODE" ${ALLOWED_TOOLS[@]+"${ALLOWED_TOOLS[@]}"})
+fi
+for directory in ${ADD_DIRS[@]+"${ADD_DIRS[@]}"}; do
+  START_ARGS+=(--add-dir "$directory")
+done
 [ -d "$CWD" ] || fail "worktree not found: $CWD"
 [ -f "$BRIEF" ] || fail "brief not found: $BRIEF"
-CWD="$(cd "$CWD" && pwd -P)"
+case "$BRIEF" in /*) ;; *) BRIEF="$PWD/$BRIEF" ;; esac
+CWD="$(cd -- "$CWD" && pwd -P)"
 LOGDIR="${LOGDIR:-$(dirname "$BRIEF")/watch-logs}"
-mkdir -p "$LOGDIR" || fail "could not create log directory: $LOGDIR"
+mkdir -p -- "$LOGDIR" || fail "could not create log directory: $LOGDIR"
+LOGDIR="$(cd -- "$LOGDIR" && pwd -P)"
+
+# 不載入 settings 的受限席要自己提供 agent 定義。檔案保留到首回合已啟動，避免 PTY 接觸定義原文。
+if [ "$HARNESS" = claude ] && [ -n "$AGENT" ] && [[ "$PERMISSION_MODE" = zero-tools || "$PERMISSION_MODE" = tool-allowlist ]]; then
+  AGENT_JSON=$(mktemp "$LOGDIR/inline-agent.XXXXXX") || fail "could not create inline agent file"
+  trap 'rm -f -- "$AGENT_JSON"' EXIT INT TERM
+  write_inline_agent || fail "could not prepare inline agent definition"
+fi
 
 HC_BIN="${HC_BIN:-hc}"
 
@@ -226,12 +403,26 @@ else
   fail "no supported parent terminal identity; use Herdr"
 fi
 
+if [ "$BACKEND" = herdr-core ]; then
+  python3 -c 'import re,sys; n=sys.argv[1]; sys.exit(0 if re.fullmatch(r"[a-z0-9][a-z0-9_.-]{0,31}", n) and not re.fullmatch(r"t[0-9a-z]+", n) else 1)' "$NAME" || fail "invalid Herdr Core name: use 1-32 of a-z 0-9 - _ . starting with a letter or digit, not shaped like an id (t7)"
+fi
+
+if [ -n "$LAUNCHER" ]; then
+  [ "$BACKEND" = herdr-core ] || fail "launcher requires Herdr App/Core; shell-function launch on legacy Herdr is not verified"
+  # Herdr App/Core 打開的是互動 login zsh；launcher 可以是 .zshrc 載入的函式，不一定在 PATH。
+  zsh -lic 'whence -w -- "$1"' start-worker "$LAUNCHER" >/dev/null 2>&1 || fail "launcher not found in interactive login zsh: $LAUNCHER"
+fi
+
 check_json_ok() {
-  printf '%s' "$1" | python3 -c 'import json,sys; s=sys.stdin.read().strip();
+  printf '%s' "$1" | python3 -I -c '
+import json, sys
+
 try:
- d=json.loads(s); raise SystemExit(1 if d.get("ok") is False else 0)
+  result = json.load(sys.stdin)
 except json.JSONDecodeError:
- raise SystemExit(0)'
+  sys.exit(1)
+sys.exit(0 if isinstance(result, dict) and result.get("ok") is not False and result.get("error") is None else 1)
+'
 }
 
 herdr_parent_is_live() {
@@ -252,43 +443,41 @@ else
   hc_parent_is_live || fail "Herdr-core parent target is not live: $HC_TERMINAL_ID"
 fi
 
-cleanup_herdr_tab() {
-  [ -n "${1:-}" ] && herdr tab close "$1" >/dev/null 2>&1 || true
+fail_legacy_worker() {
+  local tab="$1" reason="$2" out rc=0
+  out=$(herdr tab close "$tab" 2>&1) || rc=$?
+  if [ "$rc" -ne 0 ] || ! check_json_ok "$out"; then
+    fail "$reason; terminal close failed for $tab (tab close rc=$rc: ${out:-no diagnostic}); watcher not armed"
+  fi
+  fail "$reason; tab closed, watcher not armed"
 }
 
-# 回傳 0＝stdout 是 session；2＝herdr 失敗、stdout 是錯誤文字；其他＝還沒有 session。
-# agent_session 可能是 null（Codex 剛啟動時），所以用 `or {}` 取值。
-lookup_session() {
-  local agents
-  agents=$(herdr agent list 2>&1) || { printf '%s' "$agents"; return 2; }
-  printf '%s' "$agents" | python3 -c '
-import json, sys
-try:
-  d = json.load(sys.stdin)
-except Exception as e:
-  sys.stdout.write(f"invalid herdr agent list JSON: {e}")
-  sys.exit(2)
-name, pane = sys.argv[1], sys.argv[2]
-xs = [x for x in d.get("result", {}).get("agents", []) if x.get("name") == name and x.get("pane_id") == pane]
-r = (xs[0].get("agent_session") or {}).get("value", "") if xs else ""
-print(r) if r else sys.exit(1)
-' "$NAME" "$pane"
-}
-
-# Codex 送出第一則 prompt 後約 2 秒才有 session，所以在送 brief 之後有限次輪詢。
-poll_session() {
-  local i max interval out rc
-  max="${START_WORKER_SESSION_POLLS:-30}"
-  interval="${START_WORKER_SESSION_POLL_INTERVAL:-1}"
+# agent start 會等到互動 idle；已有首則訊息的 agent 可能早已 working，應從新 pane 讀回它的身分。
+poll_legacy_session() {
+  local pane="$1" i agents session
+  local max="${START_WORKER_SESSION_POLLS:-30}" interval="${START_WORKER_SESSION_POLL_INTERVAL:-1}"
   for ((i = 0; i < max; i++)); do
-    rc=0
-    out=$(lookup_session) || rc=$?
-    if [ "$rc" -eq 0 ]; then
-      printf '%s' "$out"
-      return 0
-    elif [ "$rc" -eq 2 ]; then
-      printf '%s' "$out"
-      return 2
+    if agents=$(herdr agent list 2>/dev/null); then
+      session=$(printf '%s' "$agents" | python3 -I -c '
+import json, sys
+pane, kind, pi_id, resume = sys.argv[1:]
+for agent in json.load(sys.stdin).get("result", {}).get("agents", []):
+  if agent.get("pane_id") != pane or agent.get("agent") != kind:
+    continue
+  completion = agent.get("completion_seq")
+  if agent.get("agent_status") != "working" and not (type(completion) is int and completion > 0):
+    continue
+  session = (agent.get("agent_session") or {}).get("value")
+  if not isinstance(session, str) or not session:
+    continue
+  if kind == "pi" and not session.endswith(f"_{pi_id}.jsonl"):
+    continue
+  if resume and session != resume:
+    continue
+  print(pi_id if kind == "pi" else session)
+  sys.exit(0)
+sys.exit(1)
+' "$pane" "$KIND" "$PI_UUID" "$RESUME" 2>/dev/null) && { printf '%s' "$session"; return 0; }
     fi
     [ "$i" -lt $((max - 1)) ] && sleep "$interval"
   done
@@ -316,21 +505,20 @@ prepare_pi_worktree() {
   printf '%s\n' '{"retry":{"provider":{"maxRetries":30,"maxRetryDelayMs":0}}}' > "$settings" || fail "could not write $settings"
 }
 
-# 不依賴使用者 shell 設定：配方要求清掉的變數，在 claude 啟動前由 shell 自己 unset。
-# 新 tab 的 shell 還在初始化時，pane run 會被靜默丟掉（rc=0），所以只信回顯不含的完成標記，沒等到就重送。
-confirm_pane_unset() {
+# 新 tab 初始化時 pane run 可能被靜默丟掉。只重送無副作用的 readiness 探針與 unset。
+confirm_legacy_shell() {
   local pane tab cmd out i max
   pane="$1"
   tab="$2"
   max=5
-  cmd="unset ${UNSET_NAMES[*]}; printf 'AGENT_DISPATCH_UNSET%s\\n' _DONE"
+  cmd="printf 'AGENT_DISPATCH_SHELL%s\\n' _READY"
+  [ "${#UNSET_NAMES[@]}" -eq 0 ] || cmd="unset ${UNSET_NAMES[*]} && $cmd"
   for ((i = 0; i < max; i++)); do
-    out=$(herdr pane run "$pane" "$cmd" 2>&1) || { cleanup_herdr_tab "$tab"; fail "Herdr pane run unset failed: $out"; }
-    [ -z "$out" ] || check_json_ok "$out" || { cleanup_herdr_tab "$tab"; fail "Herdr pane run unset returned ok:false: $out"; }
-    herdr pane wait-output "$pane" --match AGENT_DISPATCH_UNSET_DONE --timeout 3000 >/dev/null 2>&1 && return 0
+    out=$(herdr pane run "$pane" "$cmd" 2>&1) || fail_legacy_worker "$tab" "Herdr shell readiness probe failed: $out"
+    check_json_ok "$out" || fail_legacy_worker "$tab" "Herdr shell readiness probe returned ok:false: $out"
+    herdr pane wait-output "$pane" --match AGENT_DISPATCH_SHELL_READY --timeout 3000 >/dev/null 2>&1 && return 0
   done
-  cleanup_herdr_tab "$tab"
-  fail "unset of recipe variables was not confirmed after $max attempts in pane $pane; tab closed"
+  fail_legacy_worker "$tab" "Herdr shell readiness and recipe unset were not confirmed after $max attempts in pane $pane"
 }
 
 session_continued_into() {
@@ -382,7 +570,9 @@ PY
 }
 
 start_herdr() {
-  local main main_identity main_session ws created created_info pane tab started agents session prompt log first_error
+  local main main_identity main_session ws created created_info pane tab started session launch_cmd log
+  [[ "$NAME" =~ ^[a-z][a-z0-9_-]{0,31}$ ]] || fail "invalid legacy Herdr agent name"
+  launch_cmd=$(build_launch_cmd) || fail "could not build worker launch command"
   main="$HERDR_PANE_ID"
   ws="$HERDR_WORKSPACE_ID"
   main_identity=$(herdr agent get "$main" 2>&1) || fail "Herdr main identity unavailable: $main_identity"
@@ -400,74 +590,74 @@ start_herdr() {
   created_info=$(printf '%s' "$created" | python3 -c 'import json,sys; d=json.load(sys.stdin); r=d.get("result",{}); print(r["root_pane"]["pane_id"] + "\t" + r["tab"]["tab_id"])') || fail "invalid Herdr tab create response: $created"
   IFS=$'\t' read -r pane tab <<< "$created_info"
   [ -n "$pane" ] && [ -n "$tab" ] || fail "Herdr tab create returned no target"
-  [ "${#UNSET_NAMES[@]}" -eq 0 ] || confirm_pane_unset "$pane" "$tab"
-  started=$(herdr agent start "$NAME" --kind "$KIND" --pane "$pane" -- ${START_ARGS[@]+"${START_ARGS[@]}"} 2>&1)
-  if [ "$?" -ne 0 ]; then
-    first_error="$started"
-    if printf '%s' "$first_error" | command grep -Eq 'agent_pane_busy|not an available shell'; then
-      herdr pane process-info --pane "$pane" >/dev/null 2>&1 || { cleanup_herdr_tab "$tab"; fail "Herdr pane was not ready: $first_error"; }
-      started=$(herdr agent start "$NAME" --kind "$KIND" --pane "$pane" -- ${START_ARGS[@]+"${START_ARGS[@]}"} 2>&1) || { cleanup_herdr_tab "$tab"; fail "Herdr agent start failed after pane check: $started"; }
-    else
-      cleanup_herdr_tab "$tab"
-      fail "$first_error"
-    fi
-  fi
-  [ -z "$started" ] || check_json_ok "$started" || { cleanup_herdr_tab "$tab"; fail "Herdr agent start returned ok:false: $started"; }
-  session=""
-  if [ "$HARNESS" != codex ]; then
-    session=$(lookup_session)
-    case "$?" in
-      0) ;;
-      2) cleanup_herdr_tab "$tab"; fail "$session" ;;
-      *) cleanup_herdr_tab "$tab"; fail "Herdr agent list returned no session for $NAME" ;;
-    esac
-  fi
-  if [ "$HARNESS" = pi ]; then
-    # pi 的 agent_session 是紀錄檔路徑；結尾不是本次 uuid 就不是我們剛起的 session。
-    case "$session" in
-      *_"$PI_UUID".jsonl) session="$PI_UUID" ;;
-      *) cleanup_herdr_tab "$tab"; fail "Herdr agent list returned no session for $NAME matching pi session $PI_UUID: $session" ;;
-    esac
-  fi
-  prompt="[main] Read $BRIEF and follow it. Ask your questions in plain text and stop; do not assume answers."
-  started=$(herdr agent prompt "$NAME" "$prompt" --wait --until working 2>&1) || { cleanup_herdr_tab "$tab"; fail "prompt failed: $started"; }
-  [ -z "$started" ] || check_json_ok "$started" || { cleanup_herdr_tab "$tab"; fail "Herdr prompt returned ok:false: $started"; }
-  if [ "$HARNESS" = codex ]; then
-    session=$(poll_session) || { cleanup_herdr_tab "$tab"; fail "Herdr agent list returned no session for $NAME after prompt"; }
-  fi
+  confirm_legacy_shell "$pane" "$tab"
+  started=$(herdr pane run "$pane" "$launch_cmd" 2>&1) || fail_legacy_worker "$tab" "Herdr launch failed: $started"
+  check_json_ok "$started" || fail_legacy_worker "$tab" "Herdr launch returned ok:false: $started"
+  session=$(poll_legacy_session "$pane") || fail_legacy_worker "$tab" "Herdr found no session with first-turn activity for $NAME"
+  started=$(herdr agent rename "$pane" "$NAME" 2>&1) || fail_legacy_worker "$tab" "Herdr agent rename failed: $started"
+  check_json_ok "$started" || fail_legacy_worker "$tab" "Herdr agent rename returned ok:false: $started"
   log="$LOGDIR/$NAME.log"
   if [ "$WATCH" -eq 1 ]; then
     nohup bash "$HERE/agent-watch.sh" herdr "$NAME" "$main" "$log" "$session" "$CWD" "$main_session" "$pane" >/dev/null 2>&1 &
     disown
   fi
-  python3 -c 'import json,sys; print(json.dumps({"backend":sys.argv[1],"parent_backend":sys.argv[1],"worker_backend":sys.argv[1],"name":sys.argv[2],"worker_id":sys.argv[3],"parent_id":sys.argv[4],"parent_session_id":sys.argv[9],"pane_id":sys.argv[3],"tab_id":sys.argv[5],"session_id":sys.argv[6],"log":sys.argv[7],"cwd":sys.argv[8],"harness":sys.argv[10],"recipe":json.loads(sys.argv[13]) if sys.argv[13] else {"model":sys.argv[11],"effort":sys.argv[12]}}))' "$BACKEND" "$NAME" "$pane" "$main" "$tab" "$session" "$log" "$CWD" "$main_session" "$HARNESS" "$MODEL" "$EFFORT" "$RECIPE"
+  python3 -c 'import json,sys; print(json.dumps({"backend":sys.argv[1],"parent_backend":sys.argv[1],"worker_backend":sys.argv[1],"name":sys.argv[2],"worker_id":sys.argv[3],"parent_id":sys.argv[4],"parent_session_id":sys.argv[9],"pane_id":sys.argv[3],"tab_id":sys.argv[5],"session_id":sys.argv[6],"log":sys.argv[7],"cwd":sys.argv[8],"harness":sys.argv[10],"launch_args":sys.argv[16:],"recipe":json.loads(sys.argv[13]) if sys.argv[13] else {"model":sys.argv[11],"effort":sys.argv[12]},**({"agent":sys.argv[14]} if sys.argv[14] else {})}))' "$BACKEND" "$NAME" "$pane" "$main" "$tab" "$session" "$log" "$CWD" "$main_session" "$HARNESS" "$MODEL" "$EFFORT" "$RECIPE" "$AGENT" "$LAUNCHER" ${START_ARGS[@]+"${START_ARGS[@]}"}
 }
 
-cleanup_hc_worker() {
-  local pane="${1:-}"
-  if [ -n "$pane" ]; then
-    "$HC_BIN" kill "$pane" >/dev/null 2>&1 || true
-    "$HC_BIN" rm "$pane" >/dev/null 2>&1 || true
+fail_hc_worker() {
+  local pane="$1" reason="$2" action out rc errors="" still_live=""
+  for action in kill rm; do
+    rc=0
+    out=$("$HC_BIN" "$action" "$pane" 2>&1) || rc=$?
+    if [ "$rc" -ne 0 ] || ! check_json_ok "$out"; then
+      errors="$errors $action rc=$rc: ${out:-no diagnostic}."
+    fi
+  done
+  if [ -z "$errors" ]; then
+    still_live=$("$HC_BIN" get "$pane" 2>/dev/null | python3 -I -c '
+import json, sys
+
+try:
+  d = json.load(sys.stdin)
+except Exception:
+  sys.exit(0)
+if (
+  isinstance(d, dict)
+  and d.get("error") is None
+  and d.get("ok") is not False
+  and d.get("state") not in (None, "finished", "exited", "removed", "closed")
+):
+  print("terminal still live")
+' 2>/dev/null) || still_live=""
+    if [ -n "$still_live" ]; then
+      errors=" get: $still_live."
+    fi
   fi
+  if [ -n "$errors" ]; then
+    fail "$reason; terminal close failed for $pane:$errors watcher not armed"
+  fi
+  fail "$reason; terminal closed, watcher not armed"
 }
 
 build_hc_env_cmd() {
-  python3 -c '
-import shlex, sys
+  python3 -I -c '
+import re, shlex, sys
+
+args = sys.argv[1:]
+if any(ord(c) < 32 or ord(c) == 127 for arg in args for c in arg):
+  sys.exit("terminal environment contains a control character")
 unsets = []
 exports = []
-i = 1
-while i < len(sys.argv):
-  tag = sys.argv[i]
-  if tag == "-u":
-    unsets.append(sys.argv[i + 1])
-    i += 2
-  elif tag == "--env":
-    k, v = sys.argv[i + 1].split("=", 1)
-    exports.append(f"{k}={shlex.quote(v)}")
-    i += 2
+for tag, item in zip(args[::2], args[1::2]):
+  name, separator, value = item.partition("=")
+  if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+    sys.exit("invalid terminal environment name")
+  if tag == "-u" and not separator:
+    unsets.append(name)
+  elif tag == "--env" and separator:
+    exports.append(f"{name}={shlex.quote(value)}")
   else:
-    i += 1
+    sys.exit("invalid terminal environment argument")
 parts = []
 if unsets:
   parts.append("unset " + " ".join(unsets))
@@ -477,8 +667,162 @@ print("; ".join(parts))
 ' "$@"
 }
 
+# 快回完時用已完成回合數辨識；status 與前景 process name 是不同的訊號。
+poll_hc_prompt_start() {
+  local pane="$1" initial_turn="$2" i out progress ready=0
+  local max="${START_WORKER_PROMPT_POLLS:-21}" interval="${START_WORKER_PROMPT_POLL_INTERVAL:-1}"
+  for ((i = 0; i < max; i++)); do
+    if out=$("$HC_BIN" get "$pane" 2>/dev/null); then
+      progress=$(printf '%s' "$out" | python3 -I -c '
+import json, sys
+
+d = json.load(sys.stdin)
+if not isinstance(d, dict) or d.get("error") or d.get("ok") is False:
+  sys.exit(1)
+status = d.get("status")
+if isinstance(status, dict):
+  status = status.get("state")
+if not isinstance(status, str):
+  status = d.get("state")
+turn = d.get("turn")
+if status == "working" or (type(turn) is int and turn > int(sys.argv[1])):
+  print("started")
+elif status in ("idle", "done", "blocked"):
+  print("ready")
+' "$initial_turn" 2>/dev/null) || progress=""
+      case "$progress" in
+        started) return 0 ;;
+        ready) ready=1 ;;
+      esac
+    fi
+    [ "$i" -lt $((max - 1)) ] && sleep "$interval"
+  done
+  if [ "$HARNESS" = claude ] && [ "$ready" -eq 0 ]; then
+    printf '%s' "Claude never reported ready; first turn did not start"
+  else
+    printf '%s' "first turn did not start (worker reported ready without progress or no turn was observed)"
+  fi
+  return 1
+}
+
+detect_hc_claude_trust_dialog() {
+  printf '%s' "$1" | python3 -I -c '
+import sys
+
+YES = ("Yes, I trust this folder", "Yes, add it")
+HEADERS = ("Accessing workspace:", "Quick safety check:", "Adding a new directory:")
+# hc read 連歷史一起印，已代按過的確認框還留在上方；只看畫面底部最後一個確認框，才不會對已啟動的 TUI 重按。
+bottom = "\n".join([line for line in sys.stdin.read().splitlines() if line.strip()][-25:])
+start = max(bottom.rfind(header) for header in HEADERS)
+if start < 0:
+  sys.exit(0)
+dialog = bottom[start:]
+if not any(label in dialog for label in YES):
+  sys.exit(0)
+for line in dialog.splitlines():
+  stripped = line.lstrip()
+  if stripped.startswith(("❯", ">")):
+    if any(label in stripped for label in YES):
+      print("enter")
+      sys.exit(0)
+    if "No, exit" in stripped:
+      print("down_enter")
+      sys.exit(0)
+print("down_enter")
+' 2>/dev/null
+}
+
+# Codex 的 Core status 可為 null。新席只看新增的 rollout，續席只看這次附加的回合事件。
+poll_codex_seat_session() {
+  python3 -I - "$1" "$CWD" "$RESUME" "$INLINE_BRIEF" "$BRIEF" "$(reference_prompt)" <<'PY'
+import json, math, os, re, sys, time
+from pathlib import Path
+
+before = json.loads(sys.argv[1])
+cwd, resume, inline, brief, reference = sys.argv[2:]
+try:
+  # Quoted shell command substitution strips trailing LFs and leaves other characters intact.
+  expected = Path(brief).read_bytes().rstrip(b"\n").decode("utf-8") if inline == "1" else reference
+except (OSError, UnicodeError):
+  sys.exit("could not read expected Codex prompt")
+root = Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex") / "sessions"
+try:
+  polls = int(os.environ.get("START_WORKER_SESSION_POLLS", "30"))
+  interval = float(os.environ.get("START_WORKER_SESSION_POLL_INTERVAL", "1"))
+  if not 1 <= polls <= 30 or not math.isfinite(interval) or not 0 <= interval <= 1:
+    raise ValueError
+except ValueError:
+  sys.exit("Codex seat polling requires 1-30 checks and an interval of 0-1 seconds")
+def text_blocks(content, kind):
+  if isinstance(content, list) and content and all(
+      isinstance(block, dict) and block.get("type") == kind and isinstance(block.get("text"), str)
+      for block in content):
+    return "".join(block["text"] for block in content)
+  return False
+
+
+# 最多 30 次、間隔 1 秒，讓首則訊息後的非同步 rollout 落盤有時間完成；超時不猜身分。
+for attempt in range(polls):
+  matches = []
+  for path in root.glob("**/rollout-*.jsonl"):
+    offset = before.get(str(path))
+    if (resume and offset is None) or (not resume and offset is not None):
+      continue
+    try:
+      with path.open("rb") as stream:
+        row = json.loads(stream.readline())
+        meta = row.get("payload") if isinstance(row, dict) and row.get("type") == "session_meta" else None
+        if not isinstance(meta, dict) or meta.get("cwd") != cwd:
+          continue
+        sid = meta.get("id")
+        if not isinstance(sid, str) or not re.fullmatch(r"[A-Za-z0-9_-]+", sid) or (resume and sid != resume):
+          continue
+        if offset is not None:
+          stream.seek(offset)
+        started = False
+        first_user = None
+        for line in stream:
+          try:
+            row = json.loads(line)
+          except ValueError:
+            if not line.endswith(b"\n"):
+              break
+            raise
+          if not isinstance(row, dict) or not isinstance(payload := row.get("payload"), dict):
+            continue
+          if row.get("type") == "event_msg":
+            kind = payload.get("type")
+            if kind == "task_started" and started:
+              break
+            if kind in ("task_started", "task_complete"):
+              started = True
+            if kind == "user_message":
+              first_user = payload.get("message", False)
+              break
+            item = payload.get("item")
+            if kind == "item_completed" and isinstance(item, dict) and item.get("type") == "UserMessage":
+              first_user = text_blocks(item.get("content"), "text")
+              break
+        # Only Codex's own user-input event counts. Raw response_item messages mix startup
+        # context with user input, and guessing which is which let another seat's rollout
+        # bind to this launch; a rollout without the event fails closed instead.
+        if started and first_user == expected:
+          matches.append(sid)
+    except (OSError, UnicodeError, ValueError):
+      continue
+  if len(matches) == 1:
+    print(matches[0])
+    sys.exit(0)
+  if len(matches) > 1:
+    sys.exit("ambiguous Codex rollouts: multiple sessions match this launch prompt and cwd")
+  if attempt + 1 < polls:
+    time.sleep(interval)
+sys.exit("no new Codex rollout turn matching this launch after bounded polling")
+PY
+}
+
 start_herdr_core() {
-  local main main_session created pane tab cc_uuid env_args env_cmd launch_cmd out prompt log session u e
+  local main main_session created pane tab cc_uuid launch_cmd out log session initial_turn codex_before
   main="$HC_TERMINAL_ID"
   main_session="${CLAUDE_CODE_SESSION_ID:-hc:$HC_TERMINAL_ID}"
   [ "$HARNESS" != pi ] || prepare_pi_worktree
@@ -489,7 +833,18 @@ start_herdr_core() {
     session="$cc_uuid"
   elif [ "$HARNESS" = pi ]; then
     session="$PI_UUID"
+  else
+    codex_before=$(python3 -I -c '
+import json, os, sys
+from pathlib import Path
+
+root = Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex") / "sessions"
+resume = sys.argv[1]
+pattern = f"**/rollout-*-{resume}.jsonl" if resume else "**/rollout-*.jsonl"
+print(json.dumps({str(p): p.stat().st_size if resume else 0 for p in root.glob(pattern)}))
+' "$RESUME") || fail "could not snapshot Codex rollouts before launch"
   fi
+  launch_cmd=$(build_launch_cmd) || fail "could not build worker launch command"
   # --parent 讓 Herdr App 把 worker 列在 main 的 sub_agents 底下；刻意不加 --outlive-parent，
   # 關掉 main 的 terminal 時 worker 跟著結束。--no-notify 是因為喚醒交給 agent-watch.sh，
   # 兩邊都開 main 會被叫兩次。
@@ -501,48 +856,72 @@ except Exception:
   m=re.search(r"(?:still running as |^)(t[0-9a-zA-Z_-]+)", s); a=m.group(1) if m else ""
 print(a) if a else sys.exit(1)' 2>/dev/null) || fail "invalid hc run response: $created"
   tab="$pane"
-  env_args=()
-  for u in ${UNSET_NAMES[@]+"${UNSET_NAMES[@]}"}; do
-    env_args+=(-u "$u")
-  done
-  for e in ${TAB_ENV_ARGS[@]+"${TAB_ENV_ARGS[@]}"}; do
-    env_args+=("$e")
-  done
-  if [ "${#env_args[@]}" -gt 0 ]; then
-    env_cmd=$(build_hc_env_cmd "${env_args[@]}")
-    if [ -n "$env_cmd" ]; then
-      out=$("$HC_BIN" send "$pane" "$env_cmd" 2>&1) || { cleanup_hc_worker "$pane"; fail "hc send env failed: $out"; }
-    fi
+  if [ -n "$env_cmd" ]; then
+    out=$("$HC_BIN" send "$pane" "$env_cmd" 2>&1) || fail_hc_worker "$pane" "hc send env failed: $out"
   fi
-  launch_cmd=$(python3 -c 'import shlex,sys; print(" ".join(shlex.quote(a) for a in sys.argv[1:]))' "$KIND" ${START_ARGS[@]+"${START_ARGS[@]}"})
-  out=$("$HC_BIN" send "$pane" "$launch_cmd" 2>&1) || { cleanup_hc_worker "$pane"; fail "hc send launch failed: $out"; }
-  out=$("$HC_BIN" wait "$pane" 2>&1) || { cleanup_hc_worker "$pane"; fail "hc wait ready failed: $out"; }
-  fg_agent=$("$HC_BIN" get "$pane" 2>/dev/null | python3 -c 'import json,sys
-try:
-  d=json.load(sys.stdin)
-  print((d.get("agent") or d.get("app") or "") if isinstance(d,dict) else "")
-except Exception:
-  print("")' 2>/dev/null) || fg_agent=""
-  case "$fg_agent" in
-    zsh|bash|sh|fish|-zsh|-bash|-sh|-fish)
-      cleanup_hc_worker "$pane"
-      fail "worker exited back to shell ($fg_agent) before prompt (check worktree trust dialog or launch flags)"
-      ;;
-  esac
-  prompt="[main] Read $BRIEF and follow it. Ask your questions in plain text and stop; do not assume answers."
-  out=$("$HC_BIN" send "$pane" "$prompt" 2>&1) || { cleanup_hc_worker "$pane"; fail "prompt failed: $out"; }
+  if [ "$HARNESS" != codex ]; then
+    initial_turn=$("$HC_BIN" get "$pane" 2>/dev/null | python3 -I -c '
+import json, sys
+
+d = json.load(sys.stdin)
+if not isinstance(d, dict) or d.get("error") or d.get("ok") is False:
+  sys.exit(1)
+t = d.get("turn", 0)
+print(t) if type(t) is int and t >= 0 else sys.exit(1)
+' 2>/dev/null) || fail_hc_worker "$pane" "hc get returned no valid initial turn"
+  fi
+  out=$("$HC_BIN" send "$pane" "$launch_cmd" 2>&1) || fail_hc_worker "$pane" "hc send launch failed: $out"
   if [ "$HARNESS" = codex ]; then
-    session=$("$HC_BIN" get "$pane" 2>/dev/null | python3 -c 'import json,sys; d=json.load(sys.stdin); s=(d.get("session_id") or (d.get("labels") or {}).get("session_id") or "") if isinstance(d,dict) else ""; print(s)' 2>/dev/null) || session=""
-    [ -n "$session" ] || session="hc-$pane"
+    session=$(poll_codex_seat_session "$codex_before" 2>&1) || fail_hc_worker "$pane" "$session"
+  elif ! out=$(poll_hc_prompt_start "$pane" "$initial_turn"); then
+    # 畫面可能顯示 export 出來的憑證值，只讓固定的診斷句離開這條管線，不照抄畫面。
+    local screen="" trust_action="" accepted=0 polled=0
+    # 工作目錄一個確認框，每個 --add-dir 再各跳一個「Yes, add it」；只代按第一個時，多目標審查席會卡在第二個。
+    local max_trust=$(( ${#ADD_DIRS[@]} + 1 ))
+    while :; do
+      screen="" trust_action=""
+      if [ "$HARNESS" = claude ] || [ -n "$LAUNCHER" ]; then
+        screen=$("$HC_BIN" read "$pane" 2>/dev/null) || screen=""
+      fi
+      if [ "$HARNESS" = claude ] && [ -n "$screen" ]; then
+        trust_action=$(detect_hc_claude_trust_dialog "$screen") || trust_action=""
+      fi
+      if [ -n "$trust_action" ]; then
+        [ "$accepted" -lt "$max_trust" ] || fail_hc_worker "$pane" "$out; folder trust dialog remained active after auto-accept"
+        if [ "$trust_action" = "down_enter" ]; then
+          "$HC_BIN" keys "$pane" down >/dev/null 2>&1 || true
+        fi
+        "$HC_BIN" keys "$pane" enter >/dev/null 2>&1 || true
+        accepted=$((accepted + 1)) polled=0
+        # 下一個確認框在按下後才畫出來；先等它出現再讀，連續的確認框就不必各等一輪完整首輪輪詢。
+        sleep "${START_WORKER_TRUST_SETTLE:-2}"
+        continue
+      fi
+      if [ "$accepted" -gt 0 ] && [ "$polled" -eq 0 ]; then
+        polled=1
+        out=$(poll_hc_prompt_start "$pane" "$initial_turn") && break
+        continue
+      fi
+      [ "$accepted" -eq 0 ] || fail_hc_worker "$pane" "$out; folder trust dialog remained active after auto-accept"
+      if [ -n "$LAUNCHER" ] && printf '%s' "$screen" | command grep -F 'not listening' >/dev/null; then
+        out="$out; launcher reported its relay is not listening"
+      fi
+      fail_hc_worker "$pane" "$out"
+    done
   fi
   log="$LOGDIR/$NAME.log"
   if [ "$WATCH" -eq 1 ]; then
     nohup bash "$HERE/agent-watch.sh" herdr-core "$NAME" "$HC_TERMINAL_ID" "$log" "$session" "$CWD" "$main_session" "$pane" >/dev/null 2>&1 &
     disown
   fi
-  python3 -c 'import json,sys; print(json.dumps({"backend":sys.argv[1],"parent_backend":sys.argv[1],"worker_backend":sys.argv[1],"name":sys.argv[2],"worker_id":sys.argv[3],"parent_id":sys.argv[4],"parent_session_id":sys.argv[9],"pane_id":sys.argv[3],"tab_id":sys.argv[5],"session_id":sys.argv[6],"log":sys.argv[7],"cwd":sys.argv[8],"harness":sys.argv[10],"recipe":json.loads(sys.argv[13]) if sys.argv[13] else {"model":sys.argv[11],"effort":sys.argv[12]}}))' "$BACKEND" "$NAME" "$pane" "$main" "$tab" "$session" "$log" "$CWD" "$main_session" "$HARNESS" "$MODEL" "$EFFORT" "$RECIPE"
+  python3 -c 'import json,sys; print(json.dumps({"backend":sys.argv[1],"parent_backend":sys.argv[1],"worker_backend":sys.argv[1],"name":sys.argv[2],"worker_id":sys.argv[3],"parent_id":sys.argv[4],"parent_session_id":sys.argv[9],"pane_id":sys.argv[3],"tab_id":sys.argv[5],"session_id":sys.argv[6],"log":sys.argv[7],"cwd":sys.argv[8],"harness":sys.argv[10],"launch_args":sys.argv[16:],"recipe":json.loads(sys.argv[13]) if sys.argv[13] else {"model":sys.argv[11],"effort":sys.argv[12]},**({"agent":sys.argv[14]} if sys.argv[14] else {}),**({"launcher":sys.argv[15],"launch_args":sys.argv[16:],"recipe":None} if sys.argv[15] else {})}))' "$BACKEND" "$NAME" "$pane" "$main" "$tab" "$session" "$log" "$CWD" "$main_session" "$HARNESS" "$MODEL" "$EFFORT" "$RECIPE" "$AGENT" "$LAUNCHER" ${START_ARGS[@]+"${START_ARGS[@]}"}
 }
 
+env_args=()
+for name in ${UNSET_NAMES[@]+"${UNSET_NAMES[@]}"}; do
+  env_args+=(-u "$name")
+done
+env_cmd=$(build_hc_env_cmd ${env_args[@]+"${env_args[@]}"} ${TAB_ENV_ARGS[@]+"${TAB_ENV_ARGS[@]}"}) || fail "invalid worker launch environment"
 if [ "$BACKEND" = herdr ]; then
   start_herdr
 else

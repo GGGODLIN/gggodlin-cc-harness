@@ -7,6 +7,8 @@ import tempfile
 def locations(config):
   settings = json.loads((config / "settings.json").read_text())
   installed = json.loads((config / "plugins/installed_plugins.json").read_text())
+  if not isinstance(settings, dict) or not isinstance(installed, dict):
+    raise ValueError("installed plugin inventory has an unknown format")
   enabled = settings.get("enabledPlugins")
   plugins = installed.get("plugins")
   if not isinstance(enabled, dict) or not isinstance(plugins, dict):
@@ -24,17 +26,34 @@ def locations(config):
     if not all(isinstance(path, str) and Path(path).is_absolute() for path in paths):
       errors.append({"plugin": name, "status": "無法檢查", "category": "安裝位置"})
       continue
-    found[name] = tuple(Path(path) for path in sorted(set(paths)))
+    normalized = [os.path.normpath(path) for path in paths]
+    found[name] = tuple(Path(path) for path in sorted(set(normalized)))
   return found, errors
 
 
 def snapshot(plugin):
   try:
     root = plugin.resolve(strict=True)
-    manifest_path = plugin / "hooks/hooks.json"
-    if not manifest_path.exists() and not manifest_path.is_symlink():
+    hooks_dir = plugin / "hooks"
+    try:
+      os.lstat(hooks_dir)
+    except FileNotFoundError:
       return None, "no-hooks"
-    manifest = manifest_path.resolve(strict=True)
+    try:
+      resolved_hooks = hooks_dir.resolve(strict=True)
+    except FileNotFoundError:
+      raise ValueError("hooks directory symlink is broken")
+    if not resolved_hooks.is_relative_to(root) or not resolved_hooks.is_dir():
+      raise ValueError("hooks directory is invalid or outside installation root")
+    manifest_path = hooks_dir / "hooks.json"
+    try:
+      os.lstat(manifest_path)
+    except FileNotFoundError:
+      return None, "no-hooks"
+    try:
+      manifest = manifest_path.resolve(strict=True)
+    except FileNotFoundError:
+      raise ValueError("hook manifest symlink is broken")
     if not manifest.is_relative_to(root) or not manifest.is_file():
       raise ValueError("hook manifest is outside its installation root")
     data = json.loads(manifest.read_text())
@@ -81,10 +100,13 @@ def installation_content(roots):
 
 
 def read_state(path):
+  if path.is_symlink():
+    raise ValueError("plugin hook state cannot be a symlink")
   if not path.exists():
     return {}
   data = json.loads(path.read_text())
-  if not isinstance(data, dict) or data.get("version") != 1 or not isinstance(data.get("plugins"), dict):
+  version = data.get("version") if isinstance(data, dict) else None
+  if not isinstance(data, dict) or type(version) is not int or version != 1 or not isinstance(data.get("plugins"), dict):
     raise ValueError("plugin hook state has an unknown format")
   plugins = data["plugins"]
   if not all(isinstance(value, dict) for value in plugins.values()):
@@ -143,7 +165,8 @@ def scan(config, approved_path):
       categories.append("manifest")
     if content.get("modules") != current["modules"]:
       categories.append("module")
-    events.append({"plugin": name, "status": "未審", "category": "、".join(categories)})
+    category = "、".join(categories) if categories else "批准內容格式異常"
+    events.append({"plugin": name, "status": "未審", "category": category})
   return events
 
 
@@ -159,10 +182,11 @@ def current_content(config, name):
 
 def inspect(config, approved_path, name):
   current = current_content(config, name)
+  approved = read_state(approved_path)
   inspected = read_state(inspected_path(approved_path))
   inspected[name] = {"content": current}
   write_state(inspected_path(approved_path), inspected)
-  return {"plugin": name, **current, "approved": read_state(approved_path).get(name, {}).get("content") == current}
+  return {"plugin": name, **current, "approved": approved.get(name, {}).get("content") == current}
 
 
 def approve(config, approved_path, name):

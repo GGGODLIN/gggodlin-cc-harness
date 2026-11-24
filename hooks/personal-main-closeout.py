@@ -6,6 +6,32 @@ import subprocess
 import sys
 import time
 
+# resolve()：多帳號設定目錄的 hooks 是指回 ~/.claude 的 symlink，共用模組只在正本旁邊。
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts" / "lib"))
+
+from closeout_repos import (  # noqa: E402
+  declared_trunk,
+  git_lines,
+  git_value,
+  home_directory,
+  ignore_entries,
+  level_with_remote,
+  pushed_equal_enabled,
+  read_policy,
+  ref_exists,
+  repo_excluded,
+  repo_identity,
+  repo_scope,
+  resolved,
+  run_git,
+  scan_targets,
+  source_repo,
+  trunk_name,
+  trunk_ref,
+  work_parents,
+  worktree_entries,
+)
+
 
 HEADER = "個人 repo 收尾檢查：以下項目請確認是否需要處理。"
 
@@ -19,125 +45,23 @@ DEFAULT_BUDGET_SECONDS = 5.0
 
 SILENT_SOURCES = ("compact", "clear")
 
-TRUNK_FALLBACKS = (
-  "refs/remotes/origin/main",
-  "refs/remotes/origin/master",
-  "refs/heads/main",
-  "refs/heads/master",
-)
-
-WORK_TRUNK_FALLBACKS = (
-  "refs/remotes/origin/stage",
-  "refs/remotes/origin/main",
-  "refs/remotes/origin/master",
-  "refs/heads/main",
-  "refs/heads/master",
-)
-
-WORK_PARENTS = (("Desktop", "work", "acme"),)
-
 WORK_NOTE = "（公司 repo · 只報告，處置一律等你決定）"
 
 
-def home_directory():
-  value = os.environ.get("HOME")
-  return Path(value) if value else Path.home()
-
-
-def resolved(path):
-  return Path(path).resolve()
-
-
-def personal_roots():
-  home = home_directory()
-  return (
-    resolved(home / "Desktop" / "projects"),
-    resolved(home / ".claude"),
-    resolved(home / "code" / "social-info"),
-  )
-
-
-def contained(path, root):
-  return path == root or root in path.parents
-
-
-def work_parents():
-  home = home_directory()
-  return tuple(resolved(home.joinpath(*parts)) for parts in WORK_PARENTS)
-
-
-def repo_scope(repo):
-  if contained(repo, resolved(home_directory() / "Desktop" / "work")):
-    if any(contained(repo, parent) for parent in work_parents()):
-      return "work"
+def policy_note(bad_lines):
+  if not bad_lines:
     return None
-  if repo == resolved(home_directory() / "Desktop" / "projects"):
-    return None
-  if any(contained(repo, root) for root in personal_roots()):
-    return "personal"
-  return None
+  numbers = "、".join(str(number) for number in bad_lines[:MAX_LISTED])
+  return f"政策檔 ignore.jsonl 有 {len(bad_lines)} 行讀不懂（第 {numbers} 行），已略過；其餘登記照常生效。"
 
 
-def personal_repo(repo):
-  return repo_scope(repo) == "personal"
-
-
-def run_git(cwd, *args):
-  return subprocess.run(
-    ["git", "-C", str(cwd), *args],
-    capture_output=True,
-    check=False,
-    env={**os.environ, "GIT_OPTIONAL_LOCKS": "0"},
-    text=True,
-  )
-
-
-def git_lines(cwd, *args):
-  result = run_git(cwd, *args)
-  if result.returncode != 0:
-    return []
-  return [line for line in result.stdout.splitlines() if line.strip()]
-
-
-def git_value(cwd, *args):
-  result = run_git(cwd, *args)
-  if result.returncode != 0:
-    return None
-  return result.stdout.strip() or None
-
-
-def ref_exists(cwd, ref):
-  return run_git(cwd, "show-ref", "--verify", "--quiet", ref).returncode == 0
-
-
-def trunk_ref(cwd, scope="personal"):
-  if scope == "work":
-    for ref in WORK_TRUNK_FALLBACKS:
-      if ref_exists(cwd, ref):
-        return ref
-    return None
-  head = git_value(cwd, "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD")
-  if head is not None and ref_exists(cwd, head):
-    return head
-  for ref in TRUNK_FALLBACKS:
-    if ref_exists(cwd, ref):
-      return ref
-  return None
-
-
-def trunk_name(ref):
-  for prefix in ("refs/remotes/origin/", "refs/heads/"):
-    if ref.startswith(prefix):
-      return ref[len(prefix):]
-  return ref
-
-
-def unmerged_branches(cwd, ref, trunk):
+def unmerged_branches(cwd, refs, trunk):
+  """Local branches that are an ancestor of none of `refs`."""
   found = []
   for branch in git_lines(cwd, "for-each-ref", "--format=%(refname:short)", "refs/heads"):
     if branch == trunk:
       continue
-    if run_git(cwd, "merge-base", "--is-ancestor", branch, ref).returncode == 1:
+    if all(run_git(cwd, "merge-base", "--is-ancestor", branch, ref).returncode == 1 for ref in refs):
       found.append(branch)
   return found
 
@@ -152,17 +76,6 @@ def unpushed_count(cwd, ref, trunk):
   return int(value) if value is not None and value.isdigit() else 0
 
 
-def worktree_entries(cwd):
-  entries = []
-  for line in git_lines(cwd, "worktree", "list", "--porcelain"):
-    key, _, value = line.partition(" ")
-    if key == "worktree":
-      entries.append({"path": Path(value), "branch": None})
-    elif key == "branch" and entries:
-      entries[-1]["branch"] = trunk_name(value)
-  return entries
-
-
 def uncommitted_counts(cwd, trunk):
   counts = []
   for entry in worktree_entries(cwd):
@@ -175,77 +88,10 @@ def uncommitted_counts(cwd, trunk):
   return counts
 
 
-def ignore_file():
-  return home_directory() / ".claude" / "policies" / "personal-main-closeout" / "ignore.jsonl"
-
-
-def normalized_identity(url):
-  text = url.strip().split("?", 1)[0].split("#", 1)[0]
-  scheme = "://" in text
-  if scheme:
-    text = text.split("://", 1)[1]
-  if "@" in text:
-    text = text.split("@", 1)[1]
-  if not scheme and ":" in text:
-    host, _, tail = text.partition(":")
-    text = f"{host}/{tail.lstrip('/')}"
-  text = text.rstrip("/")
-  if text.endswith(".git"):
-    text = text[: -len(".git")]
-  return text
-
-
-def repo_identity(cwd, repo):
-  url = git_value(cwd, "config", "--get", "remote.origin.url")
-  if url is None:
-    return repo.name
-  return normalized_identity(url) or repo.name
-
-
-def branch_of_ref(ref):
-  return ref[len("refs/heads/"):] if ref.startswith("refs/heads/") else ref
-
-
-def ignore_entries():
-  try:
-    content = ignore_file().read_text(encoding="utf-8")
-  except (OSError, ValueError):
-    return []
-  entries = []
-  for line in content.splitlines():
-    if not line.strip():
-      continue
-    try:
-      record = json.loads(line)
-    except ValueError:
-      continue
-    if not isinstance(record, dict):
-      continue
-    identity = record.get("identity")
-    ref = record.get("ref")
-    if not isinstance(identity, str) or not isinstance(ref, str):
-      continue
-    tip = record.get("tip")
-    entries.append(
-      {
-        "identity": normalized_identity(identity),
-        "branch": branch_of_ref(ref),
-        "tip": tip if isinstance(tip, str) else None,
-      }
-    )
-  return entries
-
-
-# `"ref": "*"` 把整個 repo 交給別的工具或 agent 管（例如 Codex 做到一半的專案），
-# 收尾檢查對它一律不報；只有使用者明確核准才寫進 ignore.jsonl。
-def repo_excluded(identity):
-  return any(entry["branch"] == "*" and entry["identity"] == identity for entry in ignore_entries())
-
-
-def ignored_branches(cwd, identity):
+def ignored_branches(cwd, identity, entries):
   ignored = set()
   pinned = set()
-  for entry in ignore_entries():
+  for entry in entries:
     if entry["identity"] != identity:
       continue
     branch = entry["branch"]
@@ -272,33 +118,36 @@ def checked_out_off_trunk(cwd, repo, trunk, pinned):
   return None if branch == trunk else branch
 
 
-def source_repo(cwd):
-  value = git_value(cwd, "rev-parse", "--path-format=absolute", "--git-common-dir")
-  if value is None:
-    return None
-  common = resolved(value)
-  return common.parent if common.name == ".git" else common
-
-
-def inspect_repo(path):
+def inspect_repo(path, records):
   repo = source_repo(path)
   scope = repo_scope(repo) if repo is not None else None
   if scope is None:
     return None
-  ref = trunk_ref(path, scope)
+  identity = repo_identity(path, repo)
+  entries = ignore_entries(records)
+  if repo_excluded(identity, entries):
+    return None
+  # 公司 repo 的主幹與待處理清單不吃個人政策：那邊的處置一律等使用者決定。
+  personal = scope == "personal"
+  ref = trunk_ref(path, scope, declared_trunk(identity, records) if personal else None)
   if ref is None:
     return None
   trunk = trunk_name(ref)
-  identity = repo_identity(path, repo)
-  if repo_excluded(identity):
-    return None
-  ignored, pinned = ignored_branches(path, identity)
+  # 宣告了別條主幹的 repo，預設主幹通常是發版線（例如 main 帶有 dev 不會有的發版 commit）。
+  # 已併進發版線的 branch 在宣告前不會被列出，宣告後也不該冒出來，所以兩條都算「已整合」。
+  declared = declared_trunk(identity, records) if personal else None
+  default_ref = trunk_ref(path, scope) if declared else None
+  merged_into = [ref] if default_ref in (None, ref) else [ref, default_ref]
+  ignored, pinned = ignored_branches(path, identity, entries)
+  skip_level = personal and pushed_equal_enabled(identity, records)
   return {
     "repo": repo,
     "scope": scope,
     "trunk": trunk,
     "unmerged": [
-      branch for branch in unmerged_branches(path, ref, trunk) if branch not in ignored
+      branch
+      for branch in unmerged_branches(path, merged_into, trunk)
+      if branch not in ignored and not (skip_level and level_with_remote(path, branch))
     ],
     "stash": git_lines(path, "stash", "list"),
     "uncommitted": uncommitted_counts(path, trunk),
@@ -357,31 +206,23 @@ def budget_seconds():
   return value if value > 0 else DEFAULT_BUDGET_SECONDS
 
 
-def child_repositories(parent):
-  children = []
-  for child in sorted(parent.iterdir()):
-    if child.name.startswith(".") or not child.is_dir():
-      continue
-    if (child / ".git").exists():
-      children.append(child)
-  return children
+def with_policy_note(message, bad_lines):
+  note = policy_note(bad_lines)
+  if note is None:
+    return message
+  if message:
+    return f"{message}\n{note}"
+  return "\n".join([HEADER, note])
 
 
-def inspect_quietly(path):
+def inspect_quietly(path, records):
   try:
-    return inspect_repo(path)
+    return inspect_repo(path, records)
   except (OSError, ValueError, subprocess.SubprocessError):
     return None
 
 
-def scan_targets(parent):
-  children = child_repositories(parent)
-  if (parent / ".git").exists():
-    return [parent, *children]
-  return children
-
-
-def scan_parent(parent):
+def scan_parent(parent, records):
   children = scan_targets(parent)
   budget = budget_seconds()
   start = time.monotonic()
@@ -392,7 +233,7 @@ def scan_parent(parent):
     if index and time.monotonic() - start >= budget:
       skipped = len(children) - index
       break
-    report = inspect_quietly(child)
+    report = inspect_quietly(child, records)
     if report is None or report["repo"] in seen:
       continue
     seen.add(report["repo"])
@@ -426,11 +267,13 @@ def main():
   try:
     here = resolved(cwd)
     parents = (resolved(home_directory() / "Desktop" / "projects"), *work_parents())
+    records, bad_lines = read_policy()
     if here in parents:
-      message = scan_parent(here)
+      message = with_policy_note(scan_parent(here, records), bad_lines)
     else:
-      report = inspect_repo(Path(cwd))
-      message = format_report(report) if report is not None else None
+      report = inspect_repo(Path(cwd), records)
+      # 範圍外或整個交給其他工具的 repo 維持完全安靜，政策檔的問題不在那裡提。
+      message = with_policy_note(format_report(report), bad_lines) if report is not None else None
   except (OSError, ValueError, subprocess.SubprocessError):
     return 0
   output = {}

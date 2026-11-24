@@ -1,22 +1,46 @@
 import os
 from pathlib import Path
 
-TMP_ALIAS = Path("/tmp")
+
+def _uncollapsed_abs_path(path):
+    raw = os.fspath(path)
+    if not isinstance(raw, str) or not raw.strip():
+        raise ValueError("empty-path")
+    expanded = os.path.expanduser(raw)
+    if expanded.startswith("//"):
+        expanded = "/" + expanded.lstrip("/")
+    candidate = Path(expanded)
+    if not candidate.is_absolute():
+        candidate = Path.cwd() / candidate
+        expanded = os.fspath(candidate)
+        if expanded.startswith("//"):
+            expanded = "/" + expanded.lstrip("/")
+        candidate = Path(expanded)
+    return candidate
+
+
+def is_system_alias(current):
+    return (
+        (current == Path("/tmp") and os.path.realpath("/tmp") == "/private/tmp")
+        or (current == Path("/var") and os.path.realpath("/var") == "/private/var")
+    )
 
 
 def absolute_lexical_path(path):
-    candidate = Path(path).expanduser()
-    if not candidate.is_absolute():
-        candidate = Path.cwd() / candidate
-    return Path(os.path.abspath(os.fspath(candidate)))
+    return Path(os.path.abspath(os.fspath(_uncollapsed_abs_path(path))))
 
 
 def symlink_component(path):
-    candidate = absolute_lexical_path(path)
+    candidate = _uncollapsed_abs_path(path)
     current = Path(candidate.anchor)
     for part in candidate.parts[1:]:
-        current /= part
-        if current == TMP_ALIAS:
+        if part == ".":
+            continue
+        if part == "..":
+            current = current.parent
+            continue
+        current = current / part
+        if is_system_alias(current):
             continue
         if current.is_symlink():
             return current
@@ -24,8 +48,7 @@ def symlink_component(path):
 
 
 def ensure_no_symlink(path, label):
-    candidate = absolute_lexical_path(path)
-    component = symlink_component(candidate)
+    component = symlink_component(path)
     if component is not None:
         raise ValueError(f"{label}-symlink:{component}")
-    return candidate
+    return absolute_lexical_path(path)

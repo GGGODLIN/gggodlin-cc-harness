@@ -224,7 +224,247 @@ const sanitizeAudit = (event) => {
 
 export const hashSessionId = (sessionId) => sessionHash(requireSessionId(sessionId));
 
-export const writeCheckpoint = async (input, options = {}) => {
+const DEFAULT_LOCK_STALE_MS = 10_000;
+const DEFAULT_LOCK_TIMEOUT_MS = 5_000;
+const LOCK_RETRY_MS = 10;
+
+const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const isWin32TransientError = (error) =>
+  process.platform === "win32" && (error?.code === "EPERM" || error?.code === "EBUSY");
+
+const isRetryableLockOpenError = (error) =>
+  error?.code === "EEXIST" || isWin32TransientError(error);
+
+const safeLstat = async (path) => {
+  try {
+    return await lstat(path);
+  } catch (error) {
+    if (error?.code === "ENOENT") {
+      return null;
+    }
+    if (isWin32TransientError(error)) {
+      return undefined;
+    }
+    throw error;
+  }
+};
+
+const releaseOwnedLock = async (path, token, lockStat) => {
+  try {
+    const currentStat = await lstat(path);
+    if (
+      currentStat.isSymbolicLink() ||
+      !currentStat.isFile() ||
+      currentStat.dev !== lockStat.dev ||
+      currentStat.ino !== lockStat.ino
+    ) {
+      return;
+    }
+    const flags =
+      constants.O_RDONLY |
+      (constants.O_NOFOLLOW ?? 0) |
+      (constants.O_NONBLOCK ?? 0);
+    let matches = false;
+    const handle = await open(path, flags);
+    try {
+      const openedStat = await handle.stat();
+      if (
+        openedStat.isFile() &&
+        openedStat.dev === lockStat.dev &&
+        openedStat.ino === lockStat.ino
+      ) {
+        const maxBytes = Buffer.byteLength(token, "utf8") + 1;
+        const buffer = Buffer.alloc(maxBytes);
+        let totalRead = 0;
+        while (totalRead < maxBytes) {
+          const { bytesRead } = await handle.read(buffer, totalRead, maxBytes - totalRead, totalRead);
+          if (bytesRead === 0) {
+            break;
+          }
+          totalRead += bytesRead;
+        }
+        matches = buffer.subarray(0, totalRead).toString("utf8") === token;
+      }
+    } finally {
+      await handle.close().catch(() => {});
+    }
+    if (matches) {
+      await unlink(path).catch(() => {});
+    }
+  } catch {
+    // Lock file already removed, replaced, or unreadable.
+  }
+};
+
+const tryReclaimStaleLock = async (lockPath, observedMetadata, staleMs, deadline) => {
+  const reclaimPath = `${lockPath}.reclaim`;
+  const reclaimToken = `${randomUUID()}\n`;
+  let reclaimStat;
+
+  while (true) {
+    if (Date.now() >= deadline) {
+      throw storageError("checkpoint_lock_timeout");
+    }
+    let reclaimHandle;
+    let createdReclaim = false;
+    try {
+      reclaimHandle = await open(reclaimPath, "wx", 0o600);
+      createdReclaim = true;
+      await reclaimHandle.writeFile(reclaimToken, "utf8");
+      reclaimStat = await reclaimHandle.stat();
+      const openedReclaim = reclaimHandle;
+      reclaimHandle = null;
+      await openedReclaim.close();
+      break;
+    } catch (error) {
+      if (reclaimHandle) {
+        await reclaimHandle.close().catch(() => {});
+      }
+      if (createdReclaim) {
+        await unlink(reclaimPath).catch(() => {});
+        throw error;
+      }
+      if (!isRetryableLockOpenError(error)) {
+        throw error;
+      }
+      const reclaimMeta = await safeLstat(reclaimPath);
+      if (reclaimMeta === undefined) {
+        await delay(LOCK_RETRY_MS);
+        continue;
+      }
+      if (reclaimMeta === null) {
+        return false;
+      }
+      if (!reclaimMeta.isFile() && !reclaimMeta.isSymbolicLink()) {
+        throw storageError("unsafe_checkpoint_file");
+      }
+      if (reclaimMeta.isSymbolicLink() || Date.now() - reclaimMeta.mtimeMs >= staleMs) {
+        let unlinked = false;
+        try {
+          await unlink(reclaimPath);
+          unlinked = true;
+        } catch (unlinkError) {
+          if (unlinkError?.code === "ENOENT") {
+            unlinked = true;
+          }
+        }
+        if (!unlinked) {
+          await delay(LOCK_RETRY_MS);
+        }
+        continue;
+      }
+      return false;
+    }
+  }
+
+  try {
+    const current = await safeLstat(lockPath);
+    if (current === undefined) {
+      return false;
+    }
+    if (current === null) {
+      return true;
+    }
+    if (!current.isFile() && !current.isSymbolicLink()) {
+      throw storageError("unsafe_checkpoint_file");
+    }
+    const sameIdentity =
+      current.dev === observedMetadata.dev &&
+      current.ino === observedMetadata.ino;
+    const shouldUnlink =
+      current.isSymbolicLink() ||
+      (sameIdentity &&
+        current.mtimeMs === observedMetadata.mtimeMs &&
+        Date.now() - current.mtimeMs >= staleMs);
+    if (!shouldUnlink) {
+      return false;
+    }
+    try {
+      await unlink(lockPath);
+      return true;
+    } catch (unlinkError) {
+      return unlinkError?.code === "ENOENT";
+    }
+  } finally {
+    await releaseOwnedLock(reclaimPath, reclaimToken, reclaimStat);
+  }
+};
+
+const withCheckpointLock = async ({ vendor, sessionId }, options, callback) => {
+  const stateDir = resolveStateDir(options);
+  const directory = checkpointDirectory(stateDir, vendor);
+  await ensurePrivateDirectory(stateDir);
+  await ensurePrivateDirectory(join(stateDir, "checkpoints"));
+  await ensurePrivateDirectory(directory);
+
+  const lockPath = `${checkpointPath(stateDir, vendor, sessionId)}.lock`;
+  const token = `${randomUUID()}\n`;
+  const staleMs = options?.lockStaleMs ?? DEFAULT_LOCK_STALE_MS;
+  const timeoutMs = options?.lockTimeoutMs ?? DEFAULT_LOCK_TIMEOUT_MS;
+  const deadline = Date.now() + timeoutMs;
+  let lockStat;
+  let acquiredAt;
+
+  while (true) {
+    let lockHandle;
+    let created = false;
+    try {
+      lockHandle = await open(lockPath, "wx", 0o600);
+      created = true;
+      await lockHandle.writeFile(token, "utf8");
+      lockStat = await lockHandle.stat();
+      acquiredAt = Date.now();
+      const opened = lockHandle;
+      lockHandle = null;
+      await opened.close();
+      break;
+    } catch (error) {
+      if (lockHandle) {
+        await lockHandle.close().catch(() => {});
+      }
+      if (created) {
+        await unlink(lockPath).catch(() => {});
+        throw error;
+      }
+      if (!isRetryableLockOpenError(error)) {
+        throw error;
+      }
+      if (Date.now() >= deadline) {
+        throw storageError("checkpoint_lock_timeout");
+      }
+      const metadata = await safeLstat(lockPath);
+      if (metadata === undefined) {
+        await delay(LOCK_RETRY_MS);
+        continue;
+      }
+      if (metadata === null) {
+        if (error?.code !== "EEXIST") {
+          await delay(LOCK_RETRY_MS);
+        }
+        continue;
+      }
+      if (!metadata.isFile() && !metadata.isSymbolicLink()) {
+        throw storageError("unsafe_checkpoint_file");
+      }
+      if (metadata.isSymbolicLink() || Date.now() - metadata.mtimeMs >= staleMs) {
+        const reclaimed = await tryReclaimStaleLock(lockPath, metadata, staleMs, deadline);
+        if (reclaimed) {
+          continue;
+        }
+      }
+      await delay(LOCK_RETRY_MS);
+    }
+  }
+
+  try {
+    return await callback({ acquiredAt });
+  } finally {
+    await releaseOwnedLock(lockPath, token, lockStat);
+  }
+};
+
+const writeCheckpointUnlocked = async (input, options = {}) => {
   const checkpoint = validateCheckpoint(input);
   const vendor = requireVendor(checkpoint.vendor);
   const sessionId = requireSessionId(checkpoint.sessionId);
@@ -240,12 +480,53 @@ export const writeCheckpoint = async (input, options = {}) => {
   return checkpoint;
 };
 
-export const markCheckpointInjected = async ({ vendor, sessionId, injectedAt }, options = {}) => {
-  const checkpoint = await readCheckpoint({ vendor, sessionId }, options);
-  if (!checkpoint) {
-    return null;
-  }
-  return writeCheckpoint({ ...checkpoint, injectedAt }, options);
+export const writeCheckpoint = async (input, options = {}) => {
+  const checkpoint = validateCheckpoint(input);
+  return withCheckpointLock(
+    { vendor: checkpoint.vendor, sessionId: checkpoint.sessionId },
+    options,
+    () => writeCheckpointUnlocked(checkpoint, options)
+  );
+};
+
+export const markCheckpointInjected = async (
+  { vendor, sessionId, injectedAt, expectedCapturedAt, expectedTranscriptHash },
+  options = {}
+) => {
+  requireVendor(vendor);
+  requireSessionId(sessionId);
+  return withCheckpointLock({ vendor, sessionId }, options, async () => {
+    const checkpoint = await readCheckpoint({ vendor, sessionId }, options);
+    if (!checkpoint || typeof checkpoint.injectedAt === "string") {
+      return null;
+    }
+    if (expectedCapturedAt !== undefined && checkpoint.capturedAt !== expectedCapturedAt) {
+      return null;
+    }
+    if (expectedTranscriptHash !== undefined && checkpoint.transcriptHash !== expectedTranscriptHash) {
+      return null;
+    }
+    return writeCheckpointUnlocked({ ...checkpoint, injectedAt }, options);
+  });
+};
+
+export const claimCheckpointInjection = async (
+  { vendor, sessionId, injectedAt },
+  options = {}
+) => {
+  requireVendor(vendor);
+  requireSessionId(sessionId);
+  return withCheckpointLock({ vendor, sessionId }, options, async () => {
+    const checkpoint = await readCheckpoint({ vendor, sessionId }, options);
+    if (!checkpoint) {
+      return { status: "missing", checkpoint: null };
+    }
+    if (typeof checkpoint.injectedAt === "string") {
+      return { status: "already_injected", checkpoint };
+    }
+    const updated = await writeCheckpointUnlocked({ ...checkpoint, injectedAt }, options);
+    return { status: "claimed", checkpoint: updated };
+  });
 };
 
 export const readCheckpoint = async ({ vendor, sessionId }, options = {}) => {
@@ -308,8 +589,22 @@ export const appendAudit = async (event, options = {}) => {
   const stateDir = resolveStateDir(options);
   await ensurePrivateDirectory(stateDir);
   const path = join(stateDir, "audit.jsonl");
-  const handle = await open(path, "a", 0o600);
+  const metadata = await lstat(path).catch((error) => {
+    if (error?.code === "ENOENT") {
+      return null;
+    }
+    throw error;
+  });
+  if (metadata && (metadata.isSymbolicLink() || !metadata.isFile())) {
+    throw storageError("unsafe_audit_file");
+  }
+  const flags = constants.O_WRONLY | constants.O_CREAT | constants.O_APPEND | (constants.O_NOFOLLOW ?? 0);
+  const handle = await open(path, flags, 0o600);
   try {
+    const openedMetadata = await handle.stat();
+    if (!openedMetadata.isFile()) {
+      throw storageError("unsafe_audit_file");
+    }
     await handle.chmod(0o600);
     await handle.write(`${JSON.stringify(sanitizeAudit(event))}\n`);
     await handle.sync();

@@ -2,6 +2,7 @@
 # 本檔在契約測試底下：bash ~/.claude/hooks/memory-ripple.test.sh
 import fcntl
 import json
+import math
 import os
 import re
 import socket
@@ -42,11 +43,25 @@ JEV_KIND_CRITERIA = {
   "incremental": "只是一般補充、歷史快照或文字潤飾，不影響其他 memory 的現況",
   "unclear": "看不出是否會影響其他 memory",
 }
-MODEL_SUFFIXES = ("-extra-low", "-medium", "-low", "-high")
-GEMINI_FLASH_MODEL_RE = re.compile(r"^gemini-[0-9]+(?:\.[0-9]+)*-flash(?:-(?:extra-low|medium|low|high))?$")
+MODEL_SUFFIXES = ("-extra-low", "-medium", "-low", "-high", "-xhigh", ":none", ":minimal", ":low", ":medium", ":high", ":xhigh", ":max")
+GEMINI_FLASH_MODEL_RE = re.compile(r"^gemini-[0-9]+(?:\.[0-9]+)*-(?:flash|hydrogen)(?:-(?:extra-low|medium|low|high|xhigh))?$")
+GEMINI_FLASH_MAGPIE_MODEL_RE = re.compile(r"^group/gemini-flash(?::(?:none|minimal|low|medium|high|xhigh|max))?$")
+GEMINI_HYDROGEN_MEMBER_RE = re.compile(r"^(?:(?:antigravity|google)/(?:models/)?)?gemini-4-hydrogen(?::(?:none|minimal|low|medium|high|xhigh|max))?$")
 FENCED_JSON_RE = re.compile(r"```(?:json)?\s*(\{.*\})\s*```", re.I | re.S)
 WIKILINK_RE = re.compile(r"\[\[([^\]|]+)(\|[^\]]+)?\]\]")
-STOPWORDS = re.compile(r"^(user|feedback|reference|project|trial|eval|setup|config|deployed|pending|progress|review|daily|weekly|index|memory|hook|skill|claude|model|profile|ended|closed|completed|subscription|20[0-9]{2}|[0-9]+)$", re.I)
+WORD_RE = re.compile(r"[a-z0-9]+")
+TOKEN_PART_RE = re.compile(r"[a-z0-9]+|[一-鿿]{2,}")
+FRONTMATTER_RE = re.compile(r"\A---\r?\n(.*?)\r?\n---(?:\r?\n|$)", re.S)
+EXCLUDED_DIRS = {".health-reports", "archive"}
+EXCLUDED_FILES = {"MEMORY.md", "_orphan_registry.md"}
+BM25_K1 = 1.2
+BM25_B = 0.75
+STOPWORDS = re.compile(
+  r"^(user|feedback|reference|project|trial|eval|setup|config|deployed|pending|progress|review|daily|weekly|index|memory|hook|skill|claude|model|profile|ended|closed|completed|subscription|"
+  r"and|are|but|can|for|from|has|have|how|into|its|not|only|our|out|over|per|than|that|the|their|them|then|there|these|they|this|use|used|using|via|was|what|when|where|which|while|who|will|with|you|your|run|runs|note|notes|"
+  r"20[0-9]{2}|[0-9]+)$",
+  re.I,
+)
 CUES = re.compile(r"沒有.{0,20}(?:欄位|功能|支援|資料|紀錄)|缺少.{0,20}(?:欄位|功能|支援|資料|紀錄)|未收錄|未包含|不含.{0,20}(?:欄位|功能|資料)|\bschema\b|\bstale\b|遷移|\bmigration\b|未確認|已確認|\bhold\b|原.{1,60}(?:現|後隨|改用|轉用|轉為)", re.I | re.S)
 
 
@@ -118,19 +133,25 @@ def model_routing_path():
   return Path(override).expanduser() if override else Path(__file__).resolve().parent.parent / "model-routing.env"
 
 
-def gemini_flash_model():
-  try:
-    lines = model_routing_path().read_text(encoding="utf-8").splitlines()
-  except OSError:
-    return ""
-  prefix = "GEMINI_FLASH_MODEL="
+def _read_routing_key(lines, key, pattern):
+  prefix = key + "="
   values = [line[len(prefix):].strip() for line in lines if line.startswith(prefix)]
   if len(values) != 1:
     return ""
   value = values[0]
   if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
     value = value[1:-1]
-  return value if GEMINI_FLASH_MODEL_RE.fullmatch(value) else ""
+  return value if pattern.fullmatch(value) else ""
+
+
+def gemini_flash_model():
+  try:
+    lines = model_routing_path().read_text(encoding="utf-8").splitlines()
+  except OSError:
+    return ""
+  if any(line.startswith("GEMINI_FLASH_MAGPIE_MODEL=") for line in lines):
+    return _read_routing_key(lines, "GEMINI_FLASH_MAGPIE_MODEL", GEMINI_FLASH_MAGPIE_MODEL_RE)
+  return _read_routing_key(lines, "GEMINI_FLASH_MODEL", GEMINI_FLASH_MODEL_RE)
 
 
 def validate_runtime_fd(fd, error_class, max_links=1):
@@ -299,6 +320,8 @@ def compatible_model(requested, returned):
     return True
   if requested == "groq-qwen-3.8-27b" and returned == "qwen/qwen3.8-27b":
     return True
+  if GEMINI_FLASH_MAGPIE_MODEL_RE.fullmatch(requested) and GEMINI_HYDROGEN_MEMBER_RE.fullmatch(returned):
+    return True
   for suffix in MODEL_SUFFIXES:
     if requested.endswith(suffix) and returned == requested[:-len(suffix)]:
       return True
@@ -372,7 +395,7 @@ def judge(data, mode, model=None):
         raise RuntimeError("timeout")
       raw = override
     else:
-      headers = {"Content-Type": "application/json"}
+      headers = {"Content-Type": "application/json", "User-Agent": "memory-ripple"}
       if config["auth"]:
         headers["Authorization"] = "Bearer " + config["auth"]
       request = urllib.request.Request(config["url"], data=json.dumps(payload, ensure_ascii=False, allow_nan=False).encode("utf-8"), headers=headers, method="POST")
@@ -553,36 +576,196 @@ def main_audit(data):
 
 def relative_tokens(relative_path):
   stem = Path(relative_path).stem
-  stem = re.sub(r"^(user|feedback|reference|project)_", "", stem)
-  stem = re.sub(r"_20[0-9]{2}(?:[_-][0-9]{2})*$", "", stem)
-  return [part for part in stem.split("_") if len(part) >= 3 and not STOPWORDS.match(part)][:3]
+  stem = re.sub(r"^(?:user|feedback|reference|project)[_-]", "", stem, flags=re.I)
+  stem = re.sub(r"[_-]20[0-9]{2}(?:[_-][0-9]{2})*$", "", stem)
+  tokens = []
+  for part in TOKEN_PART_RE.findall(stem.lower()):
+    is_cjk = not part.isascii()
+    if is_cjk:
+      if len(part) >= 2 and part not in tokens:
+        tokens.append(part)
+    elif len(part) >= 3 and not part.isdigit() and not STOPWORDS.match(part) and part not in tokens:
+      tokens.append(part)
+  return tokens[:6]
+
+
+def _is_index_doc(path):
+  return path.name == "_INDEX.md" or path.name.startswith("_index_")
+
+
+def _words_of(text):
+  return [word for word in WORD_RE.findall(text.lower()) if len(word) >= 2 and not word.isdigit()]
+
+
+def _frontmatter_meta(text):
+  match = FRONTMATTER_RE.match(text)
+  if not match:
+    return ""
+  header = match.group(1)
+  parts = []
+  for key in ("name", "description"):
+    field = re.search(rf"^{key}:\s*(.+)$", header, re.M)
+    if field:
+      parts.append(field.group(1))
+  return " ".join(parts)
+
+
+def _safe_read_regular_md(full_path, root_str):
+  flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+  try:
+    fd = os.open(full_path, flags)
+  except OSError:
+    return None, None
+  try:
+    if not stat.S_ISREG(os.fstat(fd).st_mode):
+      return None, None
+    real_candidate = os.path.realpath(full_path)
+    if os.path.commonpath([root_str, real_candidate]) != root_str:
+      return None, None
+    chunks = []
+    while True:
+      chunk = os.read(fd, 65536)
+      if not chunk:
+        break
+      chunks.append(chunk)
+    return real_candidate, b"".join(chunks).decode("utf-8", errors="ignore")
+  except OSError:
+    return None, None
+  finally:
+    os.close(fd)
+
+
+# 單一真值兄弟檔檢索與排序：詞界比對避免 exam→example／and→command 子字串誤抓，保留中文主題詞段，
+# 並以零模型 BM25（標題與描述 2x 權重，借鑑 Parcha-ai/agentrun relevance.ts，Apache-2.0）取代字母序截斷。
+def rank_siblings(target_file, memory_dir):
+  root_str = os.path.realpath(os.path.expanduser(str(memory_dir)))
+  root = Path(root_str)
+  source_real = os.path.realpath(os.path.expanduser(str(target_file)))
+  tokens = relative_tokens(str(target_file))
+  if not tokens or not root.is_dir():
+    return tokens, [], []
+  cjk_tokens = [tok for tok in tokens if not tok.isascii()]
+  docs = []
+  for current_root, dirnames, filenames in os.walk(root_str, followlinks=False):
+    dirnames[:] = sorted(
+      d for d in dirnames
+      if d not in EXCLUDED_DIRS and not os.path.islink(os.path.join(current_root, d))
+    )
+    for filename in sorted(filenames):
+      if not filename.endswith(".md") or filename in EXCLUDED_FILES:
+        continue
+      full_path = os.path.join(current_root, filename)
+      real_candidate, text = _safe_read_regular_md(full_path, root_str)
+      if real_candidate is None or real_candidate == source_real:
+        continue
+      candidate = Path(real_candidate)
+      rel_path = os.path.relpath(real_candidate, root_str)
+      rel_stem = os.path.splitext(rel_path)[0].replace("/", " ").replace("_", " ").replace("-", " ")
+      meta_text = rel_stem + " " + _frontmatter_meta(text)
+      bag = _words_of(meta_text) * 2 + _words_of(text)
+      counts = {}
+      for word in bag:
+        counts[word] = counts.get(word, 0) + 1
+      extra_dl = 0
+      if cjk_tokens:
+        meta_lower = meta_text.lower()
+        body_lower = text.lower()
+        for ctok in cjk_tokens:
+          ctf = meta_lower.count(ctok) * 2 + body_lower.count(ctok)
+          if ctf:
+            counts[ctok] = ctf
+            extra_dl += ctf
+      docs.append({
+        "path": candidate,
+        "rel": rel_path,
+        "is_index": _is_index_doc(candidate),
+        "dl": max(len(bag) + extra_dl, 1),
+        "counts": counts,
+      })
+  if not docs:
+    return tokens, [], []
+  total_docs = len(docs)
+  avgdl = sum(doc["dl"] for doc in docs) / total_docs
+  idf = {}
+  for token in tokens:
+    df = sum(1 for doc in docs if token in doc["counts"])
+    idf[token] = math.log(1.0 + (total_docs - df + 0.5) / (df + 0.5))
+  leaves = []
+  indexes = []
+  for doc in docs:
+    score = 0.0
+    for token in tokens:
+      tf = doc["counts"].get(token, 0)
+      if tf:
+        denom = tf + BM25_K1 * (1.0 - BM25_B + BM25_B * (doc["dl"] / avgdl))
+        score += idf[token] * ((tf * (BM25_K1 + 1.0)) / denom)
+    if score <= 0.0:
+      continue
+    entry = (score, doc["path"], doc["rel"])
+    if doc["is_index"]:
+      indexes.append(entry)
+    else:
+      leaves.append(entry)
+  leaves.sort(key=lambda item: (-round(item[0], 6), item[2]))
+  indexes.sort(key=lambda item: (-round(item[0], 6), item[2]))
+  return tokens, leaves, indexes
+
+
+def _partition_siblings(leaves, indexes):
+  daily = [(score, "leaf", "daily", path, rel) for score, path, rel in leaves[:6]] + [
+    (score, "index", "daily", path, rel) for score, path, rel in indexes[:2]
+  ]
+  tail = [(score, "leaf", "tail", path, rel) for score, path, rel in leaves[6:]] + [
+    (score, "index", "tail", path, rel) for score, path, rel in indexes[2:]
+  ]
+  tail.sort(key=lambda item: (-round(item[0], 6), 0 if item[1] == "leaf" else 1, item[4]))
+  return daily, tail
 
 
 def sibling_summary(data):
-  memory_dir = Path(environment_path("MEMORY_RIPPLE_DIR", "~/.claude/memory")).expanduser()
+  memory_dir = Path(os.path.realpath(os.path.expanduser(environment_path("MEMORY_RIPPLE_DIR", "~/.claude/memory"))))
   relative_path = str(data.get("relative_path") or "")
   source = memory_dir / relative_path
-  tokens = relative_tokens(relative_path)
-  found = set()
-  if memory_dir.is_dir():
-    for path in memory_dir.rglob("*.md"):
-      if path == source or path.name in {"MEMORY.md", "_orphan_registry.md"}:
-        continue
-      try:
-        text = path.read_text(encoding="utf-8", errors="ignore")
-      except OSError:
-        continue
-      if any(token.lower() in text.lower() for token in tokens):
-        found.add(path)
-  leaves = sorted(path for path in found if not re.search(r"/(?:_index_[^/]*|_INDEX)\.md$", str(path)))[:6]
-  indexes = sorted(path for path in found if re.search(r"/(?:_index_[^/]*|_INDEX)\.md$", str(path)))[:2]
-  displayed = leaves + indexes
+  tokens, leaves, indexes = rank_siblings(source, memory_dir)
+  daily, tail = _partition_siblings(leaves, indexes)
+  found = [item[3] for item in daily + tail]
+  displayed = [item[3] for item in daily]
   return tokens, found, displayed
+
+
+def siblings_cli(data):
+  default_dir = environment_path("MEMORY_RIPPLE_DIR", "~/.claude/memory")
+  memory_dir = str(data.get("dir") or default_dir) if test_mode() else str(Path("~/.claude/memory").expanduser())
+  target_file = str(data.get("file") or "")
+  fmt = str(data.get("format") or "paths")
+  if not target_file or fmt not in {"paths", "scores", "summary"}:
+    raise SystemExit(2)
+  tokens, leaves, indexes = rank_siblings(target_file, memory_dir)
+  daily, tail = _partition_siblings(leaves, indexes)
+  if fmt == "summary":
+    leaf_disp = min(len(leaves), 6)
+    index_disp = min(len(indexes), 2)
+    output_text(encode_json({
+      "tokens": tokens,
+      "siblings": len(leaves) + len(indexes),
+      "displayed": leaf_disp + index_disp,
+      "leaf_displayed": leaf_disp,
+      "index_displayed": index_disp,
+    }))
+    return
+  if fmt == "scores":
+    combined = daily + tail
+    combined.sort(key=lambda item: (-round(item[0], 6), 0 if item[1] == "leaf" else 1, item[4]))
+    for score, kind, tier, path, _ in combined:
+      output_text(f"{score:.2f}\t{kind}\t{tier}\t{path}")
+    return
+  for _, _, _, path, _ in daily + tail:
+    output_text(str(path))
 
 
 def fill_message(data):
   tokens, siblings, displayed = sibling_summary(data)
-  memory_dir = Path(environment_path("MEMORY_RIPPLE_DIR", "~/.claude/memory")).expanduser()
+  memory_dir = Path(os.path.realpath(os.path.expanduser(environment_path("MEMORY_RIPPLE_DIR", "~/.claude/memory"))))
   label = " ".join(tokens)
   follow_up = "\n請處理這則 memory-ripple 補漏提醒，確認是否要更新 sibling memory。"
   if not siblings:
@@ -590,7 +773,7 @@ def fill_message(data):
   lines = "\n".join("- " + str(path.relative_to(memory_dir)) for path in displayed)
   remainder = len(siblings) - len(displayed)
   if remainder > 0:
-    lines += "\n- …另 " + str(remainder) + " 個（token: " + label + "全量 grep 可復原）"
+    lines += "\n- …另 " + str(remainder) + " 個（token: " + label + "，--siblings 可取回完整排序）"
   return "[memory-ripple] Gemini 語意補漏：這次 memory 寫入可能讓其他檔案的舊前提失效，共 " + str(len(siblings)) + " 檔提到同主題（" + label + "），請逐檔 triage。\n" + lines + follow_up
 
 
@@ -691,6 +874,8 @@ def main():
     gemini(data)
   elif mode == "c068":
     c068(data)
+  elif mode == "siblings":
+    siblings_cli(data)
   else:
     raise SystemExit(2)
 

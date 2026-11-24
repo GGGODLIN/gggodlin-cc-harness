@@ -1,6 +1,6 @@
 ---
 name: research-before-answer
-description: Use when answering a factual question about a named repo, package, library, framework, SDK, API, version, release note, deprecation, company, product, market, or person activity, or when making a current-state claim. Do not use for pure framework, principle, design-pattern, or concept explanations, or trivial single-fact lookups you are already certain of. Also invokable manually via /research-before-answer.
+description: Use when answering a factual question about a named repo, package, library, framework, SDK, API, version, release note, deprecation, company, product, market, or person activity, or when making a current-state claim. Do not use for pure concept explanations, trivial certain lookups, multi-source deep research reports (deep-research), or tool-vs-my-stack adoption analysis (check-my-stack). Also invokable via /research-before-answer.
 ---
 
 # Research Before Answer
@@ -21,6 +21,7 @@ description: Use when answering a factual question about a named repo, package, 
 
 ## 來源選路：先分最新外部題與個人歷史
 
+0. **跨本機對照的開放式研究才問 sharpen**：只有當需求是一兩句開放式研究、**同時涉及本機設定或既有專案對照**（例如「看這篇指南並檢查我的設定要不要改」「對照我的環境評估這套做法」），而且這輪還沒跑過 sharpen、使用者也沒說直接查時，才在開查前問一句：「要不要先跑 /sharpen（唯讀查到底，再帶發現回來對齊）？我推薦跑，因為〈一句理由〉。」然後等答案：同意就叫用 `Skill(sharpen)`，不同意就接下面第 1 步直接查。單純看外部連結／貼文／文章、單一 repo 初探、單一事實查證、個人歷史回顧、已給明確查證點，或任何你判斷「推薦不跑」的題目，一律**不問、不等回覆**，直接接下面第 1–3 步開查。
 1. 如果是最新外部事實查核或外部探索，就直接接「外部工具分流」，用網路搜尋、第一手來源或已配置的外部查詢工具。本機 memory、wiki、session、報告與歷史收錄不作探索入口，也不作搜尋失敗的替代；收錄內容無法代表最新外部資訊。
 2. 如果同時問「我能不能用」，就並行讀目前帳號、設定或即時資格回應；「我的」不因此觸發個人歷史檢索。外部功能現況與本人資格分開舉證。
 3. 如果是個人歷史、既有決策或經驗回顧，就接「個人資料層」。混合題只對回顧部分查本機紀錄，最新外部部分仍走第 1 步。
@@ -48,6 +49,7 @@ description: Use when answering a factual question about a named repo, package, 
 | GitHub repo / issue / PR | `gh` CLI |
 | 套件（npm / pypi / crates） | registry search 或 WebSearch |
 | 市場 / 人物 / 公司動態 | WebSearch、Exa |
+| X／Twitter 熱點、關鍵字或帳號動態探索 | `bash ~/.claude/scripts/x-search.sh "<query>"`（預設走本機 Grok `x_search` 探索並附 URL、失敗自動退本機 Apify；拿到候選貼文 URL 後接下方「URL 內容抓取」以 X／Twitter 抓取退路（見 WIRING.md「非官方內容抓取」）核對原文，不用 LCU 硬刷 `x.com/search` 或 `site:x.com`） |
 | 深度多輪研究 | `Skill(deep-research)` 或 `Workflow({name:"deep-research-paced"})` |
 
 分流後，如果本次研究需要社群評價、實際使用經驗、跨平台評論或公開網頁資料，且 Monid 能補上資料缺口，就在任何 Monid 呼叫前讀 [Monid 贈額試用](references/monid-opt-in.md)。使用者已批准在剩餘原始贈額內跨任務直接使用，不逐次詢問；照 reference 查價、核餘額，贈額不足就退出並移除入口。不為耗贈額增加查詢；當次拒用、資料已足或不需外查時沿原路。下方搜尋配對、正文抓取與來源核對規則照常適用。
@@ -82,28 +84,25 @@ SERP 抽取 JS pattern 跟試用背景見 `~/.claude/memory/reference_search_too
 
 先看這次抓頁面要拿來做什麼，再選工具。`WebFetch` 回的不是原文：頁面先交給小模型照你的 prompt 改寫成回答。它回 200、讀起來通順，細節卻可能被改掉或漏掉（實例：從相對日期推錯年份、讀錯表格欄位、憑空加一段「官方回應」），而且這種錯不會命中下面任何退路條件——「回傳看起來完整」不是判斷依據。
 
-**先判斷是否為使用者直接交付的 X／Twitter 研究連結**（`/status/` 貼文或 X 長文；不是日報／workflow 批次來源）。如果是，就走以下路線，不套用下方「exit 75/1 才升瀏覽器」的退路條件：
+**先判斷是否為 X／Twitter 單篇貼文或長文連結**（含 `/status/`、`/article/`、`/thread/`；包含使用者直接交付與搜尋找到的貼文 URL）：
 
-1. 以 LCU MCP（`mcp__lcu__js`）開啟指定連結，等待實際內容載入，讀回貼文、附帶或連到的 X 長文、程式碼與外部連結；只操作任務指定或自己建立的分頁。`x-fetch` 回成功仍可能只有長文入口，所以不先跑腳本來決定是否開瀏覽器。
-2. 如果研究需要留言、作者串文或引用，就補跑 X／Twitter 抓取退路（見 WIRING.md「非官方內容抓取」），把回件當補充，不當全量討論。
-3. 對照研究問題確認所需正文、程式碼與來源連結已讀到；缺少的項目明寫缺口，不以 exit 0 或頁面載入成功當作完整。LCU 不可用時停止並回報；登入、CAPTCHA 與核准照既有權限邊界處理。取得內容後接來源查證，答案成稿後接「交付前 inline 自查（R1–R3）」。
+1. 預設先跑無頭腳本存檔後 Read（X／Twitter 抓取退路見 WIRING.md「非官方內容抓取」，可免開瀏覽器一次取回貼文原文、推文掛載 X 長文全部段落、引用貼文、留言串與 `pbs.twimg.com` 原圖網址；若需判讀貼文附圖，直接下載 `Media` 段列出的原圖後 Read）：
+   ```bash
+   # 執行 X／Twitter 抓取退路並存檔至 <scratchpad>/<名稱>.md（見 WIRING.md「非官方內容抓取」）
+   ```
+   若起點尚無單篇 URL、要先探索 X 上的話題熱點或某帳號近期發言（加 `--handle <user>`、`--from <YYYY-MM-DD>`），先執行 `bash ~/.claude/scripts/x-search.sh "<query>" > "<scratchpad>/x-search.md"` 存檔後 Read；預設 Grok `x_search` 模式的輸出經過模型整理（與 `WebFetch` 同理非資料庫原件），凡是要寫進答案的具體貼文數字、引文或宣稱，必拿其列出的貼文 URL 接回上方 X／Twitter 抓取退路核對第一手原文。
+2. 如果 X／Twitter 抓取退路回 exit `75`/`1`（例如 `/i/article/` 獨立編號長文無對應推文 ID、受保護貼文，或雙無頭通道皆失敗），或 Read 後確認仍缺研究所需內容（如長文截斷、需操作互動介面或觀看推文內嵌影片畫面），才升級以正式 LCU MCP（`mcp__lcu__js`）開任務分頁補讀；只操作任務指定或自己建立的分頁。
+3. 完成條件：已逐一核對研究所需的每則目標貼文正文、程式碼、附圖與外部連結皆從第一手原件讀到，缺少的項目已明寫缺口（不以 exit 0 或頁面載入成功當作完整；LCU 不可用時停止並回報，登入、CAPTCHA 與核准照既有權限邊界處理）。完成後接外部連結來源查證，答案成稿後接「交付前 inline 自查（R1–R3）」。
 
 **公開 HTML 研究頁（文章、產品官網、HTML 文件／表格）預設先用 Context.dev Scrape API**，取得 Markdown 後再查證與分析。它不必開瀏覽器、subagent 與腳本都能呼叫，且保留表格結構。先分流：需要本人登入狀態、庫存或視覺／互動的頁面走正式 LCU；Reddit 沿用專用腳本；官方原生 Markdown 直接讀；直接交付的 X 研究連結走上方路線。日報／workflow 的既有批次腳本不因這條研究規則自動改接服務。
 
-1. 抓取並存檔，不把 key 或整份回件印到畫面：
+1. 透過包裝腳本抓取並存檔（內建本機 2-slot `flock` 並行鎖避免平行 subagent 撞免費方案 2 並行上限，程序內讀 `~/.config/context-dev/api-key` 與 `~/.config/firecrawl/api-key` 不回顯 key，並攔截 `< 200` 字或錯誤／驗證頁 stub 自動退 Firecrawl `/v2/scrape`）：
    ```bash
-   curl -s https://api.context.dev/v1/web/scrape -H "Authorization: Bearer $(cat ~/.config/context-dev/api-key)" -H 'Content-Type: application/json' -d '{"url":"<url>","formats":{"markdown":true}}' > <scratchpad>/<名稱>.json
-   python3 -c 'import json,sys;d=json.load(open(sys.argv[1]));m=d.get("markdown") or {};open(sys.argv[2],"w").write(m.get("data") or "");print(d.get("url"),m.get("success"),len(m.get("data") or ""),(d.get("cache_metadata") or {}).get("status"),(d.get("key_metadata") or {}).get("credits_remaining"),d.get("message",""))' <scratchpad>/<名稱>.json <scratchpad>/<名稱>.md
+   python3 ~/.claude/scripts/context-dev-scrape.py "<url>" "<scratchpad>/<名稱>.md"
    ```
-   需要現況時在 JSON 加 `"maxAgeMs": 0`（預設可回三天內快取）；`cache_metadata.status` 是 `hit` 時不宣稱即時抓取。只送指定公開 URL，不帶 cookies、自訂 header 或私人檔案。免費方案同時最多 2 個請求，多頁要逐一抓。
-2. 確認印出的 `url` 對應本次 URL（允許已確認的官方重新導向）、`success` 為 True，再 Read `.md` 檔，核對研究所需正文、程式碼、表格條件與來源連結。內文只剩開頭一句加「…」或出現登入／訂閱提示，代表要登入才看得到，改走正式 LCU。
-3. 如果 Context.dev 回錯（`message` 非空，如額度不足 402、並行上限 429）、`success` 不是 True、或缺研究所需內容，就改用 Firecrawl Scrape API（不開瀏覽器）；但第 2 步那種截斷或登入／訂閱提示不走這條，直接開正式 LCU，因為 Firecrawl 與網址抓取退路（見 WIRING.md「非官方內容抓取」）一樣只拿得到截斷版。抓取並存檔，不把 key 或整份回件印到畫面：
-   ```bash
-   curl -s -X POST https://api.firecrawl.dev/v2/scrape -H "Authorization: Bearer $(cat ~/.config/firecrawl/api-key)" -H 'Content-Type: application/json' -d '{"url":"<url>","formats":["markdown"]}' > <scratchpad>/<名稱>-fc.json
-   python3 -c 'import json,sys;d=json.load(open(sys.argv[1]));data=d.get("data") or {};meta=data.get("metadata") or {};md=data.get("markdown") or "";open(sys.argv[2],"w").write(md);print(meta.get("sourceURL"),d.get("success"),len(md),meta.get("statusCode"),meta.get("cacheState"),meta.get("creditsUsed"),d.get("error",""))' <scratchpad>/<名稱>-fc.json <scratchpad>/<名稱>-fc.md
-   ```
-   需要現況時在 JSON 加 `"maxAge": 0`（預設可回兩天內快取）；`cacheState` 是 `hit` 時不宣稱即時抓取。只送指定公開 URL，不傳登入 cookies、私人檔案或憑證，不選 Summary、Query 或模型 JSON extraction（會多扣點數）。確認印出的 `sourceURL` 對應本次 URL（允許已確認的官方重新導向）、`success` 為 True，再 Read `.md` 檔。
-4. 如果 Firecrawl 回錯（`error` 非空或額度不足）、`success` 不是 True、或缺研究所需內容，就接下方網址抓取退路（見 WIRING.md「非官方內容抓取」）；把 Context.dev 與 Firecrawl 的缺口記清楚，不重複扣額重試。腳本也失敗時，沿下方正式 LCU 升級規則處理。取得內容後接來源查證與「交付前 inline 自查（R1–R3）」。
+   需要現況時加 `--fresh`（同時對 Context.dev 設 `maxAgeMs: 0`、對 Firecrawl 設 `maxAge: 0`）；輸出 JSON 的 `cache_status` 為 `hit` 時不宣稱即時抓取。腳本只收公開 `http(s)` URL，不帶 cookies、自訂 header 或私人檔案，也不選 Firecrawl Summary／Query／模型 JSON extraction（避免多扣點數）。
+2. 確認印出 JSON 的 `ok` 為 `true`、`final_url` 對應本次 URL（允許已確認的官方重新導向），再 Read `.md` 檔，核對研究所需正文、程式碼、表格條件與來源連結。內文只剩開頭一句加「…」或出現登入／訂閱提示，代表要登入才看得到，直接改走正式 LCU（不重跑 Firecrawl 或網址抓取退路，因三者都只拿得到截斷版，2026-10-20 對照實測）。
+3. 如果腳本非 0 退出（Context.dev 與 Firecrawl 皆失敗、額度不足或被短 stub 閘門攔下；亦可在第 1 步加 `--with-fallback` 直接串接），或 `.md` 仍缺研究所需內容，就接下方網址抓取退路（見 WIRING.md「非官方內容抓取」）；把 `attempts` 記清楚，不手寫裸 `curl` 重複扣額重試。腳本也失敗時，沿下方正式 LCU 升級規則處理。取得內容後接來源查證與「交付前 inline 自查（R1–R3）」。
 
 Firecrawl 的 fallback、Reddit 與既有日報／workflow 批次來源沿用以下路線：
 
@@ -134,18 +133,22 @@ Firecrawl 的 fallback、Reddit 與既有日報／workflow 批次來源沿用以
 - **外部搜尋受阻或沒答案**：如果已有原文 URL，就接「URL 內容抓取」；否則依既有授權換已配置的外部來源類型。仍受阻時回報具體缺口，不改查本機歷史收錄，也不把未找到當成不存在。
 - **混合題**：外部現況、本人目前資格與個人歷史分開查、分開標出處；歷史紀錄不能佐證外部現況。
 
+**研究外部工具、做法或文章時，「對你的意義」具體回答兩件事**：能借鑑哪一點、借來落在使用者現有哪個機制（點名機制，不寫「有參考價值」「可以拿來對照」）；使用者過去有沒有遇過它想解決的問題——查了附出處，沒查就標「未查」，不用推測帶過。避免只給籠統的「有參考價值」而未落到具體機制。
+
+**多步研究的結尾提示**：如果本題用了 2 次以上第一手查證，或要比較方案、給推薦，就在答案最後加一段「行家還會看的」，列 1–2 條使用者沒問、但這領域的行家會查的事，每條一句為什麼。只提示、不去查，也不擴大這次的查證範圍——擴大範圍要使用者決定。單一事實查證不加這段。
+
 答案成稿後 → 接下方「交付前 inline 自查（R1–R3）」再送出。
 
 ## 交付前 inline 自查（R1–R3）
 
 答案寫完、送出前逐條自查（與 rba-verify 每週離線抽驗同一套 rubric——那邊每週抽 3 個 session 事後重判，這裡是交付當下的第一道防線；2026-08-12 因連兩週抽驗有真 FAIL 而加入）：
 
-- **R1 有真的查**：本回合有至少一次真實第一手查證 tool call。外部題可用 WebFetch / 網址抓取退路（見 WIRING.md「非官方內容抓取」）→Read / chrome（LCU）/ gh / registry / Context7；**WebSearch 與 Google SERP 只算「找到 URL」，不算查證**——那是搜尋引擎的摘要、不是頁面本身，寫進答案的發布日、價格、規格、數字或「有沒有出」都要來自實際讀到的頁面或指令輸出；只有 SERP 摘要時，該句前置 ⚠️ 並註「僅搜尋摘要（來源：<URL>）」，不能寫成讀過該頁；個人或本地現況可用權威檔案的 Read、git／CLI 原始輸出。nested agent 只有把實際 tool evidence 帶回 transcript 才算，agent 自述不算。invoke 完直接憑訓練資料作答＝違規。
-- **R2 答案附出處**：先盤點答案內每個會改變決策或直接回答問題的 claim；推薦、排除、排序理由、decision table 每一列與「X 會增加成本／風險」這類方案取捨句都各算一條。每條都要有可追溯指針（URL / 文件名 / 指令輸出），表格逐列同列放；表格外的共用來源不能替未對應的列補證。沒有指針的 claim 必須刪除或原位標「未驗證」，且不得拿來推薦或排除方案。出處放在 claim 同句或緊鄰行，文末統一的「來源：」清單只是補充、不能替代（讀者與審查員都只看同句）。anchor：❌「**發布了**。兩款都在 9 月 22 日推出。…（文末）來源：MacRumors、DataNorth」／✅「gpt-6-sol 2026-09-22 發布（⚠️ 僅第三方轉述：MacRumors https://…，未見 OpenAI 官方頁）；gpt-6-luna 同日（同上）」。「漲多少／差多少」這類比較題，新舊兩個數與算式都是 claim：只拿到一邊時先算頁內能算的（如「空閒＝高峰一半」），再明說缺哪一邊，不以反問代替計算。
+- **R1 有真的查**：本回合有至少一次真實第一手查證 tool call。外部題可用 WebFetch / 網址抓取退路（見 WIRING.md「非官方內容抓取」）→Read / X／Twitter 抓取退路→Read / chrome（LCU）/ gh / registry / Context7；**WebSearch、Google SERP 與 `x-search.sh` 預設 Grok 模式只算「找到候選 URL 與脈絡」，不算第一手原文查證**——那是搜尋摘要或模型整理、不是頁面與貼文原件本身，寫進答案的發布日、價格、規格、數字或「有沒有出」都要來自實際讀到的原頁、原帖（如補跑 X／Twitter 抓取退路）或指令輸出；只有 SERP 或模型搜尋摘要時，該句前置 ⚠️ 並註「僅搜尋摘要（來源：<URL>）」，不能寫成讀過該頁；個人或本地現況可用權威檔案的 Read、git／CLI 原始輸出。nested agent 只有把實際 tool evidence 帶回 transcript 才算，agent 自述不算。invoke 完直接憑訓練資料作答＝違規。
+- **R2 答案附出處**：先盤點答案內每個會改變決策或直接回答問題的 claim；推薦、排除、排序理由、decision table 每一列與「X 會增加成本／風險」這類方案取捨句都各算一條。每條都要有可追溯指針（URL / 文件名 / 指令輸出），表格逐列同列放；表格外的共用來源不能替未對應的列補證。指針層級須對齊宣稱：memory／文件對環境、執行或採用狀態的轉述，只支持「記憶／文件曾記載 X；目前狀態未驗證」，不能替代相應現況或行為證據（直接讀到權威規則／配置／憑證檔可支持該檔內容或當前配置現況〔必要時附「採用未驗證」〕，不自動證成已載入、已執行、號池已轉用或採用頻率／成熟度——後者須有執行、測試或日誌等行為證據；缺哪一層就標哪一層未驗證，僅引記憶或狀態轉述宣稱現況已接入／已採用者 R2 判 FAIL）。沒有指針的 claim 必須刪除或原位標「未驗證」，且不得拿來推薦或排除方案。出處放在 claim 同句或緊鄰行，文末統一的「來源：」清單只是補充、不能替代（讀者與審查員都只看同句）。anchor：❌「**發布了**。兩款都在 9 月 22 日推出。…（文末）來源：MacRumors、DataNorth」／✅「gpt-6-sol 2026-09-22 發布（⚠️ 僅第三方轉述：MacRumors https://…，未見 OpenAI 官方頁）；gpt-6-luna 同日（同上）」。「漲多少／差多少」這類比較題，新舊兩個數與算式都是 claim：只拿到一邊時先算頁內能算的（如「空閒＝高峰一半」），再明說缺哪一邊，不以反問代替計算。
 - **Decision table 固定形狀**：只要表格會推薦或排除方案，就必須含欄名逐字為 `來源` 的獨立欄；每列在 `來源` 欄用「取捨 claim → URL／文件／指令輸出」逐項對應。若該列含未驗證項，就在同列原位標「未驗證（不得影響判斷）」。表格後的證據清單只能補充，不能代替該列來源；任一決策列的 `來源` 欄空白就不得交付推薦。
 - **未知不是反證**：「沒有證據證明 X 安全／便宜／相容」仍是未驗證，不能改寫成「因此不選 X」；只能在同列原位標「未驗證（不得影響判斷）」。若一句話混合已驗證機制與未驗證影響，拆成兩格或兩句，判斷只引用已驗證部分。
 - **R3 查答一致**：主張與查到的內容一致；查證未覆蓋的區間不得當成推薦理由；跨來源合併身分（帳號 / 方案 / 額度池 / 版本）要有共同 identifier——無版號的成績不得掛到具體版號上。機制／trial verdict 另逐項對照 `observed metric → target outcome → attribution`：只有 proxy metric、未直接量到 target 時，只能寫「目前無法判定」，不得斷言已解決或未解決。nested agent 回報的「找不到／未能確認／只適用於 X」是查證結果的一部分，合成時逐條原樣進答案，不得刪掉或把限定範圍放大（2026-10-15 skill-up：子 agent 寫 could not find in the docs，final 整段消失，FAIL）。
-- **R4 信心標記是輸出的一部分**：一個數字，或「已發布／免費／支援／存在」這類是非判斷，其來源只有第三方轉述、官方頁 4xx／內容截斷、僅 SERP 摘要、或對象自稱（README／官網自述且無公開方法論）→ **寫下該數字的當下**就前置 ⚠️ 並在同一行註「未經官方確認（來源：<名＋URL 或指令>）」——來源要是可點的 URL 或可重跑的指令，只寫來源名字不算。比較語（「100% working」「higher quality than X」）與倍數同樣算數字；先平述、打算文末補標的路徑不存在。
+- **R4 信心標記是輸出的一部分**：一個數字，或「已發布／免費／支援／存在」這類是非判斷，其來源只有第三方轉述、官方頁 4xx／內容截斷、僅 SERP 摘要、對象自稱（README／官網自述且無公開方法論），或官方頁未明示提問指定的地區／幣別適用範圍（例如問美國價卻僅顯示裸 `$`、未標地區或 `USD`）→ **寫下該數字的當下**就前置 ⚠️ 並在同一行註「未經官方確認（來源：<名＋URL 或指令>）」（地區／幣別未明示時一併點明該未確認條件，不靜默改寫成 `US$` 等確定值）——來源要是可點的 URL 或可重跑的指令，只寫來源名字不算。比較語（「100% working」「higher quality than X」）與倍數同樣算數字；先平述、打算文末補標的路徑不存在。
   - anchor（兩段只差 ⚠️＋同行來源註這一件事；審查員對著放位置、不按比例）：❌「從一次提示（宣稱 60–80%）到 spec + 人審（99%）」／✅「從一次提示（⚠️ 60–80%，未經官方確認，來源：README https://github.com/NeoLabHQ/context-engineering-kit#readme）到 spec + 人審（⚠️ 99%，同上來源）」。「宣稱」「自稱」字樣本身不算標記；第一手指令輸出（`gh api`、本機 grep）的數字不在此列、不要補 ⚠️
 - 任一條過不了 → 修答案（補查 / 補指針 / 收斂宣稱範圍）再送出；修不了就在答案裡明寫「未驗證」「低信心」，不得靜默放行。
 
@@ -160,7 +163,7 @@ Firecrawl 的 fallback、Reddit 與既有日報／workflow 批次來源沿用以
 3. 用 proxy metric 判斷機制／trial 的 target outcome
 4. 用未直接量測的成本、風險、cleanup、延遲等定性理由排除方案
 
-成立 → 呈現答案**前**派 `Agent(subagent_type: skill-verify-auditor)`（sonnet+low、tools 僅 Read）：description 固定含 marker 字串 `skill-verify:research-before-answer`（採用率統計 grep 用，不要改字）；prompt 預設內嵌**準備直接送出的完整 draft**＋上方 R1–R4 規則原文，且當承重證據來自無落檔 CLI 時，必須一併附上可由 `Read` 獨立核對的來源路徑與行號（如當前 session transcript JSONL 絕對路徑＋對應 `tool_result` 行號，或既有證據副檔路徑）及關鍵原始輸出片段，禁止只貼呼叫端自述的工具摘要卻要求 auditor 直接當成已核實紀錄（若 draft 過長改走讀檔模式，caller 須先將草稿存為唯讀快照檔 `chmod 400`，並在 prompt 附上獨立三行標頭 `AUDIT_INPUT_MODE: FILE_SNAPSHOT`、`SNAPSHOT_PATH: <唯一絕對路徑>`、`SNAPSHOT_TOTAL_LINES: <N>`，同時仍須把 R1–R4 rubric 全文內嵌於 prompt，且收件時核對 auditor 回傳的 `READ_RANGE: 1..<N>` 確認完整讀取），要求逐條 R1–R4 單行 PASS/FAIL＋一句證據引述。最後一行只能是 `VERDICT: COMPLIANT` 或 `VERDICT: VIOLATIONS: <R 編號>` 其中一種；逐條結果有任一 FAIL 時，即使最後一行誤寫 COMPLIANT 也按 VIOLATIONS 處理。**本回合這個 skill 只有一次 auditor 額度**：不論結果如何都不得重派，也不得用 SendMessage 續問同一個 auditor。末尾那行的狀態只能是下列四個之一：
+成立 → 呈現答案**前**派 `Agent(subagent_type: skill-verify-auditor)`（sonnet+medium、tools 僅 Read）：description 固定含 marker 字串 `skill-verify:research-before-answer`（採用率統計 grep 用，不要改字）；prompt 預設內嵌**準備直接送出的完整 draft**＋上方 R1–R4 規則原文，且當承重證據來自無落檔 CLI 時，必須一併附上可由 `Read` 獨立核對的來源路徑與行號（首選在查證當下就把該 CLI 原始輸出存成證據副檔，例如 `<指令> 2>&1 | tee <scratchpad>/rba-evidence/<名稱>.txt`，再給副檔絕對路徑與行號；當下沒存才退回當前 session transcript JSONL，且不讓 auditor 回掃整份轉錄：由 caller 只投影該筆 `tool_result` 的 `tool_use_id` 與文字、限制字數，轉存成證據副檔後給路徑與行號）及關鍵原始輸出片段，禁止只貼呼叫端自述的工具摘要卻要求 auditor 直接當成已核實紀錄（若 draft 過長改走讀檔模式，caller 須先將草稿存為唯讀快照檔 `chmod 400`，並在 prompt 附上獨立三行標頭 `AUDIT_INPUT_MODE: FILE_SNAPSHOT`、`SNAPSHOT_PATH: <唯一絕對路徑>`、`SNAPSHOT_TOTAL_LINES: <N>`，同時仍須把 R1–R4 rubric 全文內嵌於 prompt，且收件時核對 auditor 回傳的 `READ_RANGE: 1..<N>` 確認完整讀取），要求逐條 R1–R4 單行 PASS/FAIL＋一句證據引述。最後一行只能是 `VERDICT: COMPLIANT` 或 `VERDICT: VIOLATIONS: <R 編號>` 其中一種；逐條結果有任一 FAIL 時，即使最後一行誤寫 COMPLIANT 也按 VIOLATIONS 處理。**本回合這個 skill 只有一次 auditor 額度**：不論結果如何都不得重派，也不得用 SendMessage 續問同一個 auditor。末尾那行的狀態只能是下列四個之一：
 
 - 全 PASS → 「🔎 self-verify: COMPLIANT」
 - 任一 FAIL 且已修正 → 修 draft（若本回合另有含相同錯誤主張的報告副檔亦同步修正）後直接交付，標「🔎 self-verify: FIXED_AFTER_AUDIT（R#）」並明寫「未經第二次獨立稽查」

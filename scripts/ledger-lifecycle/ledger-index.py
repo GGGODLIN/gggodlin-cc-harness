@@ -17,7 +17,7 @@ DATE_RE = re.compile(r"(?<!\d)(\d{4}-\d{2}-\d{2})(?!\d)")
 ARCHIVED_ENTRY_RE = re.compile(r"^### .*\([^)]*\d{4}-\d{2}-\d{2}[^)]*\)$")
 NEW_ARCHIVED_ENTRY_RE = re.compile(r"^### .*\[結案\s+\d{4}-\d{2}-\d{2}\s+·\s+[^]]+\].*$")
 PROOFREAD_ENTRY_RE = re.compile(r"^### (PR-\d+)\s+(.+)$")
-FACTCHECK_ENTRY_RE = re.compile(r"^### (?:(FC-\d+)(?:\s+|$))?(.*)$")
+FACTCHECK_ENTRY_RE = re.compile(r"^### (?:(FC-\d+)(?:\s+|$))?(.+)$")
 NEW_ARCHIVED_RE = re.compile(r"^### .*\[結案\s+(\d{4}-\d{2}-\d{2})\s+·\s+([^]]+)\]")
 LABEL_RE = re.compile(r"^\s*[-*]\s*\*\*([^*]+)\*\*\s*[:：]\s*(.*)$")
 VERDICT_RE = re.compile(r"(?<![A-Za-z])(?:KEEP|KILL|DEFER|PASS|MERGE|DECOMMISSIONED)(?![A-Za-z])")
@@ -71,7 +71,7 @@ def entry_match(kind, line):
     if kind == "proofread":
         return bool(PROOFREAD_ENTRY_RE.fullmatch(line))
     if kind == "factcheck":
-        return bool(FACTCHECK_ENTRY_RE.fullmatch(line))
+        return bool(FACTCHECK_ENTRY_RE.fullmatch(line)) and bool(line[4:].strip())
     raise ValueError(f"unsupported kind: {kind}")
 
 
@@ -233,9 +233,13 @@ def index_line(row, kind):
     return "｜".join([*(clean_value(value) for value in fields[:-1]), fields[-1]])
 
 
-def index_data_lines(path):
+def index_data_lines(path, *, must_exist=False):
     safe_path = ensure_no_symlink(path, "index-input")
+    if safe_path.is_dir():
+        raise IsADirectoryError(f"index path is a directory: {safe_path}")
     if not safe_path.is_file():
+        if must_exist:
+            raise FileNotFoundError(f"index file not found: {safe_path}")
         return []
     rows = []
     for line in read_lines(safe_path):
@@ -247,8 +251,10 @@ def index_data_lines(path):
 
 
 def parse_index_line(line):
+    if "\n" in line or "\r" in line:
+        raise ValueError(f"index line must not contain newlines: {line}")
     fields = line.split("｜", 4)
-    if len(fields) != 5 or any(not field for field in fields):
+    if len(fields) != 5 or any(not field.strip() for field in fields):
         raise ValueError(f"index line must contain five non-empty fields: {line}")
     return fields
 
@@ -261,6 +267,8 @@ def write_atomic(path, text, label="write-target"):
     try:
         with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
             handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
         os.replace(temporary, target)
     except Exception:
         try:
@@ -321,6 +329,10 @@ def clear_pending(source, anchor):
 def append_index(source, index, kind, anchor, line):
     source_path = ensure_no_symlink(source, "source")
     index_path = ensure_no_symlink(index, "index-output")
+    if source_path.resolve() == index_path.resolve():
+        raise ValueError("source and index output must be different files")
+    if not entry_match(kind, anchor):
+        raise ValueError(f"source anchor is not a {kind} entry: {anchor}")
     try:
         parse_index_line(line)
         if line.split("｜", 4)[-1] != anchor:
@@ -353,7 +365,7 @@ def append_index(source, index, kind, anchor, line):
 def reconcile(source, index, kind):
     source_rows = parse_entries(source, kind)
     source_anchors = [row["anchor"] for row in source_rows]
-    index_lines = index_data_lines(index)
+    index_lines = index_data_lines(index, must_exist=True)
     index_rows = [parse_index_line(line) for line in index_lines]
     index_anchors = [row[-1] for row in index_rows]
     source_counts = Counter(source_anchors)

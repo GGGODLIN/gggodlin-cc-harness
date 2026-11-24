@@ -6,9 +6,9 @@
 
 派工前先查當前環境是否透過 vendor、proxy 或別名映射模型，並區分「要求的模型」與「這條路徑實際會呼叫的模型」。可用環境標記的存在性、非敏感映射設定與同路徑近期 runtime 紀錄查證；不讀取或輸出憑證。沒有映射標記也不單獨證明是原生模型。
 
-若要求特定模型或跨模型意見，而目前 subagent 路徑會把它映射成另一個模型，就不要照送後仍按別名標示。已獲准使用 Herdr 時，可依 herdr skill 在原生 TUI 啟動指定模型與 effort；先查新 shell 的映射狀態，未獲准的替代路徑另請使用者決定。不要修改 ccp 或全域認證來湊模型。
+如果 main 有已驗證的 Herdr 身分（`HC_TERMINAL_ID`，或 `HERDR_PANE_ID` 與 `HERDR_WORKSPACE_ID` 齊全）且需要不同模型或 Codex／pi 外殼，就走 agent-dispatch 開 Herdr session；唯讀意見用它的唯讀單席模式，實作用它的實作 worker 模式，使用者不必點名 Herdr。同模型的搜尋或盤點照用 subagent；小改 main 自己做。只有 main 能開 Herdr session，subagent、workflow agent、受委派 worker 不開；workflow 例外與 pi-subtask 的現行路由保留。不要修改 ccp 或全域認證來湊模型。
 
-派出後仍核對 runtime 的實際模型與 effort；不符就如實標示，保留結果但不冒充原選席，也不重跑其他已成功席位。以上是派工判斷，不新增模型 registry 或檢查程式。完成核對後再依下節選擇任務類型與 agent。
+如果要選第二意見席位，就在開席前讀 `config/second-opinion-seats.json` 與 `skills/agent-dispatch/SKILL.md` 的「唯讀單席」；外部額度席未被使用者選定時不開。沒有 Herdr 身分或目錄沒有該席時回報不可用，不自行退回 headless 或換模型。顧問給的 `-p` 指令不照貼、不自寫啟動器，只有目錄明列的用途例外沿用原路。使用者當輪親口點名 headless 呼叫，或屬尚未遷移的呼叫端既有路徑時，照 `rules/common/terminal-backend-routing.md` 的例外處理。派出後仍核對 runtime 的實際模型與 effort；不符就如實標示，保留結果但不冒充原選席，也不重跑其他已成功席位。變更路由或回報跨模型執行／審查結果時，直接寫明實際執行的模型名稱與帳號／通道，不等使用者追問。同槽位換代與主模型／審查席不預設掛上一代舊模型作靜默降級備援（確需備援先問使用者；使用者已拍板的多級背景 fallback chain 如 `launcher_chain`、`mem-observer`、`audit-tail` 不在此限）。完成核對後再依下節選擇任務類型與 agent。
 
 ## 三分類定義
 
@@ -132,10 +132,10 @@ Locked surface 的生命週期沿用既有 agent-contract gate：bootstrap 走�
 
 | 繞行嘗試 | 攔截點 |
 | --- | --- |
-| 只有固定 `<fable-ok>` 或 structured marker，沒有成功 stage transcript | `review_implement_stage_missing` 或 `review_implement_marker_missing` |
-| marker 只放在 prompt、放多個 marker，或 model／axis 不在矩陣 | `review_implement_marker_invalid` |
-| payload／transcript 不一致、stage result 無效、選擇過期或同一 model／axis 已派過 | 對應 `review_implement_*` fail-closed reason |
-| 字母選擇前沒有唯一逐字固定選單、選單被改字／調序、重複，或選單只出現在 sidechain／tool result | `review_implement_axis_alias_unbound` |
+| 只有固定 `<fable-ok>` 或 structured marker，沒有成功 stage transcript | `review_implement_stage_missing` 或 `review_implement_marker_missing`（`routed-judge` 席記 `would_deny` 後放行，見 `T2-routing-gate.sh:9-13`） |
+| marker 只放在 prompt、放多個 marker，或 model／axis 不在矩陣 | `review_implement_marker_invalid`（同上，合法 `routed-judge` 席記 `would_deny` 放行；錯型別／Fable 缺 `<fable-ok>` 仍 deny） |
+| payload／transcript 不一致、stage result 無效、選擇過期或同一 model／axis 已派過 | 對應 `review_implement_*` reason（合法 `routed-judge` 席記 `would_deny` 後放行；audit 寫入失敗仍 fail-closed） |
+| 字母選擇前沒有唯一逐字固定選單、選單被改字／調序、重複，或選單只出現在 sidechain／tool result | `review_implement_axis_alias_unbound`（同上記 `would_deny` 後放行） |
 
 這是防漂移 gate，不承諾抵抗同 UID 主動竄改 transcript、環境變數或本機檔案；判不出授權一律 deny。
 
@@ -190,7 +190,7 @@ T2-routing-gate hook 強制 enforce；互動式 `routed-mech` 即使 sentinel �
 
 實作 / 重構型派工 prompt 先套模板（目標 / 不變量 / 範圍 / spec / 驗收 / 回報合約六件套）→ 見 memory `reference_dispatch_prompt_templates`。若目標檔案受契約測試保護（檔頭含 `<!-- 本檔在契約測試底下：... -->`），派工前確認受委派 subagent 的 `tools` 含 `Bash` 可執行契約測試，不派無 `Bash` 的 subagent 直接修改受保護檔案（`contract-test-preflight-gate.sh` 會在首次 Edit/Write 前攔截無 `Bash` 的改動）。
 
-**背景 subagent 並發上限**：`~/.claude/settings.json` 設有 `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS=5`，單一訊息平行派發（或同時間在途）的背景 Agent 上限為 **5 個**；超過 5 個時必須分批派發（先派 ≤5 個，收到完成通知釋出槽位後再派下一批）。若收到 `Concurrent subagent limit reached (5)... Do not retry right now`，嚴禁在同一回合內重試派發。
+**背景 subagent 並發上限**：多席平行派發前，先現場讀取 `~/.claude/settings.json` 的 `env.CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS`（或現行同名環境變數；未設時沿 CC 執行期回報上限）。此上限計算的是**包含既有在途（in-flight）背景 agent** 在內的總槽位天花板：單批派發前須先扣除目前仍在途的背景 agent 數，只送出不超過剩餘可用槽位的數量；超出的席次待完成通知釋出槽位後再補派。若收到 `Concurrent subagent limit reached (...)... Do not retry right now`，嚴禁在同一回合內重試派發，改等在途背景 agent 完成通知釋出槽位後再補派。
 
 #### Read-only worktree preflight
 
@@ -213,7 +213,8 @@ await agent('翻譯這段', { agentType: 'routed-mech', model: 'haiku' })
 
 - 2026-09-29 probe 實證（workflow `wf_1d4eecfa-e86`，transcript 的 `message.model` 與 `effort` 欄）：`agentType` 會套用定義檔的 model＋effort（mech → sonnet/medium、judge → opus/high、impl → sonnet/high，session effort 為 medium 時照樣），per-call `model` 會覆蓋 model、effort 仍取定義檔。
 - workflow 裡的 `routed-mech` 不需要 `<mech-ok>`：那道檢查掛在 Agent tool 的 PreToolUse，workflow 不會觸發。
-- 例外：specialized agent（`url-fetcher`、`chrome-fetcher` 等）照用自己的 `agentType`。只在非 Anthropic vendor session 跑、刻意繼承 main 的 workflow（目前只有 `deep-research-paced-zai.js`，GLM 已退役）會被下方 gate 擋；真要跑就暫時用停用開關，不另設放行標記。
+- 例外：使用者確認過的模型設定可以替 `routed-*` 帶 per-call `model`，例如 `/retro-workflow` 起跑摘要確認的各階段模型，或使用者批准過的 workflow 本身寫定的席位模型（`retro-workflow.js`、`daily-topic-analysis-minimal.js` 的 `routed-judge` 席）。臨時寫的 workflow 不能自己把 `routed-judge` 換成較便宜的模型：曾有一場把判斷席換成 Flash 後讀錯內容。下方 gate 分不出模型來源，這條靠自律。
+- 例外：specialized agent（`url-fetcher`、`chrome-fetcher` 等）照用自己的 `agentType`。只在非 Anthropic vendor session 跑、刻意繼承 main 的 workflow 會被下方 gate 擋；真要跑就暫時用停用開關，不另設放行標記。
 - 機械 gate：`~/.claude/hooks/workflow-routing-gate.py`（PreToolUse:Workflow）會擋「opts 物件字面值裡沒有 model／agentType／spread」與「單參數 `agent(x)`」，deny 訊息指回本段。**明文不保證**：opts 用變數或 helper 傳入的呼叫看不透、照放；寫了 agentType 但分類選錯照放。
 
 Workflow specific 細節（哪些 phase 算機械 / Search vs Fetch downgrade target）見 `~/.claude/skills/workflow-hardening/SKILL.md` §8。
@@ -260,7 +261,7 @@ subagent 回傳的內容整包進 main context；長回覆同時撐爆 main 的 
 同一 key 修正嘗試 2 次用盡仍不過 → 四選一、選哪個明寫在回覆裡：
 
 1. **換路**：回到問題定義重新拆解（子任務切法錯了、不是執行錯了；拆解後是新 key、額度重來）
-2. **升 effort**：main 自己做、prompt 加 ultrathink 或 `/effort` 升檔（見 performance.md）
+2. **升 effort**：main 自己做、prompt 加 ultrathink 或 `/effort` 升檔（見 `effort-controls.md`）
 3. **外部第二意見**：codex-rescue（可靠配方見 codex-rescue.md：單 job、禁開放式外查、前景跑）
 4. **停下問使用者**：判準見 dispatch-and-verify.md「停下問使用者 vs 自己決定」節
 

@@ -183,7 +183,7 @@ run_git_summary_case() {
   git_closeout=$(jq -sr '.[-1].git_closeout // "none"' "$fixture_home/.claude/hooks/state/checkpoint.log" 2>/dev/null)
   audit_action=$(jq -sr '.[-1].action // "none"' "$fixture_home/.claude/hooks/state/checkpoint.log" 2>/dev/null)
 
-  if [ "$decision" = "block" ] && printf '%s' "$reason" | grep -q "\[checkpoint:trigger:$expected_version\]" && printf '%s' "$reason" | grep -q 'Git closeout：READY' && printf '%s' "$reason" | grep -q 'Git closeout：BLOCKED' && printf '%s' "$reason" | grep -q '逐項列出 exact paths 與處置' && printf '%s' "$reason" | grep -q "$repo" && printf '%s' "$reason" | grep -q 'branch: main' && [ "$scope" = "personal" ] && [ "$git_closeout" = "included" ] && [ "$audit_action" = "git_closeout" ]; then
+  if [ "$decision" = "block" ] && printf '%s' "$reason" | grep -q "\[checkpoint:trigger:$expected_version\]" && printf '%s' "$reason" | grep -q 'Git closeout：READY' && printf '%s' "$reason" | grep -q 'Git closeout：BLOCKED' && printf '%s' "$reason" | grep -q '逐項列出 exact paths 與處置' && printf '%s' "$reason" | grep -q '共用帳本留給 `/git-closeout` 統一備份' && ! printf '%s' "$reason" | grep -q '共用帳本整組 checkpoint' && printf '%s' "$reason" | grep -q "$repo" && printf '%s' "$reason" | grep -q 'branch: main' && [ "$scope" = "personal" ] && [ "$git_closeout" = "included" ] && [ "$audit_action" = "git_closeout" ]; then
     printf 'PASS %s decision=%s git-summary=yes scope=%s closeout=%s\n' "$name" "$decision" "$scope" "$git_closeout"
     ((pass++))
   else
@@ -587,6 +587,7 @@ run_git_scope_case() {
   local name="$1"
   local relative="$2"
   local expected_scope="$3"
+  local expected_reason='report-only'
   local fixture_home="$TMP/$name/home"
   local repo="$fixture_home/$relative"
   local transcript="$TMP/$name/transcript.jsonl"
@@ -608,11 +609,14 @@ run_git_scope_case() {
   scope=$(jq -sr '.[-1].scope // "none"' "$fixture_home/.claude/hooks/state/checkpoint.log" 2>/dev/null)
   git_closeout=$(jq -sr '.[-1].git_closeout // "none"' "$fixture_home/.claude/hooks/state/checkpoint.log" 2>/dev/null)
 
-  if [ "$decision" = "block" ] && printf '%s' "$reason" | grep -q "scope: $expected_scope" && printf '%s' "$reason" | grep -q 'report-only' && printf '%s' "$reason" | grep -q 'fresh git status' && [ "$scope" = "$expected_scope" ] && [ "$git_closeout" = "included" ]; then
-    printf 'PASS %s scope=%s report-only=yes\n' "$name" "$scope"
+  if [ "$expected_scope" = "personal" ]; then
+    expected_reason='依 `/self-closeout` 現行規則收'
+  fi
+  if [ "$decision" = "block" ] && printf '%s' "$reason" | grep -q "scope: $expected_scope" && printf '%s' "$reason" | grep -Fq "$expected_reason" && printf '%s' "$reason" | grep -Fq 'git -C <repo root> status --short' && [ "$scope" = "$expected_scope" ] && [ "$git_closeout" = "included" ]; then
+    printf 'PASS %s scope=%s closeout=%s\n' "$name" "$scope" "$git_closeout"
     ((pass++))
   else
-    printf 'FAIL %s scope=%s expected=%s report-only=no closeout=%s\n' "$name" "$scope" "$expected_scope" "$git_closeout"
+    printf 'FAIL %s scope=%s expected=%s reason=%s closeout=%s\n' "$name" "$scope" "$expected_scope" "$expected_reason" "$git_closeout"
     ((fail++))
   fi
 }
@@ -730,6 +734,8 @@ run_git_symlink_scope_case() {
 run_git_symlink_scope_case "native-git-symlink-company"
 run_git_json_failure_case "native-git-json-failure"
 run_git_scope_case "native-git-company" "Desktop/work/company" "company"
+run_git_scope_case "native-git-acme-root" "Desktop/work/acme" "personal"
+run_git_scope_case "native-git-acme-nested" "Desktop/work/acme/acme-dashboard-v2" "company"
 run_git_scope_case "native-git-unknown" "Downloads/scratch" "unknown"
 run_git_rev_list_failure_case "native-git-rev-list-failure"
 run_git_timeout_case "native-git-timeout"
@@ -757,6 +763,259 @@ run_turn_case "gpt-cooldown-50" "gpt" "50" "繼續" "__none__" "__none__" "none"
 run_turn_case "native-refresh-49" "__unset__" "60" "可以" "11" "11" "none" "seed"
 run_turn_case "native-refresh-50" "__unset__" "60" "可以" "10" "10" "none" "seed"
 run_turn_case "native-refresh-51" "__unset__" "60" "可以" "9" "9" "none" "seed"
+run_case "native-closeout-phrase-part" "__unset__" "收掉你的部分" "block" "trigger_long"
+
+run_auto_closeout_commit_case() {
+  local name="$1"
+  local fixture_home="$TMP/$name/home"
+  local repo="$fixture_home/Desktop/projects/$name-repo"
+  local transcript="$TMP/$name/transcript.jsonl"
+  local input
+  local first_out
+  local reentry_out
+  local next_qa_out
+  local new_commit_out
+  local d1
+  local d2
+  local d3
+  local d4
+  local reason1
+
+  mkdir -p "$fixture_home/.claude/hooks/state" "$fixture_home/.claude/memory" "$(dirname "$repo")"
+  [ -f "$HOME/.claude/memory/feedback_memory_cluster_maintenance.md" ] && cp "$HOME/.claude/memory/feedback_memory_cluster_maintenance.md" "$fixture_home/.claude/memory/"
+  git init -q -b main "$repo"
+  git -C "$repo" -c user.name=Fixture -c user.email=fixture@example.com commit --allow-empty -qm init
+
+  jq -nc '{type:"user",message:{content:"照建議實作這個修改"}}' > "$transcript"
+  jq -nc --arg repo "$repo" '{type:"assistant",message:{content:[{type:"tool_use",name:"Bash",input:{command:("git -C " + $repo + " commit -m \"feat: done\"")}}]}}' >> "$transcript"
+
+  input=$(jq -nc --arg session "$name" --arg transcript "$transcript" --arg cwd "$repo" \
+    '{session_id:$session,transcript_path:$transcript,cwd:$cwd,background_tasks:[],last_assistant_message:"已完成修改並通過全部測試。\n我預期會看到：測試全綠\n實際看到：12 pass\n匹配嗎？yes"}')
+  first_out=$(HOME="$fixture_home" env -u CC_VENDOR bash "$SCRIPT" <<< "$input")
+  reentry_out=$(HOME="$fixture_home" env -u CC_VENDOR bash "$SCRIPT" <<< "$input")
+
+  # 後續回合純問答、無新 commit/edit → 不再重攔
+  jq -nc '{type:"user",message:{content:"再幫我確認一個細節"}}' >> "$transcript"
+  input=$(jq -nc --arg session "$name" --arg transcript "$transcript" --arg cwd "$repo" \
+    '{session_id:$session,transcript_path:$transcript,cwd:$cwd,background_tasks:[],last_assistant_message:"已完成確認，行為一致。"}')
+  next_qa_out=$(HOME="$fixture_home" env -u CC_VENDOR bash "$SCRIPT" <<< "$input")
+
+  # 新一輪有新 git commit → 重新啟用提醒一次
+  jq -nc '{type:"user",message:{content:"再補一個小修"}}' >> "$transcript"
+  jq -nc --arg repo "$repo" '{type:"assistant",message:{content:[{type:"tool_use",name:"Bash",input:{command:("git -C " + $repo + " commit -m \"fix: second\"")}}]}}' >> "$transcript"
+  input=$(jq -nc --arg session "$name" --arg transcript "$transcript" --arg cwd "$repo" \
+    '{session_id:$session,transcript_path:$transcript,cwd:$cwd,background_tasks:[],last_assistant_message:"修改已完成，測試通過。"}')
+  new_commit_out=$(HOME="$fixture_home" env -u CC_VENDOR bash "$SCRIPT" <<< "$input")
+
+  d1=$(printf '%s\n' "$first_out" | jq -r '.decision // "none"' 2>/dev/null)
+  d2=$([ -n "$reentry_out" ] && printf '%s\n' "$reentry_out" | jq -r '.decision // "none"' 2>/dev/null || printf 'none')
+  d3=$([ -n "$next_qa_out" ] && printf '%s\n' "$next_qa_out" | jq -r '.decision // "none"' 2>/dev/null || printf 'none')
+  d4=$(printf '%s\n' "$new_commit_out" | jq -r '.decision // "none"' 2>/dev/null)
+  reason1=$(printf '%s\n' "$first_out" | jq -r '.reason // empty' 2>/dev/null)
+
+  if [ "$d1" = "block" ] && printf '%s' "$reason1" | grep -q '\[checkpoint:auto-closeout:long\]' && printf '%s' "$reason1" | grep -q 'Git closeout：READY' && [ "$d2" = "none" ] && [ "$d3" = "none" ] && [ "$d4" = "block" ]; then
+    printf 'PASS %s first=%s reentry=%s followup=%s new_commit=%s\n' "$name" "$d1" "$d2" "$d3" "$d4"
+    ((pass++))
+  else
+    printf 'FAIL %s first=%s reentry=%s followup=%s new_commit=%s\n' "$name" "$d1" "$d2" "$d3" "$d4"
+    ((fail++))
+  fi
+}
+
+run_auto_closeout_dirty_edit_case() {
+  local name="$1"
+  local fixture_home="$TMP/$name/home"
+  local repo="$fixture_home/Desktop/projects/$name-repo"
+  local transcript="$TMP/$name/transcript.jsonl"
+  local input
+  local out
+  local decision
+  local reason
+
+  mkdir -p "$fixture_home/.claude/hooks/state" "$(dirname "$repo")"
+  git init -q -b main "$repo"
+  git -C "$repo" -c user.name=Fixture -c user.email=fixture@example.com commit --allow-empty -qm init
+  printf 'dirty\n' > "$repo/app.py"
+
+  jq -nc '{type:"user",message:{content:"幫我改一下 app.py"}}' > "$transcript"
+  jq -nc --arg fp "$repo/app.py" '{type:"assistant",message:{content:[{type:"tool_use",name:"Edit",input:{file_path:$fp}}]}}' >> "$transcript"
+  # 即使英文結案（同輪 opus-chinese-stop 亦會送 additionalContext），checkpoint-judge 不得跳過
+  input=$(jq -nc --arg session "$name" --arg transcript "$transcript" --arg cwd "$repo" \
+    '{session_id:$session,transcript_path:$transcript,cwd:$cwd,background_tasks:[],last_assistant_message:"All changes are complete and all 4 tests pass."}')
+  out=$(HOME="$fixture_home" env -u CC_VENDOR bash "$SCRIPT" <<< "$input")
+  decision=$(printf '%s\n' "$out" | jq -r '.decision // "none"' 2>/dev/null)
+  reason=$(printf '%s\n' "$out" | jq -r '.reason // empty' 2>/dev/null)
+
+  if [ "$decision" = "block" ] && printf '%s' "$reason" | grep -q 'dirty_edit' && printf '%s' "$reason" | grep -q 'Git closeout 摘要'; then
+    printf 'PASS %s decision=%s english_non_yield=yes\n' "$name" "$decision"
+    ((pass++))
+  else
+    printf 'FAIL %s decision=%s\n' "$name" "$decision"
+    ((fail++))
+  fi
+}
+
+run_auto_closeout_skip_guards_case() {
+  local name="$1"
+  local fixture_home="$TMP/$name/home"
+  local repo="$fixture_home/Desktop/projects/$name-repo"
+  local transcript="$TMP/$name/transcript.jsonl"
+  local out_bg
+  local out_q
+  local out_closed
+  local out_subagent
+  local out_readonly
+
+  mkdir -p "$fixture_home/.claude/hooks/state" "$(dirname "$repo")"
+  git init -q -b main "$repo"
+  git -C "$repo" -c user.name=Fixture -c user.email=fixture@example.com commit --allow-empty -qm init
+  # 共用工作樹預先存在別的 session 留下的髒檔
+  printf 'foreign\n' > "$repo/foreign.txt"
+
+  # 1. 純唯讀／寫入 /tmp scratchpad 的調查對話，不應因共用工作樹髒檔誤攔
+  jq -nc '{type:"user",message:{content:"幫我查這個問題"}}' > "$transcript"
+  jq -nc '{type:"assistant",message:{content:[{type:"tool_use",name:"Write",input:{file_path:"/private/tmp/claude-501/scratchpad/note.md"}}]}}' >> "$transcript"
+  out_readonly=$(HOME="$fixture_home" env -u CC_VENDOR bash "$SCRIPT" <<< "$(jq -nc --arg s "${name}-ro" --arg t "$transcript" --arg c "$repo" '{session_id:$s,transcript_path:$t,cwd:$c,background_tasks:[],last_assistant_message:"已完成查證，結論如上。"}')")
+
+  # 加入本場 commit 後測背景任務、結尾問句、subagent 與已跑 closeout-provenance.py
+  jq -nc --arg repo "$repo" '{type:"assistant",message:{content:[{type:"tool_use",name:"Bash",input:{command:("git -C " + $repo + " commit -m \"feat: work\"")}}]}}' >> "$transcript"
+
+  # 2. 背景任務仍在執行 → 放行
+  out_bg=$(HOME="$fixture_home" env -u CC_VENDOR bash "$SCRIPT" <<< "$(jq -nc --arg s "${name}-bg" --arg t "$transcript" --arg c "$repo" '{session_id:$s,transcript_path:$t,cwd:$c,background_tasks:[{type:"local_bash",status:"running"}],last_assistant_message:"修改已完成，背景測試執行中。"}')")
+
+  # 3. 結尾仍有待使用者回答的問題 → 放行
+  out_q=$(HOME="$fixture_home" env -u CC_VENDOR bash "$SCRIPT" <<< "$(jq -nc --arg s "${name}-q" --arg t "$transcript" --arg c "$repo" '{session_id:$s,transcript_path:$t,cwd:$c,background_tasks:[],last_assistant_message:"第一階段修改已完成，下一步你要選 A 還是 B？"}')")
+
+  # 4. Subagent Stop 事件 → 放行
+  out_subagent=$(HOME="$fixture_home" env -u CC_VENDOR bash "$SCRIPT" <<< "$(jq -nc --arg s "${name}-sub" --arg t "$transcript" --arg c "$repo" '{session_id:$s,agent_id:"agent-99",transcript_path:$t,cwd:$c,background_tasks:[],last_assistant_message:"已完成修改並通過測試。"}')")
+
+  # 5. 已在 commit 後執行 closeout-provenance.py → 放行
+  jq -nc '{type:"assistant",message:{content:[{type:"tool_use",name:"Bash",input:{command:"python3 ~/.claude/scripts/closeout-provenance.py --self-repos"}}]}}' >> "$transcript"
+  out_closed=$(HOME="$fixture_home" env -u CC_VENDOR bash "$SCRIPT" <<< "$(jq -nc --arg s "${name}-done" --arg t "$transcript" --arg c "$repo" '{session_id:$s,transcript_path:$t,cwd:$c,background_tasks:[],last_assistant_message:"已完成修改並完成收尾。"}')")
+
+  if [ -z "$out_readonly" ] && [ -z "$out_bg" ] && [ -z "$out_q" ] && [ -z "$out_subagent" ] && [ -z "$out_closed" ]; then
+    printf 'PASS %s readonly=pass bg=pass question=pass subagent=pass closed=pass\n' "$name"
+    ((pass++))
+  else
+    printf 'FAIL %s ro=%s bg=%s q=%s sub=%s closed=%s\n' "$name" "$out_readonly" "$out_bg" "$out_q" "$out_subagent" "$out_closed"
+    ((fail++))
+  fi
+}
+
+run_auto_closeout_pathological_state_case() {
+  local name="$1"
+  local fixture_home="$TMP/$name/home"
+  local repo="$fixture_home/Desktop/projects/$name-repo"
+  local transcript="$TMP/$name/transcript.jsonl"
+  local elsewhere="$TMP/$name/elsewhere"
+  local sentinel="$fixture_home/.claude/hooks/state/closeout_$name"
+  local log_file="$fixture_home/.claude/hooks/state/checkpoint.log"
+  local input
+  local out_sym
+  local out_fifo
+  local out_hard
+
+  mkdir -p "$fixture_home/.claude/hooks/state" "$(dirname "$repo")"
+  git init -q -b main "$repo"
+  git -C "$repo" -c user.name=Fixture -c user.email=fixture@example.com commit --allow-empty -qm init
+  printf 'untouched' > "$elsewhere"
+
+  jq -nc '{type:"user",message:{content:"實作功能"}}' > "$transcript"
+  jq -nc --arg repo "$repo" '{type:"assistant",message:{content:[{type:"tool_use",name:"Bash",input:{command:("git -C " + $repo + " commit -m \"feat: x\"")}}]}}' >> "$transcript"
+  input=$(jq -nc --arg session "$name" --arg transcript "$transcript" --arg cwd "$repo" \
+    '{session_id:$session,transcript_path:$transcript,cwd:$cwd,background_tasks:[],last_assistant_message:"已完成修改並通過測試。"}')
+
+  ln -s "$elsewhere" "$sentinel"
+  out_sym=$(HOME="$fixture_home" env -u CC_VENDOR bash "$SCRIPT" <<< "$input")
+  rm -f "$sentinel"
+
+  mkfifo "$sentinel"
+  mkfifo "$log_file"
+  out_fifo=$(HOME="$fixture_home" env -u CC_VENDOR bash "$SCRIPT" <<< "$input")
+  rm -f "$sentinel" "$log_file"
+
+  ln "$elsewhere" "$sentinel"
+  out_hard=$(HOME="$fixture_home" env -u CC_VENDOR bash "$SCRIPT" <<< "$input")
+  rm -f "$sentinel"
+
+  if [ -z "$out_sym" ] && [ -z "$out_fifo" ] && [ -z "$out_hard" ] && [ "$(cat "$elsewhere")" = "untouched" ]; then
+    printf 'PASS %s symlink=safe fifo=no-hang hardlink=safe\n' "$name"
+    ((pass++))
+  else
+    printf 'FAIL %s sym=%s fifo=%s hard=%s elsewhere=%s\n' "$name" "$out_sym" "$out_fifo" "$out_hard" "$(cat "$elsewhere")"
+    ((fail++))
+  fi
+}
+
+run_auto_closeout_reply_case() {
+  local name="$1" expected="$2" reply="$3" scenario="${4:-work}"
+  local fixture_home="$TMP/$name/home"
+  local repo="$fixture_home/Desktop/projects/$name-repo"
+  local transcript="$TMP/$name/transcript.jsonl"
+  local input out decision
+
+  mkdir -p "$fixture_home/.claude/hooks/state" "$(dirname "$repo")"
+  git init -q -b main "$repo" || return 1
+  jq -nc --arg repo "$repo" --arg other "${repo} other" --arg scenario "$scenario" '
+    def command($cmd): {type:"assistant",message:{content:[{type:"tool_use",name:"Bash",input:{command:$cmd}}]}};
+    {type:"user",message:{content:"請處理測試專案"}},
+    command("git -C " + ($repo | @sh) + " commit -m \"fix: work\""),
+    (if $scenario == "work" then empty else
+      (if $scenario == "unplanned-ledger" then empty
+      elif $scenario == "loop-ledger" then
+        command("for r in " + ($repo | @sh) + " " + ($other | @sh) + "; do python3 ~/.claude/scripts/closeout-provenance.py --repo \"$r\" --plan /tmp/fixture; done")
+      else
+        command("python3 ~/.claude/scripts/closeout-provenance.py --repo " + ($repo | @sh) + " --plan /tmp/fixture")
+      end),
+      (if $scenario == "new-work" then
+        command("git -C " + ($repo | @sh) + " commit -m \"fix: follow-up\"")
+      else
+        (if $scenario == "other-repo-ledger" or $scenario == "loop-ledger" then $other else $repo end) as $ledger_repo |
+        command("git -C " + ($ledger_repo | @sh) + " commit -q -m \"chore(closeout): checkpoint shared ledgers\"")
+      end)
+    end)' > "$transcript" || return 1
+  input=$(jq -nc --arg s "$name" --arg t "$transcript" --arg c "$repo" --arg reply "$reply" \
+    '{session_id:$s,transcript_path:$t,cwd:$c,background_tasks:[],last_assistant_message:$reply}') || return 1
+  out=$(HOME="$fixture_home" env -u CC_VENDOR -u GIT_CLOSEOUT_DISABLE bash "$SCRIPT" <<< "$input") || return 1
+  decision=none
+  if [ -n "$out" ]; then
+    decision=$(printf '%s\n' "$out" | jq -er 'select(.reason | contains("[checkpoint:auto-closeout:")) | .decision') || decision=unexpected
+  fi
+  if [ "$decision" = "$expected" ]; then
+    printf 'PASS %s decision=%s\n' "$name" "$decision"
+    ((pass++))
+  else
+    printf 'FAIL %s expected=%s decision=%s\n' "$name" "$expected" "$decision"
+    ((fail++))
+  fi
+  return 0
+}
+
+run_auto_closeout_commit_case "auto-closeout-commit"
+run_auto_closeout_dirty_edit_case "auto-closeout-dirty-edit"
+run_auto_closeout_skip_guards_case "auto-closeout-skip-guards"
+run_auto_closeout_pathological_state_case "auto-closeout-pathological-state"
+run_auto_closeout_reply_case "auto-closeout-in-progress" none '已完成：草稿｜目前：第 2 題待拍板｜下一步：依回覆修改' || ((fail++))
+run_auto_closeout_reply_case "auto-closeout-next-in-progress" none '`已完成`：初稿 ｜ `目前`：無 ｜ `下一步`：執行驗收' || ((fail++))
+run_auto_closeout_reply_case "auto-closeout-combined-status" none $'`已完成｜目前｜下一步`：初稿｜等你回覆｜驗收\n第一輪修改已完成。' || ((fail++))
+run_auto_closeout_reply_case "auto-closeout-terminal-status" block '已完成：測試與驗收｜目前：測試階段結案｜下一步：正式發布時再找我' || ((fail++))
+run_auto_closeout_reply_case "auto-closeout-empty-status" block '已完成：驗收｜目前：done｜下一步：不用做' || ((fail++))
+run_auto_closeout_reply_case "auto-closeout-no-status" block '修改已完成，測試通過。' || ((fail++))
+run_auto_closeout_reply_case "auto-closeout-quoted-progress" block $'修改已完成。\n> 已完成：初稿｜目前：待回覆｜下一步：驗收' || ((fail++))
+run_auto_closeout_reply_case "auto-closeout-ledger-commit" none '已完成修改並通過測試。' ledger || ((fail++))
+run_auto_closeout_reply_case "auto-closeout-work-after-plan" block '已完成修改並通過測試。' new-work || ((fail++))
+run_auto_closeout_reply_case "auto-closeout-ledger-without-plan" block '已完成修改並通過測試。' unplanned-ledger || ((fail++))
+run_auto_closeout_reply_case "auto-closeout-acceptance-finished" block '已完成：測試｜目前：驗收完畢｜下一步：無' || ((fail++))
+run_auto_closeout_reply_case "auto-closeout-only-next" none $'修改已完成。\n下一步：執行驗收' || ((fail++))
+run_auto_closeout_reply_case "auto-closeout-only-current" none $'修改已完成。\n目前：驗收中' || ((fail++))
+run_auto_closeout_reply_case "auto-closeout-only-current-finished" block $'修改已完成。\n目前：驗收完畢' || ((fail++))
+run_auto_closeout_reply_case "auto-closeout-multiline-status" none $'已完成｜寫好草稿\n目前｜等回覆\n下一步|確認回覆後更新。' || ((fail++))
+run_auto_closeout_reply_case "auto-closeout-cross-repo-ledger" block '已完成修改並通過測試。' other-repo-ledger || ((fail++))
+run_auto_closeout_reply_case "auto-closeout-loop-repo-ledger" none '已完成修改並通過測試。' loop-ledger || ((fail++))
+run_auto_closeout_reply_case "auto-closeout-round-wrapped-empty" block $'修改已完成。\n下一步：（無）' || ((fail++))
+run_auto_closeout_reply_case "auto-closeout-square-wrapped-empty" block $'修改已完成。\n下一步：【無】' || ((fail++))
+run_auto_closeout_reply_case "auto-closeout-punctuated-empty" block $'修改已完成。\n下一步：無。' || ((fail++))
+run_auto_closeout_reply_case "auto-closeout-wrapped-active" none $'修改已完成。\n下一步：（等你拍板 A 或 C）' || ((fail++))
 
 printf '%s\n' "---- $pass pass / $fail fail ----"
 exit "$fail"

@@ -11,9 +11,26 @@ set -euo pipefail
 
 input=$(cat)
 file_path=$(printf '%s' "$input" | jq -r '.tool_input.file_path // ""' 2>/dev/null || echo "")
+session_id=$(printf '%s' "$input" | jq -r '.session_id // ""' 2>/dev/null || echo "")
 
 case "$file_path" in
   *openspec/changes/*/design.md|*/.scratch/*/spec.md)
+    spec_dir=$(dirname "$file_path")
+    # 已有同目錄 *-review.md 代表本 spec 已進過 review，不重複噴選單
+    if [ -d "$spec_dir" ] && find "$spec_dir" -maxdepth 1 -type f -name '*-review.md' 2>/dev/null | grep -q .; then
+      exit 0
+    fi
+    # 同一 (session_id, file_path) 只提示一次，避免多次 Edit 連續注入 6–20 次
+    if [ -n "$session_id" ]; then
+      seen_dir="${REVIEW_SPEC_NUDGE_STATE_DIR:-/tmp/review-spec-tier1-nudge-seen}"
+      mkdir -p "$seen_dir" 2>/dev/null || true
+      seen_key=$(printf '%s__%s' "$session_id" "$file_path" | tr -c 'A-Za-z0-9_.-' '_')
+      seen_marker="$seen_dir/$seen_key"
+      if [ -f "$seen_marker" ]; then
+        exit 0
+      fi
+      : > "$seen_marker" 2>/dev/null || true
+    fi
     cat <<'JSON'
 {"hookSpecificOutput":{"hookEventName":"PostToolUse","additionalContext":"⚠️ design/spec doc 落檔。進 to-tickets 前先在 response 列文字選單（a) T1 自審 b) T2 單 critic c) T3 雙跑，選後回傳 `/review-spec 3 <本次 file_path 的絕對路徑>` 只有使用者真正送出 command 才執行 d) T4 跨模型 e) 跳過 review、直接進 to-tickets、不再重問 f) YAGNI 軸，模型代寫 spec 建議至少先跑，與 T1–T4 分開執行；選單最後一行固定放 `<review-spec-entry-menu:v1>`）等使用者回覆，詳見 ~/.claude/commands/review-spec.md。"}}
 JSON

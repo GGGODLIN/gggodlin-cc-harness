@@ -258,7 +258,7 @@ const parseShellWords = command => {
   return words
 }
 
-const isNodeExecutable = value => isAbsolute(value) && basename(value) === "node"
+const isNodeExecutable = value => isAbsolute(value) && /^node(?:js)?(?:[-.]?\d+(?:\.\d+)*)?(?:\.exe)?$/u.test(basename(value))
 
 const isCompactGuardScript = value => isAbsolute(value) && value.endsWith("/bin/compact-guard.mjs")
 
@@ -521,6 +521,7 @@ const contentFreeErrorCode = error => {
     "EACCES",
     "ENOENT",
     "ENOSPC",
+    "INVALID_COMMAND",
     "INVALID_JSON",
     "INVALID_STRUCTURE",
     "MANAGED_ID_COLLISION",

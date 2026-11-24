@@ -10,6 +10,7 @@ argument-hint: "[--blind|--full] [顧問代號] <要問的問題>；空參數 = 
 顧問只出意見、不動手 —— 但**保證強度按路徑不同**，別一視同仁：
 
 - 選項 3 用 `-s read-only`，**機制層強制**，它想動也動不了。
+- 目錄席位第三方 Fable 與 Gemini 帶工具，唯讀靠定義檔自律；收席的寫入工具檢查不涵蓋 Bash／MCP 副作用，不是機制鎖。
 - 選項 2 的本機讀取能力以當次工作區預檢為準。DevSpace 可用時走 snapshot；未連接時由 main 準備自足材料，顧問只讀 prompt，不自行探索本機。兩種模式都不提供一般修改工具。
 - **選項 1 在 Claude Code 走 Agent 時沒有這道鎖**：`advisor-seat` 帶全套工具（含 Write／Edit／Bash）。約束寫在該 agent 定義檔的 body 裡（唯讀紀律段），是**常駐的自律約束、不是機制強制**——它想動仍然動得了。Codex Desktop 改走下方獨立 Claude CLI，明確停用 Write／Edit／NotebookEdit／Bash／Agent、Chrome 與 MCP；代價是該席不能自己跑 Git／shell 查證。Step 4 第 3 段的角色文字仍是補強，不是替代。
 
@@ -33,7 +34,7 @@ Sourcegraph Amp 是這批調查裡最乾淨的 shipped shape (A) 實例（覆蓋
 - 同一任務已有明確指定的模式、顧問或組合就沿用；只在該任務的 context 內沿用，不跨任務延用授權，不靜默換模型。推薦永遠只是建議，未獲選定、使用者取消或材料不足時不派工。
 - 列出顧問選項與派工前，先讀 `~/.claude/references/subagent-routing.md` 的「派工前核對實際模型」。若當前 subagent 路徑會將 Fable 等別名映射到 GPT，不把 `model: fable` 當成 Fable 可用；使用已批准的原生 TUI 路徑時明確指定模型與 effort。派出後核對實際模型，再標示顧問身分；模型不符不算已完成該席。
 
-這是 runtime 的 context 判斷，不新增自動 advisor 觸發、分類程式、模型 registry 或 provider adapter。
+這是 runtime 的 context 判斷，不新增自動 advisor 觸發、分類程式或 provider adapter。
 
 **完成條件**：已從 context 整理出一句話理解、任務目的、材料與限制；有關鍵缺口時追問並停止，否則接 Step 1–3，在同一輪呈現理解與選單後等待選擇。
 
@@ -57,7 +58,7 @@ Sourcegraph Amp 是這批調查裡最乾淨的 shipped shape (A) 實例（覆蓋
 
 **它不是「完整脈絡」，別這樣講。** 抽取只保留文字 block，`tool_use` 與 `tool_result` 全部不在裡面 —— 實測那些佔原始 jsonl 的 70%（tool 內容 588 KB vs 文字 249 KB）。所以顧問拿到的是「我說了什麼」，不是「我做了什麼」，它無法核對我的宣稱有沒有對應的執行動作。
 
-**要執行證據的話，讓顧問自己去讀，不要我幫它抽。** 選項 1 與 3 都有讀檔能力，直接在 prompt 裡給它 jsonl 路徑：
+**要執行證據的話，讓顧問自己去讀，不要我幫它抽。** 選項 1、3 與第三方 Fable、Gemini 席都有讀檔能力，直接在 prompt 裡給它 jsonl 路徑：
 
 ```
 ~/.claude/projects/<專案目錄>/<CLAUDE_CODE_SESSION_ID>.jsonl
@@ -87,7 +88,7 @@ python3 ~/.claude/scripts/advisor-extract-context.py --out /tmp/advisor-ctx.txt
 
 ## Step 2：讀 Fable 額度，決定推薦選項
 
-Fable 不是另給的配額，它是週額池的 50% cap。所以總額還很鬆的時候 Fable 可能已經見底 —— 不能用 `seven_day` 反推。
+部分高階模型共享週額配額上限，所以總額還很鬆的時候 Fable 可能已經見底 —— 不能用 `seven_day` 反推。
 
 CC 原生 statusline 的 `rate_limits` 沒有 per-model 欄位，唯一路徑是 quota cache 的 `.data.limits[]`：
 
@@ -99,7 +100,7 @@ jq -r '[.data.limits[]? | select(.kind == "weekly_scoped") | .percent] | max // 
 
 **要先解析 active 帳號**，不要對 `~/.claude/cache/quota-*.json` 下 glob 再取 max —— 那會跨帳號比較，另一個帳號燒得更兇時回報的是它的數字。`cc_resolve_quota_file` 是 `workflow-limit-watch.sh` 在用的同一支解析。
 
-**Fable ≥ 95% 時把推薦從選項 1 改掉並說明原因**：顧問需要讀本機東西就推選項 3，否則推選項 2。撈不到數值時當作未知、照常列選單但標明「Fable 額度未知」，不要當成 0。
+**如果原生高階模型週額接近上限，就不推原生席**：在選單把第三方 Fable 標成「推薦」並說明原因，仍等待使用者選擇，不自動改走第三方；如果第三方路徑當下不可用，顧問需要讀本機東西就推選項 3，否則推選項 2。撈不到數值時當作未知、照常列選單但標明「Fable 額度未知」，不要當成 0。
 
 **完成條件**：手上有一個具體百分比或明確的「未知」，且推薦選項已據此決定。這個推薦只填 Step 3 的標記，不是使用者已選定的顧問，也不能觸發派工。
 
@@ -111,22 +112,42 @@ jq -r '[.data.limits[]? | select(.kind == "weekly_scoped") | .percent] | max // 
 
 使用者未回答、明確取消、材料不足或尚未選定時停在選用階段，不派工；未回覆不等於接受推薦。同一任務已有明確指定的顧問或組合時沿用，不能把前一任務的授權帶到新的任務，也不能在被選 path 失敗時靜默換模型或重跑已成功的席位。
 
-下表列出當次既有執行路徑可配置的完整選項；即使某選項當下不可用或需要補材料，也要保留在選單並說明原因，不得只呈現推薦項。
+先跑 `python3 ~/.claude/skills/agent-dispatch/scripts/open-seat.py --list` 讀席位目錄。下表的目錄席位列由目錄產生：以 `id` 對應能力說明、`display_name` 填顧問名稱，並逐字顯示該席的一行 `quota_source`；模型識別讀 `model_sources`，不在本檔另存模型 id 或配方。依 `status` 判斷是否啟用；即使當下不可用或需要補材料，也保留該列並說明原因。表中的佔位欄位要用當次目錄值替換後才呈現。
+
+非目錄路徑照舊列出。依 agent-dispatch「選路與模式」的「尚未遷移的呼叫端既有路徑照舊」，原生 Fable Agent 與網頁 GPT Pro 保持既有狀態，不因跨模型或 headless 選路規則改判不可用；Codex Desktop Fable CLI 也維持目錄例外路徑。
 
 選路徑的軸是**能力**，不是強度。哪個模型「比較聰明」不可靠也難證；「它能不能自己查證」是確定的事實，而且直接決定它能做哪一類審查。
 
-| # | 顧問 | 能自己查本機嗎 | 因此適合審 | 燒什麼 |
+| #／席位 id | 顧問 | 能自己查本機嗎 | 因此適合審 | 燒什麼 |
 |---|---|---|---|---|
-| **1** | **Fable 5.1 · xhigh**（額度充足時的預設） | ✅ 帶全套工具（唯讀靠定義檔自律） | 實作層 —— 指令對不對、參數合不合法、程式碼與宣稱是否一致 | Fable 週額 50% cap |
-| 3 | Codex `gpt-6-astra` · xhigh | ✅ 讀檔＋跑唯讀指令 | 實作層 ＋ 方法層 —— 能自己去核對證據，所以查得出「你的實驗設計不成立」這類問題 | ChatGPT 訂閱 |
+| **1** | **Fable 5.2 · xhigh（別名 `fable`）**（額度充足時的預設） | ✅ 帶全套工具（唯讀靠定義檔自律） | 實作層 —— 指令對不對、參數合不合法、程式碼與宣稱是否一致 | 原生吃高階模型週額 |
+| 3／`advisor-codex` | 該席 `display_name` | 讀檔＋跑唯讀指令（機制層強制） | 實作層 ＋ 方法層 —— 能自己去核對證據，所以查得出「你的實驗設計不成立」這類問題 | 該席 `quota_source` 原文 |
+| `third-party-fable` | 該席 `display_name` | 讀檔查本機（啟動唯讀鎖強制） | 原生 Fable 的第三方額度路徑 | 該席 `quota_source` 原文 |
+| `ccp-gemini` | 該席 `display_name` | 能查本機（啟動唯讀鎖強制） | 另一個模型家族；對 Fable／Codex 的互補性尚未驗證 | 該席 `quota_source` 原文 |
+
+如果 main 沒有 Herdr 身分（`HC_TERMINAL_ID`，或舊版 `HERDR_PANE_ID` 與 `HERDR_WORKSPACE_ID` 齊全），就把目錄席位標「當下不可用（無 Herdr 身分）」，不改用 headless 或其他模型。外部額度席仍要使用者明選；Step 2 的推薦不算選定。
 
 **調用方式**
 
-- 選項 1 在 Claude Code：`Agent(subagent_type:"advisor-seat", model:"fable", description:"<fable-ok> …")`
+- 選項 1 在 Claude Code：`Agent(subagent_type:"advisor-seat", model:"fable", description:"<fable-ok> …")`。如果 Step 0 核對到 `fable` 別名被映射成別的模型，就說明原生路徑的模型不符、推薦第三方 Fable 並等待使用者明選；如果 Step 2 讀到額度接近上限，就依 Step 2 標推薦，不自動換席。使用者主動指定第三方時，接下方「第三方 Fable 路徑」；原生額度充足不影響這項選擇。
+
+### 目錄席位的唯讀單席入口
+
+1. 使用者明選第三方 Fable、Gemini 或 Codex 後，先讀 `~/.claude/skills/agent-dispatch/SKILL.md` 的「單席交接（新路）」及 `~/.claude/skills/agent-dispatch/references/session-routing.md`，依該入口直接開席，不另問派工同意。如果沒有 Herdr 身分或席開不起來，就標示該席失敗並說明原因，不改走其他路。
+2. main 把 Step 4 四段寫入權限 600 的 brief（含回覆第一行只寫「做完了」或「卡住了：缺什麼」）；以所選 id 執行 `python3 ~/.claude/skills/agent-dispatch/scripts/open-seat.py <seat-id> <brief-file> <cwd> --log-dir <收據目錄>`，三席皆在啟動時下啟動唯讀鎖，不另組啟動配方。記下 `terminal`、`session_id` 與 `turn`，確認 `first_message.sent` 與 `started` 均為 true。
+3. 掛單席背景等待 `hc wait <terminal> --timeout 300 --json`；被叫醒後執行 `python3 ~/.claude/skills/agent-dispatch/scripts/worker-turns.py --harness <harness> --session <session_id> --turn <turn>`（Claude Code 外殼加 `--cwd <cwd>`）收件，沒有追問即用 `hc kill <terminal>` 與 `hc rm <terminal>` 關席。只有回件讀取器確認屬於本席本輪且第一行是「做完了」，才把結果交給 Step 5；空白回覆、沒有「做完了」、卡住、逾時或開席失敗一律標示該席失敗並說明原因，不當成該席意見、不自動重送、不換模型。需要落檔時由 main 寫，席位不寫檔。
+
+### 第三方 Fable 路徑
+
+以席位 id `third-party-fable` 引用目錄，模型、agent、effort 與額度來源均讀目錄；不在此維護啟動配方。這席在啟動時下啟動唯讀鎖（僅允許唯讀工具），使用者可在 Herdr 旁觀。選定後接「目錄席位的唯讀單席入口」。
+
+### Gemini 顧問席
+
+以席位 id `ccp-gemini` 引用目錄，選定後接「目錄席位的唯讀單席入口」。它補的是另一個模型家族：Gemini Pro 主控、可派唯讀 Flash 子席，能查本機（啟動唯讀鎖強制），吃 Magpie Gemini 額度；選單的一行額度來源仍逐字讀該席 `quota_source`。對 Fable／Codex 的互補性尚未驗證，不宣稱比它們更強。
 
 ### Codex Desktop Fable 路徑
 
-選項 1 且環境是 Codex Desktop 時，不用 `spawn_agent`：Codex 的 model allowlist 沒有 Fable，`advisor-seat`／`cc_flagship` 也都固定為 Astra。改用本機 Claude CLI 建立一個獨立 `advisor-seat` session；這是實際 Anthropic Fable，不是 Fable-tier 映射。Step 2 已取得 active 帳號 quota，只有低於 95% 或使用者明知額度狀態仍明確指定時才執行。
+選項 1 且環境是 Codex Desktop 時，不用 `spawn_agent`：Codex 的 model allowlist 沒有 Fable，`advisor-seat`／`cc_flagship` 也都固定為 Astra。改用本機 Claude CLI 建立一個獨立 `advisor-seat` session；這是實際 Anthropic Fable，不是 Fable-tier 映射。Step 2 已取得 active 帳號 quota，只有額度充足或使用者明知額度狀態仍明確指定時才執行。
 
 1. 建 owner-only temporary file，先用 `awk 'f>=2{print} /^---$/{f++}' "$HOME/.claude/skills/review-method/SKILL.md" > <prompt-file>` 寫入方法組正文（去掉 frontmatter：prompt 以 `---` 開頭會被 CLI 當成旗標），再把 Step 4 的四段 prompt 接在後面；讀進變數後再傳，不要把 prompt 本文嵌進 shell command。方法組要放在 prompt 裡，因為 `--agent` 讓 advisor-seat 當主執行緒時定義檔的 `skills:` 不會預先載入，`--append-system-prompt-file` 附上的內容也沒進 context（2026-10-16 CC 2.1.301 實測）；少了它 advisor-seat 只會回 `未完成：方法組未載入`。Done when：prompt file 權限為 600、開頭是方法組正文且含 `載入標記：review-method/v1 loaded`，`FABLE_PROMPT` 來自該檔完整內容。
 2. 執行一次，不重送：
@@ -164,53 +185,21 @@ printf '%s' "$FABLE_RECEIPT" | jq -e '
 檢查通過後，從 `modelUsage` 回報實際 `canonicalModel` 與 `session_id`，並把 `.result` 原文交給 Step 5。任何欄位缺失、非 first-party Fable、CLI 非零退出或空回答都算本席失敗；**不靜默換成 Astra**、6 Pro、其他 Claude model，也不重送。Done when：terminal receipt 可定位到一個 first-party `claude-fable-*`，且只有一發請求。
 
 🔌 接線點：ChatGPT 網頁版席位 — 見 WIRING.md
-- 選項 3：**直接跑 codex CLI，不要走 `codex:rescue` plugin**（理由見下）
+- 選項 3：以席位 id `advisor-codex` 引用目錄，選定後接「目錄席位的唯讀單席入口」，以 `codex-read-only` 模式開席；不另組 Codex 指令或走 `codex:rescue`。
 
-```bash
-PROMPT=$(cat <prompt 檔)          # 讀進變數再用 "$PROMPT" 傳
-codex exec -m gpt-6-astra -s read-only --skip-git-repo-check \
-  -o <答案落檔路徑> "$PROMPT"
-```
+模型來源與 effort 均讀席位目錄；模型 key 由單席入口從 `config/gpt-models.env` 解析，實際型號寫入開席收據。版本表讀不到或 key 不存在時拒絕開席，不建 terminal。沒有 Herdr 身分時標「當下不可用（無 Herdr 身分）」；如果使用者當輪明確點名 headless 呼叫，就依常駐選路規則照做並提醒模型映射。
 
-prompt 一定要先讀進變數、再用 `"$PROMPT"` 傳。**不要把檔案內容直接嵌進指令字串** —— 對話正文裡有幾百個反引號（本 session 實測 748 個），嵌進去會被 shell 當 command substitution 執行。變數展開後 bash 不再解析內容，所以這樣是安全的。
-
-跑完**驗一下參數真的有到**（三個都在 codex 自己的 rollout 檔裡，這是唯一驗得到的地方）：
-
-```bash
-grep -o -E '"(model|reasoning_effort|sandbox_policy)"[^,}]{0,40}' \
-  "$(ls -t ~/.codex/sessions/*/*/*/rollout-*.jsonl | head -1)" | sort -u
-```
-
-預期看到 `"model":"gpt-6-astra"`、`"reasoning_effort":"ultra"`、`"sandbox_policy":{"type":"read-only"`。**這步不是可選的**：2026-09-03 我連續三次宣稱參數生效，前兩次拿不出證據、第三次才發現自己其實在降級。
+Codex 的唯讀沙盒是**機制層強制**；由開席指令下 `-s read-only -a never`（對應 rollout 的 `model`、`effort`、`sandbox_policy`），收件由 `worker-turns.py --harness codex --session <session_id> --turn <turn>` 讀取；開席失敗、回覆空白或沒有「做完了」就判失敗，不把未交付內容當成該席意見。唯讀沙盒不保證 MCP／網路沒有副作用。
 
 選 2 還是 3 的一句話判準：**需要核對證據就走 3，只需要想清楚就走 2**。
 
-選項 1 與 3 既然能自己查，就在 prompt 裡給它 session jsonl 路徑，讓它自己找執行證據（見 Step 1）。選項 2 若採材料模式，就由 main 先查證並內嵌必要的原始輸出、相關程式碼與反例；顧問只能評估提供的證據，不能把缺少的本機查證當作已完成。
+選項 1、3 與第三方 Fable、Gemini 席既然能自己查，就在 prompt 裡給它 session jsonl 路徑，讓它自己找執行證據（見 Step 1）。選項 2 若採材料模式，就由 main 先查證並內嵌必要的原始輸出、相關程式碼與反例；顧問只能評估提供的證據，不能把缺少的本機查證當作已完成。
 
 **同模型排除**：main 自己就是 Fable 時，不要推薦選項 1。那種情況下「換一顆腦袋」是假的，同一個模型不會有不同盲區。改推 2 或 3，或明確講清楚這次是同模型複查、不是第二意見。
 
 選項 1 的 `<fable-ok>` 要放在 `description` 欄位，放在 prompt 內文不算授權 —— T2-routing-gate 只認 description。這是使用者 2026-07-20 訂的配額政策，不是可以繞的形式要求。
 
-選項 3 的每個旗標都有理由，別省：
-
-- `-m gpt-6-astra` —— `~/.codex/config.toml` 預設現在也是 `gpt-6-astra`，明確指定是為了不受 config 日後變動影響。
-- `-s read-only` —— **這是機制強制**，不是靠任務文字說服誰。顧問改不了東西，也就不必花篇幅交代它別動手。
-- **effort 不要指定** —— `~/.codex/config.toml` 現在是 `model_reasoning_effort = "ultra"`（2026-09-05 隨 astra 換代一起改）。codex CLI 確實吃 config 的值：2026-09-03 config 還是 `max` 時從 rollout 檔實測到 `"effort":"max"`。帶 `-c model_reasoning_effort=xhigh` 是**主動降級** —— `xhigh` 是 `codex-companion.mjs:69` 那個 plugin 的上限，不是 codex 的上限。誤把 plugin 限制當成工具限制，就會在直接 CLI 這條路上白白降一級。
-- `-o <檔案>` —— 最終訊息落檔，不用從 stream 撈。
-- `--json` 可選 —— 它印事件流（看進度、看錯誤有用），但**不帶 model 欄位**，別拿它當驗證手段。
-- `--skip-git-repo-check` —— 在非 git 目錄跑時不會被擋。
-
-**為什麼不走 `codex:rescue` plugin**（2026-09-03 實測，兩者都跑過）：
-
-| | plugin | 直接 CLI |
-|---|---|---|
-| 產出判斷 | ❌ 兩輪都失敗（46 分鐘後 process 消失、state 卡 `running`；`--resume` 35 秒 no output） | ✅ 成功，exit 0 |
-| read-only | forwarder 讀任務文字推斷後設 `write: False` | `-s read-only` 旗標強制 |
-| 用了哪個 model | ❌ log 與 job json 都不記 | ✅ `--json` 事件流 |
-
-plugin 那條路整體不可觀測：失敗時看不出為什麼，成功時也證明不了參數有生效。附帶一筆：`426 Upgrade Required, ws://127.0.0.1:17841/v1/responses` 這個錯誤是假警報，CLI 會降級成 HTTP 後正常完成 —— 別因為看到它就以為壞了。
-
-**完成條件**：使用者已選定顧問（可回「照推薦」或用自然語言選擇），或已有明確進階參數；推薦本身不算選定。材料不足、未回答或取消時不派工。選項 1 在 Claude Code 的 description 內確實含 `<fable-ok>`、且已確認 main 本身不是 Fable；選項 1 在 Codex Desktop 的 terminal receipt 已核對 first-party `claude-fable-*`、非空結果與 session id；選項 2 走 Direct Web Pro（Codex Desktop 與 Claude Code 共用同一套判定）的 terminal receipt 必須同時記錄 `sourceThreadId exact`、`transport=direct`、`model/resolvedModel=gpt-6-pro`、`power=pro`、`submitted=true`、`terminalAsyncStatus=4`、非空 answer、`quickChatUiUsed=false`、`uiFallback=false`、`resubmitCount=0`，以及非空的 `conversationId` 與 `streamRequestId`，並確認本次工作區及材料模式。snapshot 模式另外要求 `devspaceUsed=true`、`devspaceScopeClosed=true`、四項 `devspaceCoverage` 全 true、`snapshotMode=0600`、`snapshotDeleted=true`；材料模式確認 main 已把必要原文內嵌且 receipt 沒有宣稱本機探索。在 Claude Code 環境確認 `--source-thread-id` 是當前 CC session id；snapshot 模式另外帶 `--sessions-root ~/.claude/projects`，且前置的 main renderer 計數為 1；保存 native conversationId 只供使用者明確要求的 follow-up，不做清單差集或標題匹配，也不自動 follow-up；選項 3 的情況下跑完已用上面那條 grep 從 rollout 檔看到 `model`、`reasoning_effort`、`sandbox_policy` 三個實際值（不是「我帶了旗標」，是「它真的收到了」）。
+**完成條件**：使用者已選定顧問（可回「照推薦」或用自然語言選擇），或已有明確進階參數；推薦本身不算選定。材料不足、未回答或取消時不派工。選項 1 在 Claude Code 的 description 內確實含 `<fable-ok>`、且已確認 main 本身不是 Fable；選項 1 在 Codex Desktop 的 terminal receipt 已核對 first-party `claude-fable-*`、非空結果與 session id；選第三方 Fable、Gemini 或選項 3（Codex）時，均已由 `open-seat.py` 帶啟動唯讀鎖開席、由 `worker-turns.py` 確認本席本輪回覆第一行「做完了」且非空，並收起席位；第三方席回報標成第三方 Fable，Gemini 席標成 Gemini，不冒充原生 Fable；選項 2 走 Direct Web Pro（Codex Desktop 與 Claude Code 共用同一套判定）的 terminal receipt 必須同時記錄 `sourceThreadId exact`、`transport=direct`、`model/resolvedModel=gpt-6-pro`、`power=pro`、`submitted=true`、`terminalAsyncStatus=4`、非空 answer、`quickChatUiUsed=false`、`uiFallback=false`、`resubmitCount=0`，以及非空的 `conversationId` 與 `streamRequestId`，並確認本次工作區及材料模式。snapshot 模式另外要求 `devspaceUsed=true`、`devspaceScopeClosed=true`、四項 `devspaceCoverage` 全 true、`snapshotMode=0600`、`snapshotDeleted=true`；材料模式確認 main 已把必要原文內嵌且 receipt 沒有宣稱本機探索。在 Claude Code 環境確認 `--source-thread-id` 是當前 CC session id；snapshot 模式另外帶 `--sessions-root ~/.claude/projects`，且前置的 main renderer 計數為 1；保存 native conversationId 只供使用者明確要求的 follow-up，不做清單差集或標題匹配，也不自動 follow-up。
 
 ## Step 4：打包問題
 
@@ -223,7 +212,7 @@ plugin 那條路整體不可觀測：失敗時看不出為什麼，成功時也�
    - **盲審模式**：原始任務 + 可驗證證據（檔案路徑、實測數字、外部事實）+ 硬約束；逐字檢查一遍有沒有洩漏我的結論 —— 「我認為」「我們決定」「已排除」「比較好的做法是」這類句子全部拿掉，連暗示都不留。
    - 對話文字模式：script 抽出的對話正文。
 3. **它的角色** — 逐字寫：只給判斷、不要出手改任何東西、不確定就說不確定，不要為了給答案而編；再加一句「找不到問題就直說沒有，不要為了交差而製造問題」
-4. **要什麼形狀的回答** — 例如「最可能的問題，每個附你依據哪一段」。盲審模式改成「你的方案 + 你為什麼排除其他做法」
+4. **要什麼形狀的回答** — 例如「最可能的問題，每個附你依據哪一段」。盲審／獨立出方案模式改成「你的方案 + 你為什麼排除其他做法 + 若存在會改變採用決定的脆弱前提，寫出該前提、目前證據與最便宜的查核方式（沒有就寫沒有，證據不足則寫未知）」
    - **審程式碼或送出前審查**：每個問題除了後果，另要它填兩欄——觸發條件（要同時滿足哪些情況才會發生）、真實使用會不會碰到（會／偏少見／邊角，附一句理由）。邊角的問題不能標成擋送出，列為小事並附觸發條件，由使用者決定修不修。同時請它主動標出超出任務意圖的多餘防禦、輔助函式或測試，並指出多餘在哪個契約或用途上。不寫「最多 N 個」，找不到就說沒有。
    - **複審**（同一份東西修完再問）：附上輪 Step 6 裁決表（保留穩定編號與本輪修復／驗證進度：區分「已修待驗」、「接受未修」、「待驗證」與「拒絕／已接受風險」）及前輪實際審查版本至本輪候選版本的增量（兩輪皆為已提交版本時用 `git diff <prev_sha>..<current_sha>`；未提交／未追蹤內容另列，非程式碼複審提供前後文字差異）。同串 `follow-up` 預設不重複內嵌未變動的檔案全文；材料模式仍須符合既有自足材料契約，不因 `conversationId` 相同而自動切換，需要獨立追查受影響呼叫端、共用狀態或執行證據時沿用 snapshot 模式按需查讀。只請它逐條判斷未結案項目（接受未修、已修待驗、待驗證）修好沒有、修法有沒有帶進回歸，允許追查必要的未改動呼叫端、依賴及共用狀態；不寫「刻意找修法本身的漏洞」。只有目前版本的程式或測試證據能支持「已解決」；新問題沿用上面兩欄並須說明與本輪變更的因果關係；已拒絕或已接受風險的項目保留原裁決、不標成已修復，無新證據或原裁決前提改變時不重複爭辯。
    - 為什麼：只給固定分級格與名額、再要求複審刻意找漏洞時，Pro 會依後果把邊角情況標成擋送出，修進真實使用碰不到的情況；不給分級格式時，Pro 自己會分清「推得出」與「會發生」。
@@ -236,15 +225,14 @@ plugin 那條路整體不可觀測：失敗時看不出為什麼，成功時也�
 
 ## Step 5：呈現回答
 
-顧問的意見原文貼給使用者，然後用一句話標出它跟我的看法哪裡不同。ChatGPT 材料模式先附當次工作區與「僅依提供材料判斷，未自行查本機」，不能把其意見寫成已探索 repo 或已獨立驗證本機。
+顧問完整原文一律先寫進本機可點開的副檔（單席或多席皆同，例如 scratchpad 或當前 `.scratch/` 研究檔），**不要直接把整篇原文傾倒進聊天室**（避免單席／多席疊加出數千至上萬字文字牆；使用者點名要看原文才貼）。
 
-選項 2 的 receipt 帶 `snapshotProof` 時，原文前先寫一行讀取範圍：`mismatch` 寫「Pro 只讀到快照第 `snapshotLinesReached` 行（共 `snapshotLineCount` 行），之後的對話它沒看到」，`missing` 寫「Pro 沒回報讀到第幾行」，`verified` 不用寫。這行是告示、不是收件失敗：本席過不過只看上面第 4 點的條件，答案照常呈現、照常進 Step 6。為什麼要寫：快照讀不完時，漏掉的通常是最近的脈絡，使用者要知道顧問的判斷少看了哪一段。
+聊天室控制在 **800 字內**，用白話呈現三件事：
+1. **副檔連結與來源條件**：逐席附上可點連結 `[檔名](file:///絕對路徑)`。ChatGPT 材料模式先附當次工作區與「僅依提供材料判斷，未自行查本機」，不能把其意見寫成已探索 repo 或已獨立驗證本機。選項 2 的 receipt 帶 `snapshotProof` 時，該席連結前先寫一行讀取範圍：`mismatch` 寫「Pro 只讀到快照第 `snapshotLinesReached` 行（共 `snapshotLineCount` 行），之後的對話它沒看到」，`missing` 寫「Pro 沒回報讀到第幾行」，`verified` 不用寫（這是告示、不是收件失敗：本席過不過只看上面第 4 點的條件，答案照常呈現、照常進 Step 6）。
+2. **核心立場與與我的分歧**：用白話講清各席的核心主張與跟我原本看法的具體分歧。**不能替自己護航、不能濾掉質疑整體方向的批評**——把原文放副檔是為了解決聊天室閱讀過載，不是拿主視角過濾異議；衝突時不預設誰對，把分歧點講清楚交給使用者判斷。
+3. **進 Step 6 逐條裁決**：完整逐條裁決表（列數必等於顧問總條目數）寫進同一份副檔；若總條目 ≤ 5 條且不超字數上限就直接貼聊天室，超過 5 條時聊天室只列**有分歧、拒絕、待驗證或質疑整體方向**的條目，其餘全數接受的條目用一句「其餘 N 條全數接受，完整裁決表見副檔」收攏。
 
-不要先消化再轉述 —— 那等於用我的視角再過濾一次，跟對話文字模式用機械抽取是同一個理由。
-
-意見與我的結論衝突時，不預設誰對：把分歧點講清楚交給使用者判斷。顧問跑的是另一顆模型，它可能看到我的盲區，也可能因為缺少脈絡而誤判。
-
-**做完的判準**：顧問原文已呈現，且已明確寫出「一致」或具體指出分歧在哪；`snapshotProof` 是 `mismatch` 或 `missing` 時，原文前已有那行讀取範圍。**接著進 Step 6，不要停在這裡。**
+**做完的判準**：顧問原文已落檔並附可點連結（非整篇直貼聊天室）、已明確寫出「一致」或具體指出分歧在哪；`snapshotProof` 是 `mismatch` 或 `missing` 時已有那行讀取範圍。**接著進 Step 6，不要停在這裡。**
 
 ## Step 6：逐條裁決
 
@@ -268,7 +256,7 @@ plugin 那條路整體不可觀測：失敗時看不出為什麼，成功時也�
 
 ## 資料流向
 
-選項 1 留在 Anthropic，選項 2、3 送到 OpenAI。兩家都是使用者已在使用的可信任服務，**不需要為此加確認步驟或限制範圍** —— 直接派即可。
+依實際所選路徑揭露：原生 Fable → Anthropic（含 Codex Desktop Fable CLI）；第三方 Fable → 使用者自備第三方端點（見 WIRING.md）；Gemini → Magpie Gemini 群組；ChatGPT → OpenAI；Codex → OpenAI。目錄席的模型與一行額度來源以當次目錄為準。這段揭露不另加派工同意；外部額度席仍須先符合 Step 3 的明選規則，推薦不算選定。
 
 ## 顧問回來之後
 

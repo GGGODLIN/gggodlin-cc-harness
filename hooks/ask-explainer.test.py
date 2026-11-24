@@ -136,6 +136,8 @@ class WrapperTest(unittest.TestCase):
 
   # the real acme gate, wrapped: a mention of the prod host asks, and the reading is appended
   def test_real_acme_gate_wrapped(self):
+    if not GATE.is_file():
+      self.skipTest(f'{GATE.name} is not present in this checkout')
     env = {**self.env, 'acme_DB_GATE_STATE_DIR': str(self.tmp / 'gate-state')}
     r = self.run_wrapper([sys.executable, str(GATE)], command='echo ' + 'acme-db-pl-' + '0', env=env)
     hso = json.loads(r.stdout)['hookSpecificOutput']

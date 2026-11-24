@@ -67,13 +67,13 @@ case "$mode" in
     end=$(( $(date +%s) + deadline ))
     warned=0
     while [ "$(date +%s)" -lt "$end" ]; do
-      if grep -q "$success_pat" "$@" 2>/dev/null; then
+      if grep -qE -- "$success_pat" "$@" 2>/dev/null; then
         echo "DONE at $(date '+%H:%M:%S')"; exit 0
       fi
       alive=0; pgrep -f "$pgrep_pat" >/dev/null 2>&1 && alive=1
       if [ "$alive" -eq 0 ]; then
         sleep 2  # process 剛結束可能還在 flush，緩衝後再驗一次成功訊號
-        if grep -q "$success_pat" "$@" 2>/dev/null; then
+        if grep -qE -- "$success_pat" "$@" 2>/dev/null; then
           echo "DONE (process exited) at $(date '+%H:%M:%S')"; exit 0
         fi
         echo "DEAD — process gone, no success marker, at $(date '+%H:%M:%S')"; exit 2

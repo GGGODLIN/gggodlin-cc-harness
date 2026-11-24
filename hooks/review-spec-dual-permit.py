@@ -94,10 +94,14 @@ def normalize_model_mapping(value):
 
 def current_model_binding():
   vendor = os.environ.get("CC_VENDOR", "").strip()
-  if not vendor:
-    return {"vendor": "", "expected_opus_model": "", "expected_fable_model": ""}
   opus = normalize_model_mapping(os.environ.get("ANTHROPIC_DEFAULT_OPUS_MODEL", ""))
   fable = normalize_model_mapping(os.environ.get("ANTHROPIC_DEFAULT_FABLE_MODEL", ""))
+  if not vendor:
+    # 即使 CC_VENDOR 為空，若預設 opus／fable 映射指向非原生 claude-* 模型，
+    # 下游 review-spec-dual-verify.py:540-553 必拒；在 preflight 先 fail-fast 避免白跑五席。
+    if (opus and not opus.startswith("claude-opus-")) or (fable and not fable.startswith("claude-fable-")):
+      deny("native-model-mapping-override-conflict")
+    return {"vendor": "", "expected_opus_model": "", "expected_fable_model": ""}
   if not opus or not fable or opus == fable:
     deny("vendor-model-mapping-invalid")
   return {"vendor": vendor, "expected_opus_model": opus, "expected_fable_model": fable}
@@ -691,7 +695,7 @@ def direct_assistant_text(record):
   return None
 
 
-def find_selection_event(records, session, command_uuid, requested_uuid=None):
+def find_selection_event(records, session, command_uuid, requested_uuid=None, *, allow_missing=False):
   if records is None:
     deny("transcript-invalid")
   command_index = None
@@ -713,6 +717,8 @@ def find_selection_event(records, session, command_uuid, requested_uuid=None):
       deny("selection-identity-missing")
     candidates.append((record_uuid, text, index))
   if not candidates:
+    if allow_missing and requested_uuid is None:
+      return None
     deny("selection-missing" if requested_uuid is None else "selection-event-missing")
   latest = candidates[-1]
   if requested_uuid is not None and requested_uuid != latest[0]:
@@ -974,6 +980,64 @@ def finalize_selection(args):
   return seats_for_lenses(requested)
 
 
+def auto_mode_cli(script, *args, payload=None):
+  path = Path(__file__).resolve().parents[1] / "scripts" / "auto-mode" / script
+  try:
+    result = subprocess.run(
+      [sys.executable, "-IB", str(path), *args],
+      input=json.dumps(payload) if payload is not None else None,
+      capture_output=True, text=True, timeout=5, check=False,
+    )
+    response = json.loads(result.stdout) if result.returncode == 0 else None
+  except (OSError, ValueError, subprocess.TimeoutExpired):
+    return {}
+  return response if isinstance(response, dict) else {}
+
+
+def auto_finalize_selection(args, state, records, selected_seats):
+  if auto_mode_cli("mode.py", "status", "--session", args.session).get("enabled") is not True:
+    deny("selection-missing")
+  recommendation_uuid, recommendation_seats = find_recommendation_event(
+    records, args.session, state["command_uuid"], None, args.recommendation_event, state["permit_id"],
+  )
+  if selected_seats != recommendation_seats:
+    deny("recommendation-selection-mismatch")
+
+  fable_seats = fable_seats_for_seats(selected_seats)
+  action = "local-decision"
+  if fable_seats:
+    action = "third-party-fable" if state["vendor"] else "native-fable"
+  stop = "review-spec-tier3-seat-selection"
+  decision = auto_mode_cli("decision.py", "decide", payload={
+    "stop_kind": stop, "has_recommendation": True, "has_default": False,
+    "action": action, "enabled": True,
+  }).get("decision")
+
+  recommendation = ",".join(recommendation_seats)
+  if decision == "downweight":
+    replacements = canonical_seats(seat.replace(":fable", ":opus") for seat in selected_seats)
+    alternative = f"改選 {','.join(replacements)}，或另走 Codex Astra 審查。"
+    adopted = f"拒絕第三方 Fable。{alternative}"
+    disposition, reason = "downweighted", "第三方 Fable 不自動放行"
+  elif decision == "allow-auto":
+    adopted, disposition, reason = recommendation, "followed", "自動模式採用同輪推薦席位"
+  else:
+    deny("selection-missing")
+
+  task = args.task if args.task is not None else f"/review-spec 3 {state['spec_path']}"
+  record = auto_mode_cli(
+    "records.py", "append", "--session", args.session, f"--task={task}",
+    "--stop", stop, "--recommendation", recommendation, "--adopted", adopted,
+    "--disposition", disposition, "--reason", reason,
+  )
+  if decision == "downweight":
+    emit({"allowed": False, "reason": "auto-mode-seat-downweighted", "seats": fable_seats,
+          "alternative": alternative, "recorded": bool(record.get("id"))}, 3)
+  if not record.get("id"):
+    deny("selection-missing")
+  return recommendation_uuid
+
+
 def finalize(args):
   seat_selection = args.seats is not None or bool(args.seat)
   selected_seats = finalize_selection(args)
@@ -996,33 +1060,37 @@ def finalize(args):
     if state["finalized"]:
       deny("permit-already-finalized")
     selection_uuid = ""
-    selection_text = ""
     recommendation_uuid = ""
-    recommendation_seats = []
     records = load_records(transcript_bytes)
-    selection_uuid, selection_text, selection_index = find_selection_event(
+    selection = find_selection_event(
       records,
       session,
       state["command_uuid"],
       args.selection_event,
+      allow_missing=seat_selection,
     )
-    if seat_selection or args.recommendation_event:
-      recommendation_uuid, recommendation_seats = find_recommendation_event(
-        records,
-        session,
-        state["command_uuid"],
-        selection_index,
-        args.recommendation_event,
-        state["permit_id"],
-      )
-    follow_recommendation = args.follow_recommendation or selection_text.strip().rstrip("。") == "照推薦"
-    if follow_recommendation:
-      if not recommendation_seats or selected_seats != recommendation_seats:
-        deny("recommendation-selection-mismatch")
+    if selection is None:
+      recommendation_uuid = auto_finalize_selection(args, state, records, selected_seats)
     else:
-      parsed_user_seats = parse_user_selection_seats(selection_text)
-      if parsed_user_seats is None or parsed_user_seats != selected_seats:
-        deny("selection-mismatch")
+      selection_uuid, selection_text, selection_index = selection
+      recommendation_seats = []
+      if seat_selection or args.recommendation_event:
+        recommendation_uuid, recommendation_seats = find_recommendation_event(
+          records,
+          session,
+          state["command_uuid"],
+          selection_index,
+          args.recommendation_event,
+          state["permit_id"],
+        )
+      follow_recommendation = args.follow_recommendation or selection_text.strip().rstrip("。") == "照推薦"
+      if follow_recommendation:
+        if not recommendation_seats or selected_seats != recommendation_seats:
+          deny("recommendation-selection-mismatch")
+      else:
+        parsed_user_seats = parse_user_selection_seats(selection_text)
+        if parsed_user_seats is None or parsed_user_seats != selected_seats:
+          deny("selection-mismatch")
     state["finalized"] = True
     state["authorized_lenses"] = selected_lenses
     state["remaining_lenses"] = canonical_lenses(
@@ -1312,6 +1380,7 @@ def parser():
   finalize_parser.add_argument("--selection-event")
   finalize_parser.add_argument("--recommendation-event")
   finalize_parser.add_argument("--follow-recommendation", action="store_true")
+  finalize_parser.add_argument("--task", help="task ID for the automatic decision record")
   packet_parser = subparsers.add_parser("packet")
   packet_parser.add_argument("--session", required=True)
   packet_parser.add_argument("--lens", choices=sorted(LENSES), required=True)

@@ -16,9 +16,8 @@
 
 ## 送字進 worker
 
-- 多行文字用 `agent prompt` 會被拆成多次送出，worker 只看到第一段。brief 一律寫檔，prompt 只送「讀 <檔> 照做」。
-- `pane send-text` 與 `agent send-keys` 是備用，不帶狀態等待。
-- `--wait --until working` 確認 worker 收到並開始動；沒等到就是沒送進去。
+- `start-worker.sh` 從檔案準備首則訊息，將它以單一位置參數交給啟動中的 agent。舊版 Herdr 用 `pane run` 送啟動命令，Core 用 `hc send` 送啟動命令，兩者都在確認首輪活動後才掛 watcher。
+- 如果 pi 的 inline brief 以 `@` 開頭，呼叫端先在檔案加上 `[main]` 標頭。`start-worker.sh` 會在建窗前直接拒絕以 `@` 開頭的 pi inline brief，因為 pi 會將該參數視為檔案引用。
 
 ## 生命週期
 
@@ -26,11 +25,11 @@
 - Claude Code 的 scratchpad 目錄是 session 級，`/resume` 會清空。brief、收據、watch-log 不放那裡。
 - 已進「Usage limit reached · continuing at HH:MM」的 worker 不會吃到 main 的 `/login` 切帳號；要 `/exit` 後在同一 pane `claude --resume <session id>`。
 
-## 新 worktree 的信任確認框（2026-09-22 實測）
+## 新 worktree 的信任確認框（2026-09-22 實測、2026-11-23 更新）
 
-- 對從未開過 Claude Code 的目錄（新建 worktree 必中）起 worker，CC 會先跳「Is this a project you created or one you trust?」確認框，agent 狀態是 `blocked`；`start-worker.sh` 的 `agent prompt --wait --until working` 會回 `agent_not_ready … blocked during startup`，然後把 tab 關掉、整個失敗。
-- 手動補法：自己 `herdr tab create` → `herdr agent start`，`herdr pane read <pane_id>` 看到確認框後 `herdr pane send-keys <pane_id> Down` 再 `Enter`（預設游標在「No, exit」），狀態轉 `idle` 後照 Step 2 送 brief、手掛 `agent-watch.sh`。
-- 預防法：起 worker 前在對應 config dir 的 `.claude.json` 把 `projects["<worktree>"].hasTrustDialogAccepted` 設 true（CC 自己的錯誤訊息就這樣建議）。尚未做進 `start-worker.sh`。
+- Claude Code 在新 worktree 跳「Yes, I trust this folder」信任確認框時（預設游標在 `No, exit`），`start-worker.sh` 的 `herdr-core` 在首輪輪詢逾時未啟動後會讀畫面，自動送出方向鍵與 Enter 代按同意並重新計算首輪啟動等待。
+- 帶 `--add-dir` 開席時，代按工作目錄那個之後，每個未信任的額外目錄會再跳「Adding a new directory… Yes, add it」。`start-worker.sh` 依序代按，最多「`--add-dir` 數＋1」次；只看畫面底部最後一個確認框，捲動歷史裡已按過的不會再按。2026-11-23 實測：多 PR 審查的 Gemini Pro 席因只代按第一個而卡死。
+- 若代按後仍停留在確認框或首輪未開始，`start-worker.sh` 會附註 `folder trust dialog remained active after auto-accept`，執行 `kill`＋`rm` 後再以 `hc get` 核對視窗不再為 `live`，若仍活著則如實回報 `terminal close failed`。
 
 ## 模型旗標
 
@@ -41,8 +40,8 @@
 
 ### 狀態與 session
 
-- Codex：`herdr agent start --kind codex` 成功後狀態是 `done`，`agent_session` 是 null；送出第一則 prompt、狀態轉 `working` 的當下仍是 null，約 2 秒後才出現 `{"kind":"id","source":"herdr:codex","value":"<uuid>"}`。所以 Codex 要在送 brief 之後輪詢 `agent list` 取 session，不能照 CC 在送 brief 前取。回合結束狀態回到 `done`。
-- pi：帶 `--session-id <uuid>` 啟動，`agent start` 回傳時狀態就是 `idle`，`agent_session` 立即可得，但 `kind` 是 `path`，`value` 是紀錄檔完整路徑（檔名結尾 `_<uuid>.jsonl`），不是編號。收據的 session 用 main 自己產生的 uuid，路徑另存。回合結束狀態是 `done`。
+- Codex：舊版 Herdr 從 `agent list` 取同一 pane 的 session。Core 從 rollout 核對工作目錄、待送出的首則 user 訊息與回合事件，續接則檢查本次附加的紀錄。
+- pi：腳本以 `--session-id <uuid>` 啟動，收據記 main 產生的 UUID。舊版 Herdr 的 `agent_session.value` 是紀錄檔路徑，腳本用檔名結尾 `_<uuid>.jsonl` 核對它屬於這次啟動。
 - 兩者停下時都落在 `idle`／`done`，watcher 照舊帶 `--until idle --until blocked --until done`；兩者 session 在整段實測都穩定，判定可靠。
 
 ### 紀錄位置與交付訊息
@@ -59,12 +58,15 @@
 ### 啟動時會擋住的畫面
 
 - Codex 每次啟動都可能先跳「Update available」選單，Herdr 回 `agent_not_ready … blocked during startup`。啟動參數加 `-c check_for_update_on_startup=false` 即不跳，不改全域設定。
+- Codex 執行中跳出額度換模型選單（例如「Approaching rate limits, switch to gpt-6-luna?」）或要開 `/model` 時，`hc send --force <t> "2"` 會將文字貼入並按 Enter 誤選第 1 項，`hc send <t> "/model"` 會被包成 `<hc from=…>` 訊息送給模型。
+- 針對上述互動選單與 slash command，實測須改用 `hc keys <t> <數字>` 或 `hc keys <t> / m o d e l` 再 `hc keys <t> enter` 才會觸發真實按鍵（2026-11-20 實測 `hc keys t1ss 2` 正確選中「保留目前模型」）。
+- 透過 Codex 互動介面（`/model` 或額度換模型選單）切換模型時，實測會同步改寫 `~/.codex/config.toml` 的全域預設 `model` 欄位。
 - Codex 對從未信任過的 repo 會跳「Trust this folder?」，狀態 `blocked`；信任寫進 `~/.codex/config.toml` 的 `[projects."<repo 根目錄>"]`，同 repo 的其他 worktree 沿用、不再跳。`-c 'projects."<root>".trust_level="trusted"'` 蓋不掉這個確認框。實測當下 `~/.claude`、`~/Desktop/work/acme` 底下兩個主 repo、`harbor-3arm` 等常用 repo 都已信任。
-- pi 只有在 worktree 有 `.pi/settings.json` 等受保護資源時才跳「Trust project folder?」，而且 Herdr 這時回報 `idle`，不是 `blocked`——start-worker 會以為已就緒、把 brief 打進確認框。pi worker 一律帶 `--approve`。
+- 如果 worktree 有 `.pi/settings.json` 等受保護資源，pi 可能顯示「Trust project folder?」。`start-worker.sh` 以 `--approve` 啟動 pi，並將首則訊息交給 pi 的單一位置參數。
 
 ### pi 環境變數與 worker 專屬重試
 
-- pi-pick 配方的環境變數用 `herdr tab create --env KEY=VALUE` 帶進新 tab 的 shell，`agent start` 起的 pi 會繼承。
+- 舊版 Herdr 用 `herdr tab create --env KEY=VALUE` 將 pi-pick 配方的環境變數帶進新 tab，再用 `pane run` 執行帶 `--approve` 與首則訊息位置參數的 pi 啟動命令。
 - Argon 在 pi-pick 的 relay 目錄挑得到（`cc-relay` provider 的 `google/gemini-4-argon`），不需要在全域 pi 設定補模型。
 - worktree 的 `.pi/settings.json` 寫 `{"retry":{"provider":{"maxRetries":30,"maxRetryDelayMs":0}}}`：用 pi 自己的 `SettingsManager.create(cwd,{projectTrusted})` 讀，信任時 provider 重試是 30、不信任或其他目錄是預設 0；全域 `~/.pi/agent/settings.json` 前後 `cmp` 相同。
 - worktree 的 `git rev-parse --git-path info/exclude` 指向主 repo 共用的 `.git/info/exclude`，寫 `/.pi/settings.json` 一行後所有 worktree 的 `git status` 都看不到它。
@@ -72,5 +74,5 @@
 ### 在新 tab 的 shell 送指令（2026-10-18 實測）
 
 - `herdr pane run <pane> unset A B` 會把多個參數拼成一行指令執行；shell 已就緒時有效。
-- tab 剛建、shell 還在初始化（`pane process-info` 看得到前景 bash＋zsh）時送出的 `pane run` 會整個丟失，而且 rc=0、沒有任何錯誤。所以 start-worker.sh 送 `unset …; printf 'AGENT_DISPATCH_UNSET%s\n' _DONE`，再用 `herdr pane wait-output <pane> --match AGENT_DISPATCH_UNSET_DONE --timeout 3000` 等標記，最多重送 5 次；標記用 `%s` 拆開，畫面上回顯的指令文字不會誤中。
+- 舊版 Herdr 在 shell 初始化時可能靜默丟掉 `pane run`。腳本先用 `pane wait-output` 等 `AGENT_DISPATCH_SHELL_READY` 標記，若配方要求 unset，就在印標記前執行。腳本只重送就緒探針，啟動命令只送一次。
 - 實測當下新 tab 的 shell 不含任何 `ANTHROPIC_*` 變數；`tab create --env` 只能設值，清變數只能靠上面的 `pane run`。

@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
 # skill-ref-lint.test.sh — 三件 fixture 回歸（gate-authoring checklist §3）
 set -u
-LINT="$HOME/.claude/scripts/skill-ref-lint.sh"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+LINT="$SCRIPT_DIR/skill-ref-lint.sh"
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
+export HOME="$TMP/home"
+mkdir -p "$HOME/.claude/hooks"
+: > "$HOME/.claude/hooks/skill-install-scan.sh"
 pass=0; fail=0
 
 cat > "$TMP/fixture.md" <<'EOF'

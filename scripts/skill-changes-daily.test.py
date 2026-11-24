@@ -496,6 +496,228 @@ class SkillUpStatusRenderTest(unittest.TestCase):
     self.assertIn("上一輪啟動的 skill-up 回歸結果", fallback)
     self.assertNotIn("上一輪啟動的 skill-up 回歸結果", target)
     self.assertIn("## research-before-answer（command，committed）\n- 建議檔位：高", target)
+    self.assertIn("skill-up 自動背景回歸已暫停", target)
+
+  def test_paused_skill_is_not_launched_by_launch_skill_up(self):
+    with tempfile.TemporaryDirectory() as tmp:
+      root = Path(tmp)
+      module = load_daily({
+        "SKILL_EVAL_RUNS_DIR": str(root / "eval-runs"),
+        "SKILL_UP_BIN": str(root / "fake-skill-up"),
+        "SKILL_CHANGES_STATE_DIR": str(root / "state"),
+      })
+      fake = root / "fake-skill-up"
+      fake.write_text("#!/bin/sh\nexit 0\n")
+      fake.chmod(0o755)
+      rba_dir = root / "research-before-answer"
+      (rba_dir / "evals").mkdir(parents=True)
+      (rba_dir / "evals" / "eval.yaml").write_text("version: 1\n")
+      launched, err = module.launch_skill_up(
+        [{"name": "research-before-answer", "kind": "skill", "dir": rba_dir, "eval_dir": rba_dir, "origin": "committed"}],
+        "2026-11-19",
+      )
+      self.assertEqual(launched, [])
+      self.assertIsNone(err)
+
+
+class ChaosAndResilienceTest(unittest.TestCase):
+  """混沌測試：壞收據隔離、損毀 state、異常 runner JSON、不可執行 skill-up、git rename/non-ASCII/刪除。"""
+
+  def setUp(self):
+    self.temp = tempfile.TemporaryDirectory()
+    self.addCleanup(self.temp.cleanup)
+    self.home = Path(self.temp.name)
+    self.config = self.home / ".claude"
+    (self.config / "plugins").mkdir(parents=True)
+    (self.config / "settings.json").write_text(json.dumps({"enabledPlugins": {}}))
+    (self.config / "plugins/installed_plugins.json").write_text(json.dumps({"version": 2, "plugins": {}}))
+    subprocess.run(["git", "init", "-q", str(self.config)], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(self.config), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "commit", "-q", "--allow-empty", "-m", "init"], check=True, capture_output=True)
+    self.runs = self.home / "eval-runs"
+    self.state_dir = self.home / "daily-state"
+    self.report = self.home / "report.md"
+    self.env = {
+      **os.environ,
+      "HOME": str(self.home),
+      "SKILL_CHANGES_STATE_DIR": str(self.state_dir),
+      "SKILL_EVAL_RUNS_DIR": str(self.runs),
+    }
+
+  def run_cli(self, *args, extra_env=None):
+    env = {**self.env, **(extra_env or {})}
+    return subprocess.run([sys.executable, str(DAILY), *args], env=env, capture_output=True, text=True, timeout=10)
+
+  def test_corrupt_skill_up_receipts_are_isolated_and_reported_alongside_valid_ones(self):
+    # BUG-01: non-dict JSON, non-list case_results, non-dict case, bad skill_name, truncated JSON, bad UTF-8, missing case_results
+    cases = {
+      "valid-skill/iteration-1/result.json": json.dumps({"skill_name": "valid-skill", "case_results": [{"status": "PASS"}]}).encode("utf-8"),
+      "list-root/iteration-1/result.json": b"[]",
+      "null-root/iteration-1/result.json": b"null",
+      "bad-cases-type/iteration-1/result.json": json.dumps({"skill_name": "bad-cases-type", "case_results": 123}).encode("utf-8"),
+      "non-dict-case/iteration-1/result.json": json.dumps({"skill_name": "non-dict-case", "case_results": [None, "PASS"]}).encode("utf-8"),
+      "bad-skill-name/iteration-1/result.json": json.dumps({"skill_name": ["unhashable"], "case_results": [{"status": "PASS"}]}).encode("utf-8"),
+      "truncated/iteration-1/result.json": b'{"skill_name": "truncated", "case_results": [',
+      "bad-utf8/iteration-1/result.json": b"\xff\xfe\x00invalid",
+      "missing-cases/iteration-1/result.json": json.dumps({"skill_name": "missing-cases"}).encode("utf-8"),
+    }
+    for rel, raw in cases.items():
+      p = self.runs / rel
+      p.parent.mkdir(parents=True, exist_ok=True)
+      p.write_bytes(raw)
+    proc = self.run_cli("--out", str(self.report), "--no-skill-up")
+    self.assertEqual(proc.returncode, 0, proc.stderr)
+    report = self.report.read_text()
+    # Valid receipt is preserved as low tier
+    self.assertIn("valid-skill iteration-1：1 PASS／0 FAIL／0 ERROR", report)
+    # Every corrupt receipt must appear with its path and be at least medium tier (never silently dropped or low tier)
+    for rel in cases:
+      if rel.startswith("valid-skill"):
+        continue
+      full_path = str(self.runs / rel)
+      matched = [line for line in report.splitlines() if full_path in line]
+      self.assertEqual(len(matched), 1, f"missing attributable diagnostic for {rel}:\n{report}")
+      self.assertIn("建議檔位：中", matched[0], f"corrupt receipt {rel} must not be low tier: {matched[0]}")
+
+  def test_corrupt_state_fields_do_not_crash_and_surface_warning(self):
+    # BUG-03: null/string/NaN last_run_epoch, non-dict uncommitted_stamps, corrupt state.json
+    self.state_dir.mkdir(parents=True, exist_ok=True)
+    # Add an uncommitted command so changed_paths actually accesses seen_uncommitted.get(...)
+    cmd = self.config / "commands/demo.md"
+    cmd.parent.mkdir(parents=True, exist_ok=True)
+    cmd.write_text("# demo\n")
+    eval_yaml = self.config / "evals/demo/evals/eval.yaml"
+    eval_yaml.parent.mkdir(parents=True, exist_ok=True)
+    eval_yaml.write_text("tests: []\n")
+
+    for bad_state in (
+      json.dumps({"last_run_epoch": None, "uncommitted_stamps": ["not-a-dict"]}),
+      json.dumps({"last_run_epoch": "not-a-number", "uncommitted_stamps": "bad"}),
+      '{"last_run_epoch": NaN, "uncommitted_stamps": {}}',
+      "{truncated state",
+    ):
+      (self.state_dir / "state.json").write_text(bad_state)
+      proc = self.run_cli("--out", str(self.report), "--no-skill-up")
+      self.assertEqual(proc.returncode, 0, f"crashed on state={bad_state}: {proc.stderr}")
+      text = self.report.read_text()
+      self.assertIn("## 本輪限制", text, f"expected state warning in report for {bad_state}")
+      self.assertIn("state.json", text, f"expected state.json diagnostic for {bad_state}")
+
+  def test_run_evaluator_handles_non_dict_json_and_malformed_tiers(self):
+    # BUG-02: runner outputting [] / null / non-dict tier1 must return structured error, not AttributeError
+    fake_runner = self.home / "fake-runner.py"
+    skill_dir = self.config / "skills/alpha"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("---\nname: alpha\n---\n")
+    mod = load_daily({
+      "HOME": str(self.home),
+      "SKILL_CHANGES_STATE_DIR": str(self.state_dir),
+      "SKILL_EVAL_RUNS_DIR": str(self.runs),
+    })
+    mod.RUNNER = fake_runner
+    target = {"name": "alpha", "kind": "skill", "dir": skill_dir, "eval_dir": skill_dir, "origin": "uncommitted"}
+
+    for payload in ("[]", "null", json.dumps({"skills": "bad"}), json.dumps({"skills": [None]})):
+      fake_runner.write_text(f"import sys\nprint({payload!r})\n")
+      per, err = mod.run_evaluator([target], "2026-11-23")
+      self.assertIsInstance(per, dict)
+      self.assertTrue(err, f"expected runner error for payload={payload}, got per={per}, err={err}")
+
+    # Non-dict tier1/tier2_intra inside a skill entry must not crash tier_for
+    fake_runner.write_text(
+      "import json\n"
+      "print(json.dumps({'skills': [{'skill_name': 'alpha', 'tier1': 'bad', 'tier2_intra': 42}], 'tier2_preflight': 'bad'}))\n"
+    )
+    per, err = mod.run_evaluator([target], "2026-11-23")
+    tier, reasons = mod.tier_for(target, per.get("alpha"), [], err)
+    self.assertEqual(tier, "中")
+    self.assertTrue(reasons)
+
+  def test_launch_skill_up_handles_non_executable_binary_without_crashing(self):
+    # BUG-04: SKILL_UP exists (is_file=True) but lacks +x -> Popen raises PermissionError
+    bad_bin = self.home / "non-exec-skill-up"
+    bad_bin.write_text("#!/bin/sh\nexit 0\n")
+    bad_bin.chmod(0o644)
+    eval_dir = self.home / "alpha"
+    (eval_dir / "evals").mkdir(parents=True)
+    (eval_dir / "evals/eval.yaml").write_text("tests: []\n")
+    mod = load_daily({
+      "SKILL_UP_BIN": str(bad_bin),
+      "SKILL_CHANGES_STATE_DIR": str(self.state_dir),
+      "SKILL_EVAL_RUNS_DIR": str(self.runs),
+    })
+    launched, err = mod.launch_skill_up(
+      [{"name": "alpha", "kind": "skill", "dir": eval_dir, "eval_dir": eval_dir, "origin": "uncommitted"}],
+      "2026-11-23",
+    )
+    self.assertEqual(launched, [])
+    self.assertIsNotNone(err)
+    self.assertIn("alpha", err)
+
+  def test_git_rename_non_ascii_and_deleted_targets_are_handled_cleanly(self):
+    # BUG-05: rename, non-ASCII quoted filename, and deleted command/skill with leftover evals
+    # 1) Rename staged command: commands/old.md -> commands/renamed.md
+    commands = self.config / "commands"
+    commands.mkdir(parents=True, exist_ok=True)
+    (commands / "old.md").write_text("v1\n")
+    (commands / "deleted.md").write_text("v1\n")
+    for name in ("renamed", "deleted", "中文指令"):
+      p = self.config / "evals" / name / "evals"
+      p.mkdir(parents=True, exist_ok=True)
+      (p / "eval.yaml").write_text("tests: []\n")
+    subprocess.run(["git", "-C", str(self.config), "add", "commands/old.md", "commands/deleted.md"], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(self.config), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "commit", "-qm", "add cmds"], check=True, capture_output=True)
+    # Seed watermark at this commit so only uncommitted rename/non-ASCII/delete are tested
+    self.assertEqual(self.run_cli("--out", str(self.report), "--no-skill-up").returncode, 0)
+
+    # Now perform: rename old.md -> renamed.md, delete deleted.md, create non-ASCII 中文指令.md
+    subprocess.run(["git", "-C", str(self.config), "mv", "commands/old.md", "commands/renamed.md"], check=True, capture_output=True)
+    (commands / "deleted.md").unlink()
+    (commands / "中文指令.md").write_text("# zh\n")
+
+    proc = self.run_cli("--out", str(self.report), "--no-skill-up")
+    self.assertEqual(proc.returncode, 0, proc.stderr)
+    report = self.report.read_text()
+    self.assertIn("## renamed（command，uncommitted）", report)
+    self.assertIn("## 中文指令（command，uncommitted）", report)
+    self.assertNotIn("## deleted（command", report)
+    self.assertNotIn("->", report)
+    # Next run with no edits must be silent (deleted file must not loop forever)
+    proc2 = self.run_cli("--out", str(self.report), "--no-skill-up")
+    self.assertEqual(proc2.returncode, 0, proc2.stderr)
+    self.assertEqual(self.report.read_text(), "__SILENT__\n")
+
+  def test_collect_since_epoch_boundary_and_nonstandard_failure_status_and_tier_for(self):
+    # Exact boundary mtime == since_epoch must be excluded; non-PASS/ERROR status (e.g. TIMEOUT) counts as failed
+    mod = load_daily({
+      "HOME": str(self.home),
+      "SKILL_CHANGES_STATE_DIR": str(self.state_dir),
+      "SKILL_EVAL_RUNS_DIR": str(self.runs),
+    })
+    boundary_epoch = 1700000000.0
+    at_boundary = self.runs / "boundary-skill/iteration-1/result.json"
+    at_boundary.parent.mkdir(parents=True, exist_ok=True)
+    at_boundary.write_text(json.dumps({"skill_name": "boundary-skill", "case_results": [{"status": "PASS"}]}))
+    os.utime(at_boundary, (boundary_epoch, boundary_epoch))
+
+    newer = self.runs / "timeout-skill/iteration-1/result.json"
+    newer.parent.mkdir(parents=True, exist_ok=True)
+    newer.write_text(json.dumps({"skill_name": "timeout-skill", "case_results": [{"status": "TIMEOUT"}]}))
+    os.utime(newer, (boundary_epoch + 10, boundary_epoch + 10))
+
+    collected = mod.collect_skill_up_results(boundary_epoch)
+    self.assertEqual([r["skill"] for r in collected], ["timeout-skill"])
+    self.assertEqual(collected[0]["failed"], 1)
+    self.assertEqual(collected[0]["passed"], 0)
+    self.assertEqual(collected[0]["errored"], 0)
+
+    # Verify tier_for classification for Tier 1 failure (高) and Tier 2 findings (中)
+    skill_target = {"name": "s", "kind": "skill", "dir": Path("."), "eval_dir": Path("."), "origin": "committed"}
+    t1_tier, _ = mod.tier_for(skill_target, {"tier1": {"status": "failed", "finding_count": 2}, "tier2": {"status": "passed"}}, [], None)
+    self.assertEqual(t1_tier, "高")
+    t2_tier, _ = mod.tier_for(skill_target, {"tier1": {"status": "passed"}, "tier2": {"status": "findings", "finding_count": 1}}, [], None)
+    self.assertEqual(t2_tier, "中")
+    clean_tier, _ = mod.tier_for(skill_target, {"tier1": {"status": "passed"}, "tier2": {"status": "passed"}}, [], None)
+    self.assertEqual(clean_tier, "低")
 
 
 if __name__ == "__main__":

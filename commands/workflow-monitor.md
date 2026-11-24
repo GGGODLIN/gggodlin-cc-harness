@@ -217,13 +217,18 @@ Two bridges this command stands on:
    fi
    pgrep -lf "${WATCH_PROC}.*${SESSION_ID}" >/dev/null && \
      echo "⚠️ lingering watch for $SESSION_ID — investigate before flipping to suspended"
+   ```
+
+   **REQUIRED ON BOTH PATHS** (run whether `TaskStop` succeeded or the shell fallback above ran — Step 3 RESUME reads `argsFile` from `$STATE_FILE`):
+
+   ```bash
    # dcg 的 redirect-truncate-root-home 規則會擋 shell `>` 寫 home 路徑，改 python 寫檔（2026-07-11）
    python3 -c 'import sys; open(sys.argv[1],"w").write(sys.stdin.read())' "$STATE_FILE" <<EOF
    {"phase":"suspended","runId":"<runId>","vendor":"<WM_VENDOR from Step 0a>","watchProc":"${WATCH_PROC}","scriptPath":"<scriptPath>","sessionDir":"<...workflows dir>","sessionId":"${SESSION_ID}","argsFile":"${ARGS_FILE}","watchTaskId":"","pausedNote":"<why — quote the watcher's trip line>"}
    EOF
    ```
 
-   `watchTaskId` again starts empty — Step 7 refills it with the **reverse** watch's id, which is what Step 3.1 stops.
+   Done when `jq -r '"\(.phase) \(.argsFile)"' "$STATE_FILE"` prints `suspended <non-empty argsFile>`. `watchTaskId` starts empty — Step 7 refills it with the **reverse** watch's id, which is what Step 3.1 stops. Then continue to Step 7.
 
 7. **Arm auto-resume** — launch the reverse watch (slow poll, waits for the metric to recover). Again use the resolver's line verbatim; on anthropic it carries the 7d AND-condition, on relay the inverted `above` direction:
 

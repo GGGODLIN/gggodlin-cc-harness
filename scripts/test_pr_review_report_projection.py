@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+import atexit
+import errno
 import importlib.util
 import os
 import re
@@ -29,6 +31,19 @@ REPORT_ROOTS = [
   REPORT_ROOT / "oldco-api",
   REPORT_ROOT / "oldco-shop",
 ]
+
+
+def remove_empty_report_root():
+  try:
+    REPORT_ROOT.rmdir()
+  except OSError as error:
+    if error.errno not in (errno.ENOENT, errno.ENOTEMPTY, errno.EEXIST):
+      raise
+
+
+if not REPORT_ROOT.exists():
+  REPORT_ROOT.mkdir(parents=True, exist_ok=True)
+  atexit.register(remove_empty_report_root)
 
 
 def report_paths(root, number=1):
@@ -314,6 +329,20 @@ F-01 0123456789abcdef0123
     self.assertIn("正式環境有幾個租戶？", main)
     self.assertLess(main.index("## 待確認問題"), main.index("## 發現總覽"))
 
+  def test_tool_comparison_section_is_preserved_after_findings(self):
+    module = load_module()
+    for title in ("審查工具比較", "審查工具比較 (qualitative)", "審查工具比較（qualitative）"):
+      with self.subTest(title=title):
+        source = schema2_report() + (
+          f"\n## {title}\n\n### 誰抓到\n\n"
+          "| 組 | Codex 中性（gpt-6.2-astra） | 裁決 |\n|---|---|---|\n"
+          "| F-01 問題 | ✅ MEDIUM | ✅ 採納（Should Fix） |\n"
+        )
+        main = module.project_report(source, "pr-1-review.audit.md", require_schema=True)
+        self.assertIn(f"## {title}", main)
+        self.assertIn("| F-01 問題 | ✅ MEDIUM | ✅ 採納（Should Fix） |", main)
+        self.assertLess(main.index("## 發現總覽"), main.index(f"## {title}"))
+
   @unittest.skipUnless(MODULE_PATH.is_file(), "projection helper not implemented")
   def test_schema_two_requires_exact_prior_continuity_contract(self):
     module = load_module()
@@ -431,6 +460,21 @@ TAIL_MUST_SURVIVE
       "| F-01 | `left | right` 會失效 | Should Fix | auto-fix |",
     )
     with self.assertRaisesRegex(ValueError, "source report contract mismatch"):
+      module.project_report(source, "pr-1-review.audit.md", require_schema=True)
+
+  @unittest.skipUnless(MODULE_PATH.is_file(), "projection helper not implemented")
+  def test_finding_table_reports_bare_pipe_row_width_and_line(self):
+    module = load_module()
+    bad_row = "| F-01 | left | right | Should Fix | auto-fix | 修法明確 |"
+    source = minimal_report().replace(
+      "| F-01 | 問題 | Should Fix | auto-fix | 修法明確 |",
+      bad_row,
+    )
+    line_number = source.splitlines().index(bad_row) + 1
+    with self.assertRaisesRegex(
+      ValueError,
+      rf"finding-summary-structure.*finding-rows.*line {line_number}: got 6 columns, expected 5",
+    ):
       module.project_report(source, "pr-1-review.audit.md", require_schema=True)
 
   @unittest.skipUnless(MODULE_PATH.is_file(), "projection helper not implemented")
@@ -1782,6 +1826,8 @@ RAW_CROSS_VERIFICATION
 
   @unittest.skipUnless(MODULE_PATH.is_file(), "projection helper not implemented")
   def test_replays_ten_reports_without_losing_state_or_comment_payloads(self):
+    if not any(root.exists() for root in REPORT_ROOTS):
+      self.skipTest("isolated worktree has no historical pr-review-reports corpus")
     module = load_module()
     reports = recent_reports()
     self.assertEqual(10, len(reports))
@@ -1796,6 +1842,143 @@ RAW_CROSS_VERIFICATION
         self.assertIn(link, main, str(path))
       ratios.append(len(main.splitlines()) / len(source.splitlines()))
     self.assertLessEqual(statistics.median(ratios), 0.51)
+
+
+class ProjectionBoundaryHardeningTest(unittest.TestCase):
+  def _valid_group_report(self):
+    import hashlib
+    target_a = "github:github.com/acme/saas#11"
+    target_b = "github:github.com/acme/dashboard#707"
+    joined = "\n".join(sorted([target_a, target_b]))
+    set_id = "sha256:" + hashlib.sha256(joined.encode("utf-8")).hexdigest()
+    stable = set_id[7:19]
+    gid = "a" * 20
+    uid = "b" * 20
+    return stable, set_id, f"""# Review set {stable} Code Review 比較報告
+
+**Report projection schema**: 3
+**Review set identity**: {set_id}
+**Review set targets**: {target_b} · {target_a}
+**Target versions**: {target_b}=head:{'d'*40}|base:{'e'*40}|state:current; {target_a}=head:{'b'*40}|base:{'c'*40}|state:current
+**Prior review continuity**: N-A (no prior audit)
+
+## 跨目標位置
+
+| group_id | finding_uid | target_identity | file | line | source |
+|---|---|---|---|---|---|
+| {gid} | {uid} | {target_a} | src/a.ts | 10 | cc |
+
+## 上一輪 findings 對帳
+
+N-A — no prior audit
+
+## 發現總覽
+
+| # | 問題 | 最終建議 | Action | Action 理由 |
+|---|---|---|---|---|
+| F-01 | 問題 | Should Fix | `auto-fix` | 修法明確 |
+
+auto-fix 只是處置建議；沒有使用者另行下令，不修改 code、commit、push 或 PR。
+
+F-01 finding_uid: {gid} action=auto-fix
+
+### Inline Comments per Finding
+
+#### #1 問題
+**File**: src/a.ts
+**Line**: 10
+
+**Comment**:
+```
+ACTIONABLE_PAYLOAD
+```
+"""
+
+  def test_full_five_column_row_with_unescaped_pipe_inside_code_span_is_rejected(self):
+    module = load_module()
+    source = minimal_report().replace(
+      "| F-01 | 問題 | Should Fix | auto-fix | 修法明確 |",
+      "| F-01 | `left | right` 會失效 | Should Fix | auto-fix | 修法明確 |",
+    )
+    with self.assertRaisesRegex(ValueError, "finding-summary-structure.*finding-rows.*got 6 columns, expected 5"):
+      module.project_report(source, "pr-1-review.audit.md", require_schema=True)
+
+  def test_group_identity_rejects_trailing_garbage_and_overlong_hash(self):
+    module = load_module()
+    _, set_id, report = self._valid_group_report()
+    for mutated in (
+      report.replace(set_id, f"{set_id} trailing-junk"),
+      report.replace(set_id, f"{set_id}deadbeef"),
+    ):
+      with self.subTest(mutated=mutated[:180]):
+        with self.assertRaisesRegex(ValueError, "review-set-identity"):
+          module.project_group_report(mutated, "set-x-review.audit.md", require_schema=True)
+
+  def test_group_title_stable_id_handles_leading_blank_line_and_rejects_mismatch_without_expected_id(self):
+    module = load_module()
+    stable, _, report = self._valid_group_report()
+    module.validate_group_source_contract("\n\n" + report, require_schema=True, expected_stable_id=stable)
+
+    wrong_title = report.replace(f"# Review set {stable} ", "# Review set 000000000000 ")
+    with self.assertRaisesRegex(ValueError, "title-stable-id|identity"):
+      module.project_group_report(wrong_title, "set-x-review.audit.md", require_schema=True)
+
+  def test_continuity_rejects_fenced_na_and_bad_separator_width_and_trailing_garbage(self):
+    module = load_module()
+    fenced_na = schema2_report().replace(
+      "N-A — no prior audit",
+      "```\nN-A — no prior audit\n```",
+    )
+    with self.assertRaisesRegex(ValueError, "prior-review-continuity"):
+      module.project_report(fenced_na, "pr-1-review.audit.md", require_schema=True)
+
+    checked = schema2_report().replace(
+      "**Prior review continuity**: N-A (no prior audit)",
+      "**Prior review continuity**: CHECKED (fixed 0 / still-open 1 / stale 0)",
+    ).replace(
+      "N-A — no prior audit",
+      "| 前輪 finding_uid | 問題 | 狀態 | 本輪證據 |\n|---|---|\n| `fedcba9876543210fedc` | 舊問題 | `STILL_OPEN` | `src/old.ts:8` |",
+    )
+    with self.assertRaisesRegex(ValueError, "prior-review-continuity"):
+      module.project_report(checked, "pr-1-review.audit.md", require_schema=True)
+
+    trailing_garbage = schema2_report().replace(
+      "**Prior review continuity**: N-A (no prior audit)",
+      "**Prior review continuity**: CHECKED (fixed 0 / still-open 1 / stale 0)",
+    ).replace(
+      "N-A — no prior audit",
+      "| 前輪 finding_uid | 問題 | 狀態 | 本輪證據 |\n|---|---|---|---|\n| `fedcba9876543210fedc` | 舊問題 | `STILL_OPEN` | `src/old.ts:8` |\n\nunexpected bogus row",
+    )
+    with self.assertRaisesRegex(ValueError, "prior-review-continuity"):
+      module.project_report(trailing_garbage, "pr-1-review.audit.md", require_schema=True)
+
+  def test_canonical_report_identity_uses_resolved_filename_not_symlink_alias(self):
+    module = load_module()
+    repo_dir = REPORT_ROOT / "tmp-canon-sym-test"
+    repo_dir.mkdir(parents=True, exist_ok=True)
+    self.addCleanup(lambda: (
+      (repo_dir / "pr-1-review.md").unlink(missing_ok=True),
+      (repo_dir / "not-canonical.md").unlink(missing_ok=True),
+      repo_dir.rmdir() if repo_dir.exists() else None,
+    ))
+    real_target = repo_dir / "not-canonical.md"
+    real_target.write_text("hi")
+    alias = repo_dir / "pr-1-review.md"
+    alias.symlink_to(real_target)
+    with self.assertRaisesRegex(ValueError, "canonical PR report names"):
+      module.canonical_report_identity(alias)
+
+  def test_assert_distinct_report_paths_rejects_symlinked_lock_path(self):
+    module = load_module()
+    with tempfile.TemporaryDirectory() as tmp:
+      root = Path(tmp)
+      draft, audit, main = report_paths(root, number=1)
+      target = root / "real.lock"
+      target.write_text("")
+      lock_path = main.with_name(f".{main.name}.lock")
+      lock_path.symlink_to(target)
+      with self.assertRaisesRegex(ValueError, "symbolic links"):
+        module.assert_distinct_report_paths((draft, audit, main), lock_path)
 
 
 if __name__ == "__main__":

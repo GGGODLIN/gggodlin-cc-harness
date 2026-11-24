@@ -767,5 +767,151 @@ class SelfLifecycle(GateCase):
     self.assertNotEqual(proc.returncode, 0)
 
 
+class FileSnapshotPrecheck(GateCase):
+  """FILE_SNAPSHOT 選用標頭預檢：內嵌模式不要求標頭；殘缺標頭攔截且不耗單次額度。"""
+
+  def snapshot_input(self, prompt_body, skill="auto-choice"):
+    return {
+      "description": f"Self-Verify skill-verify:{skill}",
+      "prompt": prompt_body,
+      "subagent_type": "skill-verify-auditor",
+      "model": "sonnet",
+    }
+
+  def test_embedded_mode_without_file_snapshot_allows_and_consumes_quota(self):
+    embedded = (
+      "你是 adversarial 合規審查員...\n"
+      "帳本原文：\n## 決定 1\n  SNAPSHOT_PATH: 內嵌引述縮排行不觸發讀檔模式\n> AUDIT_INPUT_MODE: FILE_SNAPSHOT\n"
+    )
+    first, _ = self.verdict(self.run_gate("pre-agent", self.agent_payload(self.snapshot_input(embedded))))
+    self.assertIsNone(first, "一般全文內嵌模式不得要求 FILE_SNAPSHOT 標頭")
+    self.assertEqual(len(self.claim_files()), 1)
+
+    second, reason = self.verdict(self.run_gate("pre-agent", self.agent_payload(self.snapshot_input(embedded))))
+    self.assertEqual(second, "deny")
+    self.assertIn("額度已使用", reason)
+
+  def test_valid_three_line_file_snapshot_allows_and_consumes_quota(self):
+    snap = self.tmp / "choices-snapshot.md"
+    snap.write_text("# Choices\nline 2\nline 3\n", encoding="utf-8")
+    valid_prompt = (
+      f"AUDIT_INPUT_MODE: FILE_SNAPSHOT\n"
+      f"SNAPSHOT_PATH: {snap}\n"
+      f"SNAPSHOT_TOTAL_LINES: 3\n\n"
+      f"逐條檢查 R1..R5..."
+    )
+    first, _ = self.verdict(self.run_gate("pre-agent", self.agent_payload(self.snapshot_input(valid_prompt))))
+    self.assertIsNone(first)
+    self.assertEqual(len(self.claim_files()), 1)
+
+    second, reason = self.verdict(self.run_gate("pre-agent", self.agent_payload(self.snapshot_input(valid_prompt))))
+    self.assertEqual(second, "deny")
+    self.assertIn("額度已使用", reason)
+
+  def test_partial_or_malformed_snapshot_headers_deny_without_consuming_quota(self):
+    snap = self.tmp / "real-snapshot.md"
+    snap.write_text("line 1\nline 2\n", encoding="utf-8")
+    symlink_snap = self.tmp / "link-snapshot.md"
+    symlink_snap.symlink_to(snap)
+    sub_dir = self.tmp / "dir-snapshot"
+    sub_dir.mkdir()
+
+    bad_prompts = [
+      f"AUDIT_INPUT_MODE: FILE_SNAPSHOT\nSNAPSHOT_PATH: {snap}\n\nrubric",
+      "AUDIT_INPUT_MODE: FILE_SNAPSHOT\nSNAPSHOT_TOTAL_LINES: 2\n\nrubric",
+      f"SNAPSHOT_PATH: {snap}\nSNAPSHOT_TOTAL_LINES: 2\n\nrubric",
+      "SNAPSHOT_TOTAL_LINES: 2\n\nrubric",
+      f"AUDIT_INPUT_MODE: SNAPSHOT\nSNAPSHOT_PATH: {snap}\nSNAPSHOT_TOTAL_LINES: 2\n",
+      "AUDIT_INPUT_MODE: FILE_SNAPSHOT\nSNAPSHOT_PATH: relative/snap.md\nSNAPSHOT_TOTAL_LINES: 2\n",
+      f"AUDIT_INPUT_MODE: FILE_SNAPSHOT\nSNAPSHOT_PATH: {self.tmp / 'missing.md'}\nSNAPSHOT_TOTAL_LINES: 2\n",
+      f"AUDIT_INPUT_MODE: FILE_SNAPSHOT\nSNAPSHOT_PATH: {symlink_snap}\nSNAPSHOT_TOTAL_LINES: 2\n",
+      f"AUDIT_INPUT_MODE: FILE_SNAPSHOT\nSNAPSHOT_PATH: {sub_dir}\nSNAPSHOT_TOTAL_LINES: 2\n",
+      f"AUDIT_INPUT_MODE: FILE_SNAPSHOT\nSNAPSHOT_PATH: {snap}\nSNAPSHOT_TOTAL_LINES: 0\n",
+      f"AUDIT_INPUT_MODE: FILE_SNAPSHOT\nSNAPSHOT_PATH: {snap}\nSNAPSHOT_TOTAL_LINES: <N>\n",
+      f"AUDIT_INPUT_MODE: FILE_SNAPSHOT\nSNAPSHOT_PATH: {snap}\nSNAPSHOT_PATH: {snap}\nSNAPSHOT_TOTAL_LINES: 2\n",
+      "AUDIT_INPUT_MODE: FILE_SNAPSHOT\nSNAPSHOT_PATH: /tmp/bad‮\x1b[31mname.md\nSNAPSHOT_TOTAL_LINES: 2\n",
+    ]
+    for bad in bad_prompts:
+      with self.subTest(bad=bad.splitlines()[0]):
+        verdict, reason = self.verdict(self.run_gate("pre-agent", self.agent_payload(self.snapshot_input(bad))))
+        self.assertEqual(verdict, "deny")
+        self.assertIn("FILE_SNAPSHOT", reason)
+        self.assertNotIn("‮", reason)
+        self.assertNotIn("\x1b", reason)
+        self.assertEqual(self.claim_files(), [], "殘缺快照標頭不得消耗單次額度")
+
+    fixed_prompt = (
+      f"AUDIT_INPUT_MODE: FILE_SNAPSHOT\n"
+      f"SNAPSHOT_PATH: {snap}\n"
+      f"SNAPSHOT_TOTAL_LINES: 2\n\n"
+      f"rubric..."
+    )
+    allowed, _ = self.verdict(self.run_gate("pre-agent", self.agent_payload(self.snapshot_input(fixed_prompt))))
+    self.assertIsNone(allowed, "補齊三行標頭後同一回合仍應成功派工")
+    self.assertEqual(len(self.claim_files()), 1)
+
+  def test_already_spent_quota_still_returns_quota_deny_on_malformed_snapshot(self):
+    self.assertIsNone(self.verdict(self.run_gate("pre-agent", self.agent_payload(self.snapshot_input("embedded full ledger"))))[0])
+    verdict, reason = self.verdict(
+      self.run_gate("pre-agent", self.agent_payload(self.snapshot_input("SNAPSHOT_PATH: /nope\n")))
+    )
+    self.assertEqual(verdict, "deny")
+    self.assertIn("額度已使用", reason)
+
+  def test_rba_live_transcript_jsonl_denied_without_consuming_quota_and_sidecar_allowed(self):
+    bad_inputs = [
+      "證據在 ~/.claude/projects/-Users-you-Desktop-projects/11111111-2222-3333-4444-555555555555.jsonl 第 100 行",
+      "請讀 ~/.claude-alt/projects/-Users-you-Desktop-projects/abc123.jsonl",
+    ]
+    for prompt in bad_inputs:
+      tool_input = {
+        "subagent_type": "skill-verify-auditor",
+        "description": "skill-verify:research-before-answer audit draft",
+        "prompt": prompt,
+      }
+      verdict, reason = self.verdict(self.run_gate("pre-agent", self.agent_payload(tool_input)))
+      self.assertEqual(verdict, "deny")
+      self.assertIn("活動對話紀錄檔", reason)
+      self.assertEqual(self.claim_files(), [], "攔截活動 JSONL 不得消耗單次額度")
+
+    # Known-good: scratchpad evidence sidecar (even .jsonl outside ~/.claude*/projects/) is allowed
+    good_input = {
+      "subagent_type": "skill-verify-auditor",
+      "description": "skill-verify:research-before-answer audit draft",
+      "prompt": "證據在 /private/tmp/claude-501/scratchpad/rba-evidence/gh-api.txt 第 1-20 行（另附 /tmp/sample.jsonl）",
+    }
+    allowed, _ = self.verdict(self.run_gate("pre-agent", self.agent_payload(good_input)))
+    self.assertIsNone(allowed)
+    self.assertEqual(len(self.claim_files()), 1)
+
+  def test_rba_post_agent_violations_emits_sidecar_sync_reminder_and_compliant_stays_silent(self):
+    tool_input = {
+      "subagent_type": "skill-verify-auditor",
+      "description": "skill-verify:research-before-answer audit draft",
+      "prompt": "full draft",
+    }
+    fail_payload = {
+      "session_id": "sess-rba-post",
+      "tool_name": "Agent",
+      "tool_input": tool_input,
+      "tool_response": "R1: PASS\nR2: FAIL — mismatch\nVERDICT: VIOLATIONS: R2\nagentId: a1b2c3d4e5f6",
+    }
+    res_fail = self.run_gate("post-agent", fail_payload)
+    self.assertEqual(res_fail.returncode, 0)
+    data = json.loads(res_fail.stdout)["hookSpecificOutput"]
+    self.assertEqual(data["hookEventName"], "PostToolUse")
+    self.assertIn("rba-sidecar-sync", data["additionalContext"])
+
+    ok_payload = {
+      "session_id": "sess-rba-post",
+      "tool_name": "Agent",
+      "tool_input": tool_input,
+      "tool_response": "R1: PASS\nVERDICT: COMPLIANT\nagentId: f6e5d4c3b2a1",
+    }
+    res_ok = self.run_gate("post-agent", ok_payload)
+    self.assertEqual(res_ok.returncode, 0)
+    self.assertEqual(json.loads(res_ok.stdout), {})
+
+
 if __name__ == "__main__":
   unittest.main(verbosity=2)

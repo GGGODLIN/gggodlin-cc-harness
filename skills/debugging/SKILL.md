@@ -217,6 +217,7 @@ Before proposing a fix:
    - Test passes now?
    - No other tests broken?
    - Issue actually resolved?
+   - If the confirmed root cause is a recurring coding mistake inside a single product repo (≥2 independent occurrences) that architecture, types, or a lint rule could prevent, offer once after verification whether to invoke `Skill(repo-guard)` to encode it (never expand the fix without consent).
 
 4. **If Fix Doesn't Work**
    - STOP

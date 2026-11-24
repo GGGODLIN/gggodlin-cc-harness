@@ -3,7 +3,6 @@
 import argparse
 import importlib.util
 import json
-import os
 import re
 import subprocess
 import sys
@@ -11,42 +10,22 @@ from pathlib import Path
 
 
 TARGETS_SCRIPT = Path(__file__).with_name("pr-review-targets.py")
+CONFIG_ROOT = Path(__file__).resolve().parents[1]
+SEAT_SCRIPTS = CONFIG_ROOT / "skills/agent-dispatch/scripts"
+SEAT_CATALOG = CONFIG_ROOT / "config/second-opinion-seats.json"
 MATERIALS_DIRNAME = "materials"
 CHANNELS_DIRNAME = "channels"
+# The target-selection contract still uses "agy" as the key for both Gemini angles.
 SEAT_ANGLE = {
-  "gemini-pro": {"seat": "agy", "angle": "Gemini Pro", "source": "gemini",
-                 "command": "agy", "default_model": "Gemini 4 Argon (High)"},
-  "gemini-flash": {"seat": "agy", "angle": "Gemini Flash", "source": "gemini",
-                   "command": "agy", "default_model": None},
+  "gemini-pro": {"seat": "agy", "angle": "Gemini Pro", "source": "gemini"},
+  "gemini-flash": {"seat": "agy", "angle": "Gemini Flash", "source": "gemini"},
   "web-gpt": {"seat": "web-gpt", "angle": "web GPT Pro", "source": "web",
-              "command": "web-cli", "default_model": "web-gpt-pro"},
+              "default_model": "web-gpt-pro"},
 }
-INTERFACE_REQUIREMENT = {
-  "gemini-pro": "agy",
-  "gemini-flash": "agy",
-  "web-gpt": "web-cli_chatgpt_ask",
-}
+INTERFACE_REQUIREMENT = {"web-gpt": "web-cli_chatgpt_ask"}
 SEVERITY_TO_SUGGESTION = {
   "CRITICAL": "Must Fix", "HIGH": "Must Fix", "MEDIUM": "Should Fix", "LOW": "參考用",
 }
-# Argon runs through the user's Argon endpoint before falling back to agy, which
-# runs as the fallback CLI path. Hooks, MCP and user settings are dropped because
-# they add unnecessary input tokens to every review and are irrelevant to a read-only reviewer; the
-# reviewed repo's project settings are dropped too, since their allow rules could re-enable writes.
-ARGON_MAGPIE_MODEL = "google/gemini-4-argon:high"
-CCP_ARGON_SCRIPT = (
-  "printf '%s\\n' 'harness: wiring point \"後端標記 CC_VENDOR\" is not provided in this public copy; see WIRING.md' >&2; exit 1 "
-  '&& cd "$1" && shift && ccp-gemini-argon "$@"'
-)
-CCP_ARGON_FLAGS = (
-  "--output-format", "json", "--permission-mode", "dontAsk", "--no-session-persistence",
-  "--settings", '{"disableAllHooks": true}', "--strict-mcp-config", "--setting-sources", "local",
-  "--allowedTools", "Read", "Grep", "Glob", "Bash(git diff:*)", "Bash(git show:*)", "Bash(git log:*)",
-)
-FALLBACK_WHEN = (
-  "primary 不可用才跑：Argon 端點不通、非 0 結束、stdout 不是 JSON envelope、"
-  "或 envelope 的 is_error 為 true"
-)
 PROMPT_HEADER = (
   "DO NOT ASK FOR CONFIRMATION. The PR scope below is ALREADY confirmed — begin code review "
   "immediately and produce the JSON output. Any text other than the final JSON array is forbidden."
@@ -91,13 +70,6 @@ def channel_for(payload):
   channel = str(payload.get("channel") or "")
   spec = SEAT_ANGLE.get(channel)
   return channel, spec
-
-
-def requested_model(payload, spec):
-  if spec["default_model"] is None:
-    model = str(payload.get("model") or os.environ.get("GEMINI_FLASH_MODEL") or "")
-    return model or None
-  return str(payload.get("model") or spec["default_model"])
 
 
 def capacity_gate(state):
@@ -207,7 +179,7 @@ def gemini_prompt(channel, spec, model, targets, spec_block=None):
         + (f" review_diff={diff_file}" if diff_file else "")
       )
   if any(not is_range(target) and target.get("review_diff") for target in targets):
-    # The Argon allowlist only matches `git diff`/`git show`/`git log` prefixes, so a `git -C <root> diff`
+    # The Gemini Pro allowlist only matches `git diff`/`git show`/`git log` prefixes, so a `git -C <root> diff`
     # against any root but the cwd is denied and the reviewer ends up with no diff at all.
     lines.extend([
       "",
@@ -355,45 +327,34 @@ def packet_target(target):
   return packet
 
 
-def ccp_argon_execution(prompt, targets):
+def gemini_seat_execution(channel, spec, targets, spec_block):
   cwd = targets[0]["review_root"]
+  seat_id = f"pr-review-{channel}"
+  catalog = json.loads(SEAT_CATALOG.read_text())
+  seat = next(item for item in catalog["seats"] if item["id"] == seat_id)
+  model = f"{seat['main_group']}:{seat['effort']}"
   return {
-    "command": "zsh",
+    "command": "python3",
     "role": "primary",
-    "via": "ccp-gemini-argon",
+    "via": seat_id,
+    "requested_model": model,
     "argv": [
-      "-c", CCP_ARGON_SCRIPT, "ccp-gemini-argon", cwd,
-      "-p", prompt, *CCP_ARGON_FLAGS,
+      str(SEAT_SCRIPTS / "open-seat.py"), seat_id, "<brief-file>", cwd,
+      "--log-dir", "<seat-log-dir>",
       *(item for target in targets for item in add_dirs(target)),
     ],
+    "finish_argv": [str(SEAT_SCRIPTS / "finish-seat.py"), "<receipt.json>"],
     "cwd": cwd,
-    "prompt": prompt,
+    "prompt": gemini_prompt(channel, spec, model, targets, spec_block),
     "stdin": "/dev/null",
-    "requested_model": ARGON_MAGPIE_MODEL,
-    "reply": "stdout 是 JSON envelope：.result 是模型回覆、.modelUsage 的 key 是實際模型、.is_error 為 true 視同失敗",
+    "reply": "收席 stdout 的 JSON 作為 collect 的 seat_result，由 collect 保留既有 reply envelope",
   }
 
 
-def build_executions(channel, spec, model, targets, spec_block=None):
-  if spec["command"] == "agy":
-    prompt = gemini_prompt(channel, spec, model, targets, spec_block)
-    argv = [
-      f"--print={prompt}",
-      f"--model={model}",
-      "--dangerously-skip-permissions",
-      *(item for target in targets for item in add_dirs(target)),
-      "--print-timeout", "10m",
-    ]
-    agy = {
-      "command": "agy",
-      "argv": argv,
-      "prompt": prompt,
-      "stdin": "/dev/null",
-      "requested_model": model,
-    }
-    if channel != "gemini-pro":
-      return [agy]
-    return [ccp_argon_execution(prompt, targets), {**agy, "role": "fallback", "run_if": FALLBACK_WHEN}]
+def build_executions(channel, spec, payload, targets, spec_block=None):
+  if spec["source"] == "gemini":
+    return [gemini_seat_execution(channel, spec, targets, spec_block)]
+  model = str(payload.get("model") or spec["default_model"])
   import sys; sys.stderr.write('harness: wiring point "ChatGPT 網頁版席位" is not provided in this public copy; see WIRING.md\n'); sys.exit(1)
 
 
@@ -401,9 +362,12 @@ def materials(payload):
   channel, spec = channel_for(payload)
   if spec is None:
     return {"status": "ERROR", "reason_codes": ["UNKNOWN_CHANNEL"]}
-  interface = payload.get("interface") or {}
-  requirement = INTERFACE_REQUIREMENT[channel]
-  if interface.get(requirement) is False:
+  raw_interface = payload.get("interface")
+  if raw_interface is not None and not isinstance(raw_interface, dict):
+    return {"status": "ERROR", "reason_codes": ["INVALID_INTERFACE"]}
+  interface = raw_interface or {}
+  requirement = INTERFACE_REQUIREMENT.get(channel)
+  if requirement and interface.get(requirement) is False:
     return {
       "status": "INCOMPATIBLE_INTERFACE",
       "channel": channel,
@@ -444,31 +408,22 @@ def materials(payload):
       "executions": [],
       "dispatch_call_count": 0,
     }
-  if spec["default_model"] is None:
-    model = requested_model(payload, spec)
-    if not model:
-      return {
-        "status": "MODEL_UNAVAILABLE",
-        "channel": channel,
-        "reason": "GEMINI_FLASH_MODEL missing; model-routing.sh must resolve it before dispatch",
-        "executions": [],
-        "dispatch_call_count": 0,
-      }
-  else:
-    model = requested_model(payload, spec)
+  targets = state.get("targets")
+  if not isinstance(targets, list) or not targets:
+    return {"status": "ERROR", "reason_codes": ["NO_TARGETS"]}
   try:
-    spec_block = spec_context_block(state, state["targets"])
+    spec_block = spec_context_block(state, targets)
   except KeyError:
     return {"status": "ERROR", "reason_codes": ["SPEC_CONTENT_MISSING"]}
-  targets = state["targets"]
-  if spec["command"] == "agy":
+  if spec["source"] == "gemini":
     targets, reason, failed = with_review_diffs(targets)
     if failed:
       return {"status": "ERROR", "reason_codes": [reason], "failed_targets": failed}
   preparation_path = Path(str(payload.get("preparation_path"))).expanduser()
   channels_dir = preparation_path.parent / MATERIALS_DIRNAME / str(state.get("run_id")) / CHANNELS_DIRNAME
   channels_dir.mkdir(parents=True, exist_ok=True)
-  executions = build_executions(channel, spec, model, targets, spec_block)
+  executions = build_executions(channel, spec, payload, targets, spec_block)
+  model = executions[0]["requested_model"]
   packet = {
     "channel": channel,
     "seat": spec["seat"],
@@ -477,9 +432,9 @@ def materials(payload):
     "model": model,
     "targets": [packet_target(target) for target in targets],
     "executions": executions,
-    "interface_requirement": requirement,
-    "interface_available": interface.get(requirement, True),
   }
+  if requirement:
+    packet.update({"interface_requirement": requirement, "interface_available": interface.get(requirement, True)})
   packet_path = channels_dir / f"{channel}.packet.json"
   packet_path.write_text(json.dumps(packet, ensure_ascii=False, sort_keys=True))
   return {
@@ -492,15 +447,40 @@ def materials(payload):
     "packet_path": str(packet_path),
     "executions": executions,
     "targets": [target["target_identity"] for target in packet["targets"]],
-    "dispatch_call_count": sum(1 for item in executions if item.get("role") != "fallback"),
+    "dispatch_call_count": len(executions),
   }
+
+
+def fenced_json_blocks(text):
+  blocks = []
+  lines = text.splitlines()
+  index = 0
+  while index < len(lines):
+    opened = re.match(r"^ {0,3}(`{3,}|~{3,})(.*)$", lines[index])
+    if not opened:
+      index += 1
+      continue
+    marker = opened.group(1)
+    info = opened.group(2).strip().lower()
+    index += 1
+    body = []
+    closed = False
+    while index < len(lines):
+      if re.fullmatch(rf" {{0,3}}{re.escape(marker[0])}{{{len(marker)},}}\s*", lines[index]):
+        closed = True
+        index += 1
+        break
+      body.append(lines[index])
+      index += 1
+    if closed and info in ("", "json"):
+      blocks.append("\n".join(body))
+  return blocks
 
 
 def parse_output(text):
   raw = str(text or "")
   stripped = raw.strip()
-  fence = re.search(r"```(?:json)?\s*\n(.*?)\n```", stripped, re.DOTALL)
-  candidates = [stripped] + ([fence.group(1)] if fence else [])
+  candidates = [stripped, *fenced_json_blocks(stripped)]
   for candidate in candidates:
     try:
       value = json.loads(candidate)
@@ -516,23 +496,32 @@ def map_finding(finding, targets):
     return None
   identity = str(finding.get("target") or finding.get("target_identity") or "")
   declared = {target["target_identity"]: target for target in targets}
-  file_value = str(finding.get("file") or "")
+  file_value = str(finding.get("file") or "").strip()
+  if not file_value:
+    return None
   path = Path(file_value)
   if identity:
     if identity not in declared:
       return None
     target = declared[identity]
     root = Path(str(target["review_root"])).resolve()
-    relative = file_value
     if path.is_absolute():
       try:
         resolved = path.resolve()
       except (OSError, ValueError):
         return None
-      if not (resolved == root or resolved.is_relative_to(root)):
+      if resolved == root or not resolved.is_relative_to(root):
         return None
-      relative = str(resolved.relative_to(root))
-    return target["target_identity"], relative
+      return target["target_identity"], str(resolved.relative_to(root))
+    if ".." in path.parts:
+      return None
+    try:
+      resolved = (root / path).resolve()
+    except (OSError, ValueError):
+      return None
+    if resolved == root or not resolved.is_relative_to(root):
+      return None
+    return target["target_identity"], file_value
   if not path.is_absolute():
     return None
   matches = []
@@ -542,12 +531,44 @@ def map_finding(finding, targets):
       resolved = path.resolve()
     except (OSError, ValueError):
       continue
-    if resolved == root or resolved.is_relative_to(root):
+    if resolved != root and resolved.is_relative_to(root):
       matches.append((target, str(resolved.relative_to(root))))
   if len(matches) != 1:
     return None
   target, relative = matches[0]
   return target["target_identity"], relative
+
+
+def seat_reply(seat_result, channel):
+  if not isinstance(seat_result, dict) or seat_result.get("seat_id") != f"pr-review-{channel}":
+    return {"status": "error", "reason": "seat-failed: invalid seat identity"}
+  checks = seat_result.get("checks")
+  if not isinstance(checks, dict):
+    return {"status": "error", "reason": "seat-failed: invalid checks"}
+
+  failures = []
+  for name, check in checks.items():
+    if isinstance(check, dict) and check.get("passed") is True:
+      continue
+    violations = check.get("violations") if isinstance(check, dict) else None
+    tools = ", ".join(dict.fromkeys(
+      row["tool"] for row in (violations if isinstance(violations, list) else [])
+      if isinstance(row, dict) and isinstance(row.get("tool"), str) and row["tool"]))
+    failures.append(f"{name} ({tools})" if tools else name)
+
+  if failures:
+    return {"status": "error", "reason": "seat-failed: " + "; ".join(failures)}
+  if seat_result.get("status") != "success" or seat_result.get("opinion_usable") is not True:
+    return {"status": "error", "reason": "seat-failed"}
+
+  turns = checks.get("served_model", {}).get("turns")
+  if not isinstance(turns, list) or any(not isinstance(turn, dict) for turn in turns):
+    return {"status": "error", "reason": "seat-failed: invalid served_model.turns"}
+  models = [turn["served_model"].strip() for turn in turns if turn.get("role") == "main"
+            and isinstance(turn.get("served_model"), str) and turn["served_model"].strip()]
+  if not models:
+    return {"status": "error", "reason": "seat-failed: missing main served model"}
+  return {"status": "ok", "model": models[-1], "output": seat_result.get("answer")}
 
 
 def collect(payload):
@@ -556,8 +577,20 @@ def collect(payload):
     packet = json.loads(Path(str(packet_path)).expanduser().read_text())
   except (OSError, ValueError, TypeError):
     return {"status": "ERROR", "reason_codes": ["PACKET_NOT_FOUND"]}
-  reply = payload.get("reply") or {}
+  if (not isinstance(packet, dict)
+      or packet.get("channel") not in SEAT_ANGLE
+      or not isinstance(packet.get("targets"), list)
+      or any(not isinstance(target, dict) or "target_identity" not in target or "review_root" not in target
+             for target in packet["targets"])):
+    return {"status": "ERROR", "reason_codes": ["PACKET_INVALID"]}
+  raw_reply = payload.get("reply")
+  reply = raw_reply if isinstance(raw_reply, dict) else (
+    {} if raw_reply is None else {"status": "error", "reason": "invalid-reply"}
+  )
   channel = packet["channel"]
+  is_seat_result = "seat_result" in payload and SEAT_ANGLE[channel]["source"] == "gemini"
+  if is_seat_result:
+    reply = seat_reply(payload["seat_result"], channel)
   result = {
     "status": "OK",
     "channel": channel,
@@ -574,8 +607,10 @@ def collect(payload):
                                                         "reason": str(reply.get("reason") or "error")}]})
     return result
   accepted = {normalize_model(packet.get("model"))} | {
-    normalize_model(item.get("requested_model")) for item in packet.get("executions") or []}
-  if normalize_model(reply.get("model")) not in accepted:
+    normalize_model(item["requested_model"]) for item in packet.get("executions") or []
+    if item.get("requested_model")}
+  accepted.discard("")
+  if not is_seat_result and normalize_model(reply.get("model")) not in accepted:
     result.update({"status": "FAILED", "reason": "model-mismatch",
                    "failed_channels": [{"channel": channel, "reason": "model-mismatch"}]})
     return result
@@ -586,6 +621,9 @@ def collect(payload):
     return result
 
   for finding in parsed:
+    if not isinstance(finding, dict):
+      result["unmapped_findings"].append({"raw": finding})
+      continue
     mapped = map_finding(finding, packet["targets"])
     severity = str(finding.get("severity") or "").upper()
     if mapped is None:
@@ -622,12 +660,16 @@ def merge(payload):
   findings = []
   unmapped = []
   failed = []
-  for item in payload.get("channel_results") or []:
+  channel_results = payload.get("channel_results")
+  for item in channel_results if isinstance(channel_results, list) else []:
     if not isinstance(item, dict):
       continue
-    findings.extend(item.get("findings") or [])
-    unmapped.extend(item.get("unmapped_findings") or [])
-    failed.extend(item.get("failed_channels") or [])
+    if isinstance(item.get("findings"), list):
+      findings.extend(item["findings"])
+    if isinstance(item.get("unmapped_findings"), list):
+      unmapped.extend(item["unmapped_findings"])
+    if isinstance(item.get("failed_channels"), list):
+      failed.extend(item["failed_channels"])
   return {
     "status": "OK" if not failed else "PARTIAL",
     "findings": findings,
@@ -644,6 +686,10 @@ def main(argv=None):
   args = parser.parse_args(argv)
   try:
     payload = json.load(sys.stdin)
+    if not isinstance(payload, dict):
+      json.dump({"status": "ERROR", "reason_codes": ["INVALID_INPUT_JSON"]}, sys.stdout)
+      sys.stdout.write("\n")
+      return 1
     if args.mode == "materials":
       result = materials(payload)
     elif args.mode == "collect":

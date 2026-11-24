@@ -3,7 +3,7 @@ set -uo pipefail
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT="$DIR/ledger-index.py"
-TMP="$(mktemp -d /tmp/ledger-index-test.XXXXXX)"
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/ledger-index-test.XXXXXX")" || exit 1
 trap 'rc=$?; rm -rf "$TMP"; exit $rc' EXIT
 PASS=0
 FAIL=0

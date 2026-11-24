@@ -80,5 +80,28 @@ check "報告分已保存與原處已乾淨" "原處已乾淨"
 check "報告含保留欄" "保留／收尾後新增"
 check "快照 commit 前核對暫存區" "git diff --cached --name-only"
 
+check "驗證完接快取提醒" 'Git 判定完成後接第 7 步'
+check "提醒只讀資料碟可用空間" '只執行 `df -h /System/Volumes/Data` 讀取當下 `Avail`'
+check "提醒無門檻且不量快取" '不設空間門檻、不量快取大小、不掃家目錄'
+check "df 失敗仍提醒" '空間欄寫「讀取失敗」，仍附提醒'
+check "提醒不改 Git 判定或擋工作" '提醒不影響 READY／BLOCKED 判定，也不擋新工作'
+check "不清或未回即結束" '使用者沒回或說不用就結束，不追問'
+check "要清才進盤點" '只有使用者回「要清」時'
+check "盤點只查已知位置與專案" '只查已知位置與本輪已盤點的專案，不整批掃家目錄'
+check "每個 du 限時" '每個 `du -sh <path>` 都加 30 秒 timeout'
+check "量測逾時不當零" '不把未知當 0'
+check "uv 從實際設定定位" 'uv cache dir'
+check "包含 tokscale build 候選" 'tokscale/target'
+check "Docker 只盤點可回收資源" 'docker system df -v'
+check "Docker 禁用概括 prune" '不能以概括 prune 代替刪除清單'
+check "Docker volumes 保留" '不清 volumes'
+check "Go module cache 永遠排除" '永遠排除 Go module cache（`~/go/pkg/mod`'
+check "兩種索引與 Git 內容排除" 'cc-session-index 與 semble 的索引、任何 Git 追蹤或未提交的內容'
+check "刪除清單路徑大小與代價" '一次列出要刪的完整絕對路徑、實測大小（或逾時）、重建代價與擬執行操作'
+check "要清不是刪除授權" '「要清」只授權盤點，不是刪除同意'
+check "清理前變動須重問" '範圍改變就停止並重新取得同意'
+check "每種 verdict 都附末行" '上述每種回報（含 READY、BLOCKED、不適用）都在既有格式之後接第 7 步，只附一次末行'
+check "提醒實際文字" '資料碟可用空間：<Avail>。要不要順便清開發快取？'
+
 printf '\n%s PASS / %s FAIL\n' "$PASS" "$FAIL"
 [[ "$FAIL" -eq 0 ]]

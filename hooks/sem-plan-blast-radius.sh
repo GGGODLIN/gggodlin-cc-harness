@@ -4,7 +4,7 @@
 # parse 失敗一律 exit 0 不擋流程），與 review-spec-tier1-nudge.sh 同 pattern。
 # 補強而非依賴：sem 不在照樣跑。對應工具: sem (Ataraxy-Labs/sem)。trial — review 2026-06-22。
 set -euo pipefail
-export SEM_CACHE_DIR="${SEM_CACHE_DIR:-$HOME/.cache/sem}"
+export SEM_CACHE_DIR="${SEM_CACHE_DIR:-${HOME:-/tmp}/.cache/sem}"
 
 input=$(cat)
 file_path=$(printf '%s' "$input" | jq -r '.tool_input.file_path // ""' 2>/dev/null || echo "")

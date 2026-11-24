@@ -24,10 +24,13 @@ bug 內生於它的結構：`jq ... | while IFS= read -r err` 按**行**迭代�
 """
 
 import argparse
+import datetime as dt
 import json
+import math
 import os
 import re
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -46,6 +49,8 @@ RE_WS = re.compile(r"\s+")
 
 
 def normalize(text):
+    if not isinstance(text, str):
+        return ""
     s = RE_WS.sub(" ", text.lower())
     s = RE_PATH.sub("", s)
     s = RE_HEX.sub("", s)
@@ -58,14 +63,30 @@ def error_text(block):
     c = block.get("content")
     if isinstance(c, list):
         return " ".join(
-            x.get("text", "") for x in c if isinstance(x, dict) and x.get("type") == "text"
+            x["text"]
+            for x in c
+            if isinstance(x, dict) and x.get("type") == "text" and isinstance(x.get("text"), str)
         )
     return "" if c is None else str(c)
 
 
-def iter_errors(path):
+def _extract_date(ts):
+    if not isinstance(ts, str) or not (s := ts.strip()):
+        return ""
+    if s.endswith(("Z", "z")):
+        s = s[:-1] + "+00:00"
     try:
-        with open(path, errors="ignore") as f:
+        d = dt.datetime.fromisoformat(s)
+        if d.tzinfo is not None:
+            d = d.astimezone(dt.timezone.utc)
+    except (ValueError, OverflowError):
+        return ""
+    return d.date().isoformat()
+
+
+def _iter_error_records(path):
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
             for line in f:
                 if '"is_error"' not in line:
                     continue
@@ -73,36 +94,60 @@ def iter_errors(path):
                     d = json.loads(line)
                 except Exception:
                     continue
-                if d.get("type") != "user":
+                if not isinstance(d, dict) or d.get("type") != "user":
                     continue
-                content = (d.get("message") or {}).get("content")
+                msg = d.get("message")
+                if not isinstance(msg, dict):
+                    continue
+                content = msg.get("content")
                 if not isinstance(content, list):
                     continue
-                ts = d.get("timestamp") or ""
+                date_s = _extract_date(d.get("timestamp"))
                 for b in content:
                     if not isinstance(b, dict):
                         continue
-                    if b.get("type") != "tool_result" or not b.get("is_error"):
+                    if b.get("type") != "tool_result" or b.get("is_error") is not True:
                         continue
                     txt = error_text(b)
                     if txt:
-                        yield ts[:10], txt
+                        tuid = b.get("tool_use_id")
+                        tuid_s = tuid if isinstance(tuid, str) else ""
+                        yield date_s, txt, tuid_s
     except OSError:
         return
 
 
-def load_seen(ledger):
+def iter_errors(path):
+    for date_s, txt, _ in _iter_error_records(path):
+        yield date_s, txt
+
+
+def _load_seen_with_tids(ledger):
     seen = set()
+    seen_tids = set()
     rows = 0
     if ledger.exists():
-        with open(ledger, errors="ignore") as f:
+        with open(ledger, encoding="utf-8", errors="replace") as f:
             for line in f:
                 try:
                     d = json.loads(line)
                 except Exception:
                     continue
-                seen.add((d.get("sig"), d.get("session")))
+                if not isinstance(d, dict):
+                    continue
+                sig = d.get("sig")
+                session = d.get("session")
+                if isinstance(sig, str) and isinstance(session, str):
+                    seen.add((sig, session))
+                tid = d.get("tool_use_id")
+                if isinstance(tid, str) and tid:
+                    seen_tids.add(tid)
                 rows += 1
+    return seen, seen_tids, rows
+
+
+def load_seen(ledger):
+    seen, _, rows = _load_seen_with_tids(ledger)
     return seen, rows
 
 
@@ -113,20 +158,30 @@ def main():
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
+    if args.days is not None and args.days < 1:
+        print("Error: --days must be >= 1", file=sys.stderr)
+        return 2
+
+    if not PROJECTS.is_dir():
+        print(f"Error: projects directory does not exist: {PROJECTS}", file=sys.stderr)
+        return 2
+
     started = time.time()
     cutoff = None
     if args.rebuild:
-        cutoff = time.time() - (args.days or 180) * 86400
+        days = args.days if args.days is not None else 180
+        cutoff = started - days * 86400
     elif args.days is not None:
-        cutoff = time.time() - args.days * 86400
+        cutoff = started - args.days * 86400
     elif STATE.exists():
         cutoff = STATE.stat().st_mtime
 
     files = []
-    for p in PROJECTS.rglob("*.jsonl"):
+    for p in sorted(PROJECTS.rglob("*.jsonl")):
         if "/subagents/" in str(p):
             continue
         try:
+            # 檔案可能在游標所記錄的同一秒內追加資料，等於游標時也要重掃。
             if cutoff is not None and p.stat().st_mtime < cutoff:
                 continue
         except OSError:
@@ -134,52 +189,91 @@ def main():
         files.append(p)
 
     if args.rebuild:
-        seen, prior = set(), 0
+        seen, seen_tids, prior = set(), set(), 0
     else:
-        seen, prior = load_seen(LEDGER)
+        seen, seen_tids, prior = _load_seen_with_tids(LEDGER)
 
     out = []
     scanned = 0
     raw_errors = 0
+    fallback_date = time.strftime("%Y-%m-%d", time.gmtime(started))
     for p in files:
         scanned += 1
         session = p.stem
-        for date, txt in iter_errors(p):
+        for date, txt, tuid in _iter_error_records(p):
             raw_errors += 1
             sig = normalize(txt)
             if len(sig) < MIN_SIG_LEN:
+                continue
+            if tuid and tuid in seen_tids:
                 continue
             key = (sig, session)
             if key in seen:
                 continue
             seen.add(key)
-            out.append({"date": date or time.strftime("%Y-%m-%d"), "sig": sig, "session": session})
+            if tuid:
+                seen_tids.add(tuid)
+            row = {"date": date or fallback_date, "sig": sig, "session": session}
+            if tuid:
+                row["tool_use_id"] = tuid
+            out.append(row)
 
     if args.dry_run:
         print(
             f"DRY-RUN scanned={scanned} raw_errors={raw_errors} new_rows={len(out)} "
             f"prior_rows={prior} elapsed={time.time() - started:.1f}s"
         )
-        return
+        return 0
 
     LEDGER.parent.mkdir(parents=True, exist_ok=True)
     STATE.parent.mkdir(parents=True, exist_ok=True)
-    mode = "w" if args.rebuild else "a"
-    tmp = LEDGER.with_suffix(".jsonl.tmp")
     if args.rebuild:
-        with open(tmp, "w") as f:
-            for row in out:
-                f.write(json.dumps(row, ensure_ascii=False) + "\n")
-        os.replace(tmp, LEDGER)
+        tmp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                dir=LEDGER.parent,
+                prefix=LEDGER.name + ".",
+                suffix=".tmp",
+                delete=False,
+            ) as f:
+                tmp_path = f.name
+                for row in out:
+                    f.write(json.dumps(row, ensure_ascii=False) + "\n")
+            os.replace(tmp_path, LEDGER)
+            tmp_path = None
+        finally:
+            if tmp_path is not None:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
         total = len(out)
     else:
-        with open(LEDGER, mode) as f:
+        need_leading_nl = False
+        if out and LEDGER.exists():
+            try:
+                if LEDGER.stat().st_size > 0:
+                    with open(LEDGER, "rb") as rf:
+                        rf.seek(-1, os.SEEK_END)
+                        need_leading_nl = rf.read(1) != b"\n"
+            except OSError:
+                pass
+        with open(LEDGER, "a", encoding="utf-8") as f:
+            if need_leading_nl:
+                f.write("\n")
             for row in out:
                 f.write(json.dumps(row, ensure_ascii=False) + "\n")
         total = prior + len(out)
 
-    STATE.touch()
+    # 只在全量重建或常規增量模式更新游標；使用掃描起點而非結束時刻，避免掃描期間追加的錯誤下輪漏計
+    if args.rebuild or args.days is None:
+        STATE.touch()
+        cursor_ts = math.floor(started)
+        os.utime(STATE, (cursor_ts, cursor_ts))
     print(f"scanned={scanned} ledger_total={total}")
+    return 0
 
 
 if __name__ == "__main__":

@@ -18,30 +18,30 @@ cat <<'EOF'
 
 ## 前一日 follow-up
 
-## 💤 Lifecycle:stale 久未 refresh (建議 archive 或 promote 進 CLAUDE.md 後刪除)
+## Lifecycle:stale 久未 refresh (建議 archive 或 promote 進 CLAUDE.md 後刪除)
 （用 `### <slug>: stale 已 N 天` 格式列）
 
-## 📜 久未 changelog 但非 verified (建議升 lifecycle 或補 changelog)
+## 久未 changelog 但非 verified (建議升 lifecycle 或補 changelog)
 
-## ⚠️ Parse 失敗 (frontmatter 解析錯)
+## Parse 失敗 (frontmatter 解析錯)
 （列無法 parse frontmatter 的 entity；無寫「無」）
 
 ## 已掃但 fresh
 （snapshot 數字）
 
-## 🎯 今日推薦 actions
+## 今日推薦 actions
 ```
 
 `< 500 bytes` 視為 short-circuit。
 
 # Promote-status 標記處理
 
-`wiki_stale.override_until: YYYY-MM-DD` → 該 entity 在此日期前不 nudge、列在「⏸ HOLD」（額外段在「🎯 今日推薦 actions」前），標明 override 日期
+`wiki_stale.override_until: YYYY-MM-DD` → 該 entity 在此日期前不 nudge、列在「HOLD」（額外段在「今日推薦 actions」前），標明 override 日期
 
 # 判準
 
-1. **`lifecycle: stale` 已 N 天**: lifecycle 標為 stale，距 `last_updated:` > 30 天沒 refresh → 列「💤 Lifecycle:stale」
-2. **久未 changelog**: confidence 不是 stale、`lifecycle != verified`、最後 changelog entry > N 天 → 列「📜 久未 changelog」。N 按 frontmatter 選填欄 `volatility:` 分級（2026-07-12 加）：high → 30 天、medium → 90 天、low → 180 天、**留空 → 90 天（原預設不變）**
+1. **`lifecycle: stale` 已 N 天**: lifecycle 標為 stale，距 `last_updated:` > 30 天沒 refresh → 列「Lifecycle:stale」
+2. **久未 changelog**: confidence 不是 stale、`lifecycle != verified`、最後 changelog entry > N 天 → 列「久未 changelog」。N 按 frontmatter 選填欄 `volatility:` 分級（2026-07-12 加）：high → 30 天、medium → 90 天、low → 180 天、**留空 → 90 天（原預設不變）**
 
 注意：兩條判準互斥（lifecycle 是 stale 走 1、非 stale 走 2）。
 
@@ -90,19 +90,19 @@ cat <<'EOF'
 - **Confidence**: high (建議升 verified) / low (changelog 真的有變化要補)
 ```
 
-# 「🎯 今日推薦 actions」
+# 「今日推薦 actions」
 
 Priority:
 - HIGH = lifecycle:stale 已 60+ 天（建議 archive 或 promote 已逾期）
-- MED = lifecycle:stale 30-60 天 + 久未 changelog 180+ 天
-- LOW = 久未 changelog 90-180 天
+- MED = lifecycle:stale 30-60 天 + 久未 changelog（`volatility: high` 60+ 天；一般 medium/low/留空 180+ 天）
+- LOW = 久未 changelog（`volatility: high` 31-60 天；一般 medium/low/留空 90-180 天）
 
 # 前一日 follow-up
 
-抽昨日「💤 stale」+「📜 久未 changelog」段 entity → 看今日狀態：
+抽昨日「stale」+「久未 changelog」段 entity → 看今日狀態：
 - 已 archive (entity 不存在) → 標 ✅ 解決
-- lifecycle 升 verified → 標 ✅ refreshed
-- 加 `wiki_stale.override_until` → 移「⏸ HOLD」段
+- 已刷新（更新正文、`last_updated` 與 `Changelog` 轉回 fresh，維持原 `draft`／`reviewed` 不要求升 `verified`；或 `lifecycle` 升 `verified`）→ 標 ✅ refreshed
+- 加 `wiki_stale.override_until` → 移「HOLD」段
 
 # 紀律
 

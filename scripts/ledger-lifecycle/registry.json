@@ -151,6 +151,20 @@
       "owner": "skill authoring"
     },
     {
+      "path": "~/.claude/skills/inventory/*.md",
+      "kind": "state",
+      "threshold": [
+        {
+          "metric": "size",
+          "unit": "KB",
+          "operator": ">",
+          "value": 64
+        }
+      ],
+      "action": "只提醒，不自動改檔",
+      "owner": "skill authoring"
+    },
+    {
       "path": "~/Desktop/projects/example-owner-blog/docs/owner/blog-mechanisms.md",
       "kind": "state",
       "threshold": [

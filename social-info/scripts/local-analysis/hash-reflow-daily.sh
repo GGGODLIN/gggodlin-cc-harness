@@ -38,7 +38,7 @@ repos_arg, baseline_path, mode = sys.argv[1:4]
 # 與 2026-10-06 審計、hash-free-harness 收尾歸零同一條 regex；裸 hash／digest 刻意不抓。
 RE = re.compile(r"(sha-?(1|224|256|384|512)|\bmd5\b|hashlib|createHash|subtle\.digest|\.hexdigest\(|\bchecksum|\bblake2|\bhmac\b|sha256sum|shasum)", re.I)
 EXTS = {".py", ".sh", ".mjs", ".js", ".ts"}
-ROOT_EXCL = ("archive/", "trials/archive/", "openspec/changes/archive/", ".scratch/", "worktrees/", "plugins/",
+ROOT_EXCL = ("archive/", "retired/", "trials/archive/", "openspec/changes/archive/", ".scratch/", "worktrees/", "plugins/",
              "shell-snapshots/", "projects/", "cache/", "file-history/")
 ANY_EXCL = {"node_modules", ".venv", "venv", "site-packages", "vendor", "dist", "__pycache__", ".git"}
 

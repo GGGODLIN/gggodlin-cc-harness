@@ -11,9 +11,9 @@
 兩件事分開。本檔的輸出 100% 是衍生資料，砍掉重算隨時可以。
 
 設計取捨（拍板紀錄）：
-- **不收 latency**。p50/p95 算得出來，但同一則 assistant 訊息內並行發出的工具**共用一個
-  timestamp**，平行批次會系統性失真；且「多慢算慢」是使用者要定的門檻。沒有門檻與消費者
-  之前收集它，就會重演 OpenSpace 那個「量了一堆沒人看」的失敗模式。
+- **不收 latency**（單次呼叫延遲另由 `tool-latency` 統計）。2026-08-01 建檔時曾觀察同一則
+  assistant 訊息內並行發出的工具共用一個 timestamp；2026-11-10 實測確認 CC 每個區塊各有時間戳，
+  但同批工具耗時仍受序列／批次排程影響，故本檔只負責錯誤率歸因，延遲交由 `tool-latency` 處理。
 - **不設警報門檻**。第一次量，沒人知道 Agent 12.8% 算高還是正常。先讓數字可得、累積幾週
   有體感再定閾值——閾值拍歪的代價（誤報讓人以後忽略這個 channel）比沒閾值更糟。
 - **趨勢看週對週**，不是絕對值。這是使用者 2026-08-01 拍板：「第一次就先報，之後長期趨勢
@@ -37,36 +37,53 @@ import datetime as dt
 import json
 import os
 import sys
+import tempfile
 import time
 from collections import defaultdict
+from fractions import Fraction
 from pathlib import Path
 
 HOME = Path.home()
-PROJECTS = HOME / ".claude" / "projects"
-OUT = HOME / "code" / "social-info" / "reports" / "local-analysis" / "tool-reliability.jsonl"
+PROJECTS = Path(os.environ.get("TOOL_RELIABILITY_PROJECTS_DIR") or (HOME / ".claude" / "projects"))
+OUT = Path(
+    os.environ.get("TOOL_RELIABILITY_DATA_FILE")
+    or (HOME / "code" / "social-info" / "reports" / "local-analysis" / "tool-reliability.jsonl")
+)
 
 MIN_CALLS_FOR_RATE = 20
-DELTA_ALERT = 0.03
+DELTA_ALERT = Fraction(3, 100)
 HIGH_RATE = 0.15
 TOP_NOTABLE = 5
 
 
-def iso_week(ts):
-    if not ts:
+def _parse_ts_dt(ts):
+    if not isinstance(ts, str) or not (s := ts.strip()):
         return None
+    if s.endswith(("Z", "z")):
+        s = s[:-1] + "+00:00"
     try:
-        d = dt.datetime.fromisoformat(ts.replace("Z", "+00:00"))
-    except ValueError:
+        d = dt.datetime.fromisoformat(s)
+        if d.tzinfo is not None:
+            d = d.astimezone(dt.timezone.utc)
+    except (ValueError, OverflowError):
+        return None
+    return d
+
+
+def iso_week(ts):
+    d = _parse_ts_dt(ts)
+    if d is None:
         return None
     y, w, _ = d.isocalendar()
-    return f"{y}-W{w:02d}"
+    return f"{y:04d}-W{w:02d}"
 
 
-def scan_file(path):
+def scan_file(path, seen_tids=None, cutoff=None):
+    local_seen = seen_tids if seen_tids is not None else set()
     names = {}
     pairs = []
     try:
-        with open(path, errors="ignore") as f:
+        with open(path, encoding="utf-8", errors="replace") as f:
             for line in f:
                 if '"tool_use"' not in line and '"tool_result"' not in line:
                     continue
@@ -74,20 +91,29 @@ def scan_file(path):
                     d = json.loads(line)
                 except Exception:
                     continue
-                msg = d.get("message") or {}
+                if not isinstance(d, dict):
+                    continue
+                msg = d.get("message")
+                if not isinstance(msg, dict):
+                    continue
                 content = msg.get("content")
                 if not isinstance(content, list):
                     continue
                 if d.get("type") == "assistant":
                     for b in content:
                         if isinstance(b, dict) and b.get("type") == "tool_use":
-                            names[b.get("id")] = b.get("name")
+                            tid = b.get("id")
+                            name = b.get("name")
+                            if isinstance(tid, str) and tid and isinstance(name, str) and name:
+                                names.setdefault(tid, name)
                 elif d.get("type") == "user":
                     for b in content:
                         if isinstance(b, dict) and b.get("type") == "tool_result":
-                            pairs.append(
-                                (b.get("tool_use_id"), bool(b.get("is_error")), d.get("timestamp"))
-                            )
+                            tuid = b.get("tool_use_id")
+                            if isinstance(tuid, str) and tuid:
+                                pairs.append(
+                                    (tuid, b.get("is_error") is True, d.get("timestamp"))
+                                )
     except OSError:
         return []
     out = []
@@ -95,44 +121,88 @@ def scan_file(path):
         name = names.get(tid)
         if not name:
             continue
-        wk = iso_week(ts)
-        if wk:
-            out.append((wk, name, err))
+        d_ts = _parse_ts_dt(ts)
+        if d_ts is None:
+            continue
+        if cutoff is not None:
+            ev_dt = d_ts if d_ts.tzinfo is not None else d_ts.replace(tzinfo=dt.timezone.utc)
+            if ev_dt.timestamp() < cutoff:
+                continue
+        if tid in local_seen:
+            continue
+        local_seen.add(tid)
+        y, w, _ = d_ts.isocalendar()
+        out.append((f"{y:04d}-W{w:02d}", name, err))
     return out
 
 
 def write_agg(agg):
     OUT.parent.mkdir(parents=True, exist_ok=True)
-    tmp = OUT.with_suffix(".jsonl.tmp")
-    with open(tmp, "w") as f:
-        for (wk, tool), (calls, errors) in sorted(agg.items()):
-            rate = round(errors / calls, 4) if calls else 0.0
-            f.write(
-                json.dumps(
-                    {"week": wk, "tool": tool, "calls": calls, "errors": errors, "rate": rate},
-                    ensure_ascii=False,
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=OUT.parent,
+            prefix=OUT.name + ".",
+            suffix=".tmp",
+            delete=False,
+        ) as f:
+            tmp_path = f.name
+            for (wk, tool), (calls, errors) in sorted(agg.items()):
+                rate = round(errors / calls, 4) if calls else 0.0
+                f.write(
+                    json.dumps(
+                        {"week": wk, "tool": tool, "calls": calls, "errors": errors, "rate": rate},
+                        ensure_ascii=False,
+                    )
+                    + "\n"
                 )
-                + "\n"
-            )
-    os.replace(tmp, OUT)
+        os.replace(tmp_path, OUT)
+        tmp_path = None
+    finally:
+        if tmp_path is not None:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
 
 
 def report():
     rows = defaultdict(lambda: [0, 0])
     if not OUT.exists():
-        print("尚無資料，先跑一次 tool-reliability-extract.py")
-        return
-    with open(OUT, errors="ignore") as f:
+        print("尚無資料，先跑一次 tool-reliability-extract.py", file=sys.stderr)
+        return 1
+    with open(OUT, encoding="utf-8", errors="replace") as f:
         for line in f:
             try:
                 d = json.loads(line)
             except Exception:
                 continue
-            rows[(d["week"], d["tool"])] = [d["calls"], d["errors"]]
+            if not isinstance(d, dict):
+                continue
+            wk = d.get("week")
+            tool = d.get("tool")
+            calls = d.get("calls")
+            errors = d.get("errors")
+            if (
+                not isinstance(wk, str)
+                or not wk
+                or not isinstance(tool, str)
+                or not tool
+                or not isinstance(calls, int)
+                or isinstance(calls, bool)
+                or calls < 0
+                or not isinstance(errors, int)
+                or isinstance(errors, bool)
+                or errors < 0
+            ):
+                continue
+            rows[(wk, tool)] = [calls, errors]
     weeks = sorted({k[0] for k in rows})
     if not weeks:
-        print("尚無資料")
-        return
+        print("尚無資料", file=sys.stderr)
+        return 1
     cur = weeks[-1]
     prev = weeks[-2] if len(weeks) > 1 else None
 
@@ -145,9 +215,9 @@ def report():
             small_n += 1
             small_calls += calls
             continue
-        rate = errors / calls
+        rate = Fraction(errors, calls)
         pv = rows.get((prev, t)) if prev else None
-        prate = pv[1] / pv[0] if pv and pv[0] >= MIN_CALLS_FOR_RATE else None
+        prate = Fraction(pv[1], pv[0]) if pv and pv[0] >= MIN_CALLS_FOR_RATE else None
         sized.append((t, calls, errors, rate, prate))
 
     print(f"## 工具可靠度：{cur}" + (f"（對照 {prev}）" if prev else "（無前一週可比）"))
@@ -157,20 +227,20 @@ def report():
     for t, calls, errors, rate, prate in sized:
         if prate is not None and abs(rate - prate) >= DELTA_ALERT:
             notable.append((abs(rate - prate), t, calls, errors, rate, prate))
-        elif prate is None and rate >= HIGH_RATE:
+        elif prate is None and float(rate) >= HIGH_RATE:
             notable.append((rate, t, calls, errors, rate, None))
     notable.sort(reverse=True)
 
     if notable:
-        print(f"**值得看（錯誤率變動 ≥{DELTA_ALERT:.0%} 或新工具錯誤率 ≥{HIGH_RATE:.0%}）**")
+        print(f"**值得看（錯誤率變動 ≥{float(DELTA_ALERT):.0%} 或新工具錯誤率 ≥{HIGH_RATE:.0%}）**")
         print()
         for _, t, calls, errors, rate, prate in notable[:TOP_NOTABLE]:
             if prate is None:
-                print(f"- `{t}` {rate:.0%}（{errors}/{calls}）— 無前週基期")
+                print(f"- `{t}` {float(rate):.0%}（{errors}/{calls}）— 無前週基期")
             else:
-                d = rate - prate
+                delta = float(rate - prate)
                 print(
-                    f"- `{t}` {prate:.0%} → {rate:.0%}（{d:+.0%}，{errors}/{calls}）"
+                    f"- `{t}` {float(prate):.0%} → {float(rate):.0%}（{delta:+.0%}，{errors}/{calls}）"
                 )
         print()
     else:
@@ -182,8 +252,8 @@ def report():
     print("| 工具 | 呼叫 | 錯誤 | 錯誤率 | 前週 |")
     print("|---|---|---|---|---|")
     for t, calls, errors, rate, prate in sorted(sized, key=lambda x: -x[1]):
-        pr = f"{prate:.1%}" if prate is not None else "—"
-        print(f"| {t} | {calls} | {errors} | {rate:.1%} | {pr} |")
+        pr = f"{float(prate):.1%}" if prate is not None else "—"
+        print(f"| {t} | {calls} | {errors} | {float(rate):.1%} | {pr} |")
     print()
     print("</details>")
     print()
@@ -191,9 +261,14 @@ def report():
         f"（本週另有 {small_n} 個工具呼叫數 < {MIN_CALLS_FOR_RATE}、合計 {small_calls} 次，"
         f"分母太小不計比率；歷史週數 {len(weeks)}：{weeks[0]} → {weeks[-1]}）"
     )
+    return 0
 
 
 def main():
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     ap = argparse.ArgumentParser()
     ap.add_argument("--report", action="store_true")
     ap.add_argument("--days", type=int, default=None)
@@ -201,14 +276,22 @@ def main():
     args = ap.parse_args()
 
     if args.report:
-        report()
-        return
+        return report()
+
+    if args.days is not None and args.days < 1:
+        print("Error: --days must be >= 1", file=sys.stderr)
+        return 2
+
+    if not PROJECTS.is_dir():
+        print(f"Error: projects directory does not exist: {PROJECTS}", file=sys.stderr)
+        return 2
 
     started = time.time()
-    cutoff = time.time() - (args.days or 180) * 86400
+    days = args.days if args.days is not None else 180
+    cutoff = started - days * 86400
 
     files = []
-    for p in PROJECTS.rglob("*.jsonl"):
+    for p in sorted(PROJECTS.rglob("*.jsonl")):
         if "/subagents/" in str(p):
             continue
         try:
@@ -219,11 +302,12 @@ def main():
         files.append(p)
 
     agg = defaultdict(lambda: [0, 0])
+    seen_tids = set()
     scanned = 0
     added = 0
     for p in files:
         scanned += 1
-        for wk, tool, err in scan_file(p):
+        for wk, tool, err in scan_file(p, seen_tids=seen_tids, cutoff=cutoff):
             agg[(wk, tool)][0] += 1
             added += 1
             if err:
@@ -234,10 +318,11 @@ def main():
             f"DRY-RUN scanned={scanned} pairs={added} groups={len(agg)} "
             f"elapsed={time.time() - started:.1f}s"
         )
-        return
+        return 0
 
     write_agg(agg)
     print(f"scanned={scanned} pairs={added} groups={len(agg)}")
+    return 0
 
 
 if __name__ == "__main__":

@@ -159,7 +159,7 @@ def reminder(version, prefix, previous=0, automatic=False):
     message = f'''{prefix}
 
 先檢索既有 memory 與 index；相同主題優先更新／合併，沒有新資訊就略過，不因提醒而硬建新檔。
-按內容型別路由：feedback (工作習慣/糾正/確認過的做法、附 Why+How to apply) / reference (跨任務可轉移事實/坑/工具行為) / project (進行中專案脈絡/目標) / user (本人角色/偏好/處境)。決策連 rationale 一起記。精確值 (DSN/port/seed/完整命令列/路徑/version pin) 逐字保存不准摘要改寫。
+按內容型別路由：feedback (工作習慣/糾正/確認過的做法、附 Why+How to apply) / reference (跨任務可轉移事實/坑/工具行為) / project (進行中專案脈絡/目標) / user (本人角色/偏好/處境)。決策連 rationale 一起記；規則／拍板類筆記必列 Exceptions & Scope Limits 與關鍵原句，未見完成回件必標 planned/unverified。精確值 (DSN/port/seed/完整命令列/路徑/version pin) 逐字保存不准摘要改寫。
 
 ──────── 寫前必看規範（動態載入自 feedback_memory_cluster_maintenance.md Tier 1 段）────────
 
@@ -184,7 +184,7 @@ def reminder(version, prefix, previous=0, automatic=False):
 - cluster check 對 MEMORY.md `### Cluster indexes` 段
 - 跨 cluster cross-link (grep _index_*.md 看別處對位)
 - bump cluster frontmatter (N entries)
-- 決策保留 rationale，精確值逐字保存'''
+- 決策保留 rationale，規則／拍板必列 Exceptions & Scope Limits 與原句，未見完成回件標 planned/unverified，精確值逐字保存'''
   empty = ('這只是上一回合的可選提醒，不是寫入授權；本輪使用者要求優先。沒有候選就略過此 check，繼續本輪，不必額外回 skip。'
            if automatic else '沒東西要記 → 只回 "skip" 一字、不要解釋。')
   return CONTROL_RE.sub('', message + '\n\n' + empty)

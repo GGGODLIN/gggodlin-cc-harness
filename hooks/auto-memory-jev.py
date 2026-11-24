@@ -21,23 +21,45 @@ except ImportError:
     sys.exit(0)
   raise
 
+PPLX_MODEL = 'openrouter/perplexity/pplx-decider-v1.3:free'
+PPLX_BASE = 'http://127.0.0.1:8317'
+PPLX_TIMEOUT = 3.0
+PPLX_FALLS_TO_NEXT = ('pplx_quota_cooldown', 'missing_pplx_key', 'missing_zero_cost_evidence', 'unexpected_model')
+VERCEL_MODEL = 'vercel-decide/perplexity/pplx-decider-v1.3'
+VERCEL_CREDITS_BASE = 'https://ai-gateway.vercel.sh'
+VERCEL_CREDITS_TIMEOUT = 2.0
+VERCEL_TIMEOUT = 2.5
+VERCEL_MAX_FREE_USD = 5.0
+VERCEL_FALLS_TO_JEV = ('vercel_quota_cooldown', 'missing_pplx_key', 'missing_vercel_key',
+                       'vercel_free_not_confirmed', 'vercel_bad_response', 'unexpected_model')
+AMD_MODEL = 'amd-tokenlab/d3'
+AMD_TIMEOUT = 4.5
+AMD_MIN_BUDGET_S = 0.8
+AMD_POINTS_PER_INPUT_TOKEN = 3.5e-8  # AMD Token Lab input token 估算權重
+STOP_HOOK_BUDGET_S = 9.2
+TAIL_LEGS_RESERVE_S = 2.5
+AMD_FALLS_TO_JEV = ('amd_quota_cooldown', 'missing_pplx_key', 'missing_amd_key',
+                    'amd_bad_response', 'amd_budget_tight', 'unexpected_model')
 MODEL = 'type-safe/jev-latest:free'
 BASE = 'https://api.experientiallabs.ai'
-TIMEOUT = 1.5
+TIMEOUT = 1.2
 THRESHOLD = 0.5
 TAIL_FROM_BYTES = 64 * 1024 * 1024
 TAIL_START_BYTES = 8 * 1024 * 1024
-# 第二腿 Drex（nace，從贈額扣款、不在 free_guard 範圍）：Jev 免費層 429／逾時／冷卻中／免費價查核失敗才問。
+# 五腿順序（總逾時控制在 settings.json Stop 10 秒上限內）：1) OpenRouter Perplexity Decider v1.3 (:free)
+# → 2) Magpie vercel-decide/v1.3（使用免費點數層，每小時快取查 /v1/credits 確認為免費層且尚有餘額）
+# → 3) Magpie amd-tokenlab/d3（使用免費贈點備援，無 usage.cost 欄，剩餘時間夾限上限 4.5 秒）
+# → 4) Experiential Jev (:free) → 5) Drex（nace 贈額）。
 # 選 v2.0 不選 v1.5：2026-10-17 用本 hook 的 packet 對 120 個真實回合並列，v2.0 在 0.5 門檻觸發 11 次對 Jev 16 次、
 # 一致 107/120；v1.5 要 0.8 才對齊，而且多抓的是結案狀態回報。題目與門檻沿用、不另校。
 DREX_MODEL = 'drex-v2.0'
 DREX_BASE = 'https://console.nace.ai'
 DREX_USD_PER_INPUT_TOKEN = 6e-8  # console.nace.ai/docs/drex/reference/pricing：60 nUSD／input token，output 免費
-# 這些 Jev 失敗才換腿；nonzero_cost／missing_zero_cost_evidence 是免費契約被破壞，照舊停用、不讓 Drex 蓋過去。
+# 這些 Jev 失敗才換腿；nonzero_cost／missing_zero_cost_evidence 是免費契約被破壞，照舊停用或冷卻中止、不讓 Drex 蓋過去。
 JEV_FALLS_TO_DREX = ('quota_cooldown', 'missing_key', 'free_lane_not_confirmed', 'unexpected_model')
 # 題目唯一來源；凍結靠 auto-memory-jev.md 的 Locked 欄，hook 不自驗。
 QUESTION_FILE = Path(__file__).with_name('auto-memory-jev-question.json')
-SECRET = re.compile(r'sk-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10,}|AIza[0-9A-Za-z_-]{30,}|gsk_[A-Za-z0-9]{20,}|Bearer\s+[A-Za-z0-9._-]{24,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|(?:api[_-]?key|secret|token|password|passwd)["\']?\s*[:=]\s*["\']?[A-Za-z0-9_./+=-]{20,}', re.I)
+SECRET = re.compile(r'sk-[A-Za-z0-9_-]{16,}|vck_[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10,}|AIza[0-9A-Za-z_-]{30,}|gsk_[A-Za-z0-9]{20,}|Bearer\s+[A-Za-z0-9._-]{24,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|(?:api[_-]?key|secret|token|password|passwd)["\']?\s*[:=]\s*["\']?[A-Za-z0-9_./+=-]{20,}', re.I)
 MANUAL = re.compile(r'收尾|結案|save[-_ ]?session|寫.*memory|該記.{0,5}嗎|歸檔|promote.*wiki|記下來|記一下|存.{0,3}memory', re.I)
 PRIVATE = re.compile(r'不要(?:記|存)|別(?:記|存)|do not (?:remember|save)|don.t (?:remember|save)', re.I)
 SYNTHETIC = re.compile(r'^\s*(?:<|/|\[SYSTEM NOTIFICATION|\[Request interrupted)', re.I)
@@ -275,7 +297,7 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 def http(base, path, key, body=None, timeout=TIMEOUT):
   data = dump(body).encode() if body is not None else None
   request = urllib.request.Request(base + path, data=data, headers={
-    'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json'})
+    'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json', 'User-Agent': 'auto-memory-jev'})
   opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
   try:
     with opener.open(request, timeout=timeout) as response:
@@ -326,8 +348,213 @@ def reserve(directory, size):
     directory.write('budget.json', dump(state))
 
 
+def pplx_cooling(directory):
+  return json.loads(directory.read('budget.json') or '{}').get('pplx_cooldown_until', 0) > time.time()
+
+
+def pplx_endpoint():
+  if os.environ.get('JEV_MEMORY_TEST_MODE') == '1':
+    test_url = os.environ.get('JEV_MEMORY_PPLX_TEST_URL', '')
+    if not test_url:
+      raise ValueError('missing_pplx_key')
+    if not re.fullmatch(r'http://127\.0\.0\.1:\d+', test_url):
+      raise ValueError('invalid_test_endpoint')
+    return test_url, 'test-only-pplx'
+  keys_file = Path.home() / '.cli-proxy-api/keys.env'
+  if not keys_file.is_file():
+    raise ValueError('missing_pplx_key')
+  parsed = {}
+  for line in keys_file.read_text(encoding='utf-8', errors='replace').splitlines():
+    if '=' in line and not line.lstrip().startswith('#'):
+      k, v = line.split('=', 1)
+      parsed[k.strip()] = v.strip().strip('"').strip("'")
+  key = parsed.get('CLIPROXY_KEY_CC') or parsed.get('CLIPROXY_KEY_ADMIN') or ''
+  if not key:
+    raise ValueError('missing_pplx_key')
+  return PPLX_BASE, key
+
+
+def ask_pplx(directory, candidate, questions):
+  if pplx_cooling(directory):
+    raise ValueError('pplx_quota_cooldown')
+  base, key = pplx_endpoint()
+  try:
+    data = http(base, '/v1/systemone', key, {'model': PPLX_MODEL, 'state': candidate, 'questions': questions}, timeout=PPLX_TIMEOUT)
+  except urllib.error.HTTPError as error:
+    error.close()
+    if error.code in (400, 404, 429):
+      cooldown(directory, field='pplx_cooldown_until')
+    raise
+  usage = data.get('usage') or {}
+  cost = usage.get('cost')
+  if not is_zero(cost):
+    try:
+      paid = not isinstance(cost, bool) and math.isfinite(float(cost)) and float(cost) > 0
+    except (ValueError, TypeError):
+      paid = False
+    cooldown(directory, paid=paid, field='pplx_cooldown_until')
+    raise ValueError('nonzero_cost' if paid else 'missing_zero_cost_evidence')
+  returned = str(data.get('model') or '')
+  if returned != PPLX_MODEL and not returned.startswith('perplexity/pplx-decider-v1.3'):
+    raise ValueError('unexpected_model')
+  return data, PPLX_MODEL
+
+
+def vercel_cooling(directory):
+  try:
+    state = json.loads(directory.read('budget.json') or '{}')
+  except (json.JSONDecodeError, UnicodeDecodeError):
+    return False
+  until = state.get('vercel_cooldown_until', 0) if isinstance(state, dict) else 0
+  return isinstance(until, (int, float)) and not isinstance(until, bool) and until > time.time()
+
+
+def vercel_credits_endpoint():
+  if os.environ.get('JEV_MEMORY_TEST_MODE') == '1':
+    test_url = os.environ.get('JEV_MEMORY_VERCEL_CREDITS_TEST_URL', '')
+    if not test_url:
+      raise ValueError('missing_vercel_key')
+    if not re.fullmatch(r'http://127\.0\.0\.1:\d+', test_url):
+      raise ValueError('invalid_test_endpoint')
+    return test_url, 'test-only-vercel-credits'
+  key = subprocess.run(['security', 'find-generic-password', '-s', 'jev-api-key', '-w'],
+                       capture_output=True, text=True, timeout=1, check=True).stdout.strip()
+  if not key:
+    raise ValueError('missing_vercel_key')
+  return VERCEL_CREDITS_BASE, key
+
+
+def vercel_free_guard(directory, base, key):
+  try:
+    cache = json.loads(directory.read('vercel-free-credits.json') or '{}')
+  except (json.JSONDecodeError, UnicodeDecodeError):
+    cache = {}
+  if not isinstance(cache, dict):
+    cache = {}
+  checked_at = cache.get('checked_at', 0)
+  if (cache.get('model') == VERCEL_MODEL and isinstance(checked_at, (int, float))
+      and not isinstance(checked_at, bool) and 0 <= time.time() - checked_at < 3600):
+    if cache.get('free_ok') is False:
+      raise ValueError('vercel_free_not_confirmed')
+    if cache.get('free_ok') is True:
+      return
+  try:
+    data = http(base, '/v1/credits', key, timeout=VERCEL_CREDITS_TIMEOUT)
+  except (json.JSONDecodeError, UnicodeDecodeError) as error:
+    raise ValueError('vercel_bad_response') from error
+  except ValueError as error:
+    if str(error) == 'oversized_response':
+      raise ValueError('vercel_bad_response') from error
+    raise
+  if not isinstance(data, dict):
+    raise ValueError('vercel_bad_response')
+  raw_bal = data.get('balance')
+  try:
+    bal = float(raw_bal) if not isinstance(raw_bal, bool) and raw_bal is not None else float('nan')
+  except (ValueError, TypeError):
+    bal = float('nan')
+  # 僅在明確帶 token_pass: null 且餘額位於 (0, 5.0] 區間時確認為月贈免費點數池；正負結果皆快取一小時防重複外呼
+  free_ok = ('token_pass' in data and data['token_pass'] is None
+             and math.isfinite(bal) and (0.0 < bal <= VERCEL_MAX_FREE_USD))
+  directory.write('vercel-free-credits.json', dump({'model': VERCEL_MODEL, 'checked_at': time.time(), 'free_ok': free_ok}))
+  if not free_ok:
+    raise ValueError('vercel_free_not_confirmed')
+
+
+def ask_vercel(directory, candidate, questions):
+  if vercel_cooling(directory):
+    raise ValueError('vercel_quota_cooldown')
+  base, key = pplx_endpoint()
+  vc_base, vc_key = vercel_credits_endpoint()
+  vercel_free_guard(directory, vc_base, vc_key)
+  try:
+    data = http(base, '/v1/systemone', key, {'model': VERCEL_MODEL, 'state': candidate, 'questions': questions}, timeout=VERCEL_TIMEOUT)
+  except urllib.error.HTTPError as error:
+    error.close()
+    if error.code == 402:
+      try:
+        directory.write('vercel-free-credits.json', dump({'model': VERCEL_MODEL, 'checked_at': time.time(), 'free_ok': False}))
+      except OSError:
+        pass
+    if error.code in (402, 403, 404, 429):
+      cooldown(directory, field='vercel_cooldown_until')
+    raise
+  except (json.JSONDecodeError, UnicodeDecodeError) as error:
+    raise ValueError('vercel_bad_response') from error
+  except ValueError as error:
+    if str(error) == 'oversized_response':
+      raise ValueError('vercel_bad_response') from error
+    raise
+  if not isinstance(data, dict):
+    raise ValueError('vercel_bad_response')
+  answers = data.get('answers')
+  nudge = answers.get('direct_nudge') if isinstance(answers, dict) else None
+  if not isinstance(nudge, dict) or 'noul' not in nudge:
+    raise ValueError('vercel_bad_response')
+  returned = str(data.get('model') or '')
+  if returned != VERCEL_MODEL and not returned.startswith('perplexity/pplx-decider-v1.3'):
+    raise ValueError('unexpected_model')
+  return data, VERCEL_MODEL
+
+
+def amd_cooling(directory):
+  try:
+    state = json.loads(directory.read('budget.json') or '{}')
+  except (json.JSONDecodeError, UnicodeDecodeError):
+    return False
+  until = state.get('amd_cooldown_until', 0) if isinstance(state, dict) else 0
+  return isinstance(until, (int, float)) and not isinstance(until, bool) and until > time.time()
+
+
+def amd_endpoint():
+  if os.environ.get('JEV_MEMORY_TEST_MODE') == '1':
+    test_url = os.environ.get('JEV_MEMORY_AMD_TEST_URL', '')
+    if not test_url:
+      raise ValueError('missing_amd_key')
+    if not re.fullmatch(r'http://127\.0\.0\.1:\d+', test_url):
+      raise ValueError('invalid_test_endpoint')
+    return test_url, 'test-only-amd'
+  return pplx_endpoint()
+
+
+def ask_amd(directory, candidate, questions, hook_started=None):
+  if amd_cooling(directory):
+    raise ValueError('amd_quota_cooldown')
+  leg_timeout = AMD_TIMEOUT
+  if hook_started is not None:
+    avail = STOP_HOOK_BUDGET_S - (time.monotonic() - hook_started) - TAIL_LEGS_RESERVE_S
+    if avail < AMD_MIN_BUDGET_S:
+      raise ValueError('amd_budget_tight')
+    leg_timeout = min(AMD_TIMEOUT, avail)
+  base, key = amd_endpoint()
+  try:
+    data = http(base, '/v1/systemone', key, {'model': AMD_MODEL, 'state': candidate, 'questions': questions}, timeout=leg_timeout)
+  except urllib.error.HTTPError as error:
+    error.close()
+    if error.code in (400, 402, 403, 404, 429):
+      cooldown(directory, field='amd_cooldown_until')
+    raise
+  except (json.JSONDecodeError, UnicodeDecodeError) as error:
+    raise ValueError('amd_bad_response') from error
+  except ValueError as error:
+    if str(error) == 'oversized_response':
+      raise ValueError('amd_bad_response') from error
+    raise
+  if not isinstance(data, dict):
+    raise ValueError('amd_bad_response')
+  answers = data.get('answers')
+  nudge = answers.get('direct_nudge') if isinstance(answers, dict) else None
+  score = nudge.get('noul') if isinstance(nudge, dict) else None
+  if isinstance(score, bool) or not isinstance(score, (int, float)) or not math.isfinite(score) or not 0 <= score <= 1:
+    raise ValueError('amd_bad_response')
+  returned = str(data.get('model') or '')
+  if returned not in (AMD_MODEL, 'd3', 'vllm-sr/d3'):
+    raise ValueError('unexpected_model')
+  return data, AMD_MODEL
+
+
 def jev_cooling(directory):
-  # 冷卻只鎖 Jev 腿；預算（reserve）兩腿共用，所以不放在這裡
+  # 冷卻各自鎖該腿；預算（reserve）五腿共用，所以不放在這裡
   return json.loads(directory.read('budget.json') or '{}').get('cooldown_until', 0) > time.time()
 
 
@@ -379,17 +606,52 @@ def ask_drex(candidate, questions):
   return data, DREX_MODEL
 
 
-def cooldown(directory, paid=False):
+def cooldown(directory, paid=False, field='cooldown_until'):
   with directory.lock('budget.lock'):
     budget = json.loads(directory.read('budget.json') or '{}')
-    budget['cooldown_until'] = time.time() + 3600
+    budget[field] = time.time() + 3600
     directory.write('budget.json', dump(budget))
   if paid:
     with SafeDirectory(Path.home() / '.claude/hooks/state') as root:
       root.write('auto-memory-jev.disabled', 'Unexpected nonzero usage.cost; inspect billing before enabling.\n')
 
 
-def run_stop(payload, directory, state, name):
+def ask_judge_chain(directory, candidate, questions, hook_started=None):
+  try:
+    return ask_pplx(directory, candidate, questions)
+  except ValueError as error:
+    if str(error) not in PPLX_FALLS_TO_NEXT:
+      raise
+  except OSError:
+    pass
+  try:
+    return ask_vercel(directory, candidate, questions)
+  except ValueError as error:
+    if str(error) not in VERCEL_FALLS_TO_JEV:
+      raise
+  except (OSError, subprocess.SubprocessError):
+    pass
+  try:
+    return ask_amd(directory, candidate, questions, hook_started=hook_started)
+  except ValueError as error:
+    if str(error) not in AMD_FALLS_TO_JEV:
+      raise
+  except OSError:
+    pass
+  try:
+    return ask_jev(directory, candidate, questions)
+  except ValueError as error:
+    if str(error) not in JEV_FALLS_TO_DREX:
+      raise
+    return ask_drex(candidate, questions)
+  except (OSError, subprocess.SubprocessError):
+    # HTTPError／URLError／socket timeout 都是 OSError；Keychain 讀不到或逾時是 SubprocessError
+    return ask_drex(candidate, questions)
+
+
+def run_stop(payload, directory, state, name, hook_started=None):
+  if hook_started is None:
+    hook_started = time.monotonic()
   if payload.get('stop_hook_active'):
     return
   context = snapshot(payload['transcript_path'])
@@ -411,18 +673,11 @@ def run_stop(payload, directory, state, name):
   if fingerprint in state.get('delivered', []):
     raise ValueError('packet_repeat')
   questions = json.loads(QUESTION_FILE.read_text())
-  reserve(directory, len(dump({'model': MODEL, 'state': candidate, 'questions': questions}).encode()))
+  reserve(directory, len(dump({'model': PPLX_MODEL, 'state': candidate, 'questions': questions}).encode()))
   started = time.monotonic()
-  try:
-    data, judge = ask_jev(directory, candidate, questions)
-  except ValueError as error:
-    if str(error) not in JEV_FALLS_TO_DREX:
-      raise
-    data, judge = ask_drex(candidate, questions)
-  except (OSError, subprocess.SubprocessError):
-    # HTTPError／URLError／socket timeout 都是 OSError；Keychain 讀不到或逾時是 SubprocessError
-    data, judge = ask_drex(candidate, questions)
-  usage = data.get('usage') or {}
+  data, judge = ask_judge_chain(directory, candidate, questions, hook_started=hook_started)
+  raw_usage = data.get('usage')
+  usage = raw_usage if isinstance(raw_usage, dict) else {}
   score = data['answers']['direct_nudge']['noul']
   if isinstance(score, bool) or not isinstance(score, (int, float)) or not math.isfinite(score) or not 0 <= score <= 1:
     raise ValueError('invalid_probability')
@@ -439,6 +694,17 @@ def run_stop(payload, directory, state, name):
     directory.write(name, dump(state))
   safe_usage = {k: v for k, v in usage.items() if k in ('input_tokens', 'output_tokens', 'cost')
                 and isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)}
+  if judge == VERCEL_MODEL:
+    pm = data.get('provider_metadata')
+    gw = pm.get('gateway') if isinstance(pm, dict) else None
+    gw_cost = gw.get('cost') if isinstance(gw, dict) else None
+    try:
+      if not isinstance(gw_cost, bool) and gw_cost is not None and math.isfinite(float(gw_cost)):
+        safe_usage['vercel_credit_cost'] = round(float(gw_cost), 8)
+    except (ValueError, TypeError):
+      pass
+  if judge == AMD_MODEL and isinstance(safe_usage.get('input_tokens'), int):
+    safe_usage['amd_points_est'] = round(safe_usage['input_tokens'] * AMD_POINTS_PER_INPUT_TOKEN, 8)
   if judge == DREX_MODEL and isinstance(safe_usage.get('input_tokens'), int):
     safe_usage['cost_usd_est'] = round(safe_usage['input_tokens'] * DREX_USD_PER_INPUT_TOKEN, 8)
   audit(payload, 'pending' if score >= THRESHOLD else 'quiet', turn=current['turn'][:16],
@@ -479,7 +745,9 @@ def run_deliver(payload, directory, state, name):
   audit(payload, 'delivered', turn=pending['turn'][:16], version=version, score=pending['score'])
 
 
-def main(payload, mode):
+def main(payload, mode, hook_started=None):
+  if hook_started is None:
+    hook_started = time.monotonic()
   if disabled() or payload.get('agent_id') or payload.get('agent_type'):
     return
   session = payload.get('session_id', '')
@@ -494,7 +762,7 @@ def main(payload, mode):
     with directory.lock(name + '.lock'):
       state = json.loads(directory.read(name) or '{}')
       if mode == 'stop':
-        run_stop(payload, directory, state, name)
+        run_stop(payload, directory, state, name, hook_started=hook_started)
       elif mode == 'deliver':
         run_deliver(payload, directory, state, name)
 
@@ -506,7 +774,7 @@ if __name__ == '__main__':
     raw = sys.stdin.read(1048577)
     if len(raw) <= 1048576:
       payload = json.loads(raw)
-      main(payload, sys.argv[1] if len(sys.argv) > 1 else 'stop')
+      main(payload, sys.argv[1] if len(sys.argv) > 1 else 'stop', hook_started=started)
   except Exception as error:
     try:
       status = str(error) if isinstance(error, ValueError) and re.fullmatch('[a-z_]{1,50}', str(error)) else type(error).__name__

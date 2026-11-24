@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from path_safety import ensure_no_symlink, symlink_component
 
 H2_RE = re.compile(r"^##\s+(.+?)\s*\((\d{4}-\d{2}-\d{2})([^)]*)\)\s*$")
-DATE_H2_RE = re.compile(r"^##\s+.*\(.*\d{4}-\d{2}-\d{2}.*\)")
+DATE_H2_RE = re.compile(r"^##\s+.*[(（].*\d{4}-\d{2}-\d{2}.*[)）]")
 DETAIL_SLUG_RE = re.compile(r"^active/(.+)-(\d{4}-\d{2}-\d{2})(?:-[1-9]\d*)?\.md$")
 INDEX_RE = {
     "started": re.compile(r"^-\s+started:\s+(\d{4}-\d{2}-\d{2})\s*$"),
@@ -91,7 +91,7 @@ def find_status(block):
 
 def read_detail_identity(target):
     with target.open(encoding="utf-8") as handle:
-        lines = [handle.readline().rstrip("\n"), handle.readline().rstrip("\n")]
+        lines = [handle.readline().rstrip("\r\n"), handle.readline().rstrip("\r\n")]
     values = {}
     for line in lines:
         if line.startswith("detail-key: "):
@@ -142,7 +142,7 @@ def candidate_blocks(lines):
 
 
 def build_plan(active, details_dir):
-    ensure_no_symlink(active, "active")
+    active = ensure_no_symlink(active, "active")
     details_root(details_dir)
     lines = active.read_text(encoding="utf-8").splitlines(keepends=True)
     prefix, entries, unclassified = candidate_blocks(lines)
@@ -192,19 +192,28 @@ def build_plan(active, details_dir):
                 slug_counts[indexed_slug] = max(slug_counts.get(indexed_slug, 0), 1)
             plan.append({"main": block, "detail": None, "target": target, "title": title})
             continue
-        if fields:
+        if "detail" in fields:
             errors.append(f"index-incomplete:{title}")
             continue
         started = find_started(block)
         if started is None:
             errors.append(f"started-missing:{title}")
             continue
-        base_slug = slugify(title)
-        slug_counts[base_slug] = slug_counts.get(base_slug, 0) + 1
-        ordinal = slug_counts[base_slug]
-        candidate_index = ordinal
-        candidate_slug = base_slug if ordinal == 1 else f"{base_slug}-{ordinal}"
-        duplicate = ordinal > 1
+        run_match = re.fullmatch(r"(.+) \[run-(\d+)\]", title)
+        if run_match:
+            stem_title = run_match.group(1)
+            base_slug = slugify(stem_title)
+            candidate_index = int(run_match.group(2))
+            candidate_slug = f"{base_slug}-{run_match.group(2)}"
+            duplicate = False
+        else:
+            stem_title = title
+            base_slug = slugify(title)
+            slug_counts[base_slug] = slug_counts.get(base_slug, 0) + 1
+            ordinal = slug_counts[base_slug]
+            candidate_index = ordinal
+            candidate_slug = base_slug if ordinal == 1 else f"{base_slug}-{ordinal}"
+            duplicate = ordinal > 1
         while candidate_slug in used_slugs:
             candidate_index += 1
             candidate_slug = f"{base_slug}-{candidate_index}"
@@ -213,7 +222,7 @@ def build_plan(active, details_dir):
         target = root / filename
         while True:
             ensure_no_symlink(target, "detail-target")
-            if target not in reserved_targets and not target.exists():
+            if candidate_slug not in used_slugs and target not in reserved_targets and not target.exists():
                 break
             candidate_index += 1
             candidate_slug = f"{base_slug}-{candidate_index}"
@@ -221,7 +230,7 @@ def build_plan(active, details_dir):
             target = root / filename
             duplicate = True
         if duplicate:
-            display_title = f"{title} [run-{candidate_index}]"
+            display_title = f"{stem_title} [run-{candidate_index}]"
             warnings.append(f"duplicate-slug:{title} kept as {candidate_slug}")
         else:
             display_title = title
@@ -275,8 +284,16 @@ def write_temp(directory, data, prefix):
         handle.write(data)
         handle.flush()
         os.fsync(handle.fileno())
-    finally:
         handle.close()
+    except BaseException:
+        try:
+            handle.close()
+        finally:
+            try:
+                path.unlink()
+            except OSError:
+                pass
+        raise
     return path
 
 
@@ -285,22 +302,23 @@ def build_output(prefix, plan):
 
 
 def apply_plan(active, details_dir, output, plan):
-    ensure_no_symlink(active, "active")
+    active = ensure_no_symlink(active, "active")
     root = details_root(details_dir)
     for item in plan:
         ensure_no_symlink(item["target"], "detail-target")
     staging_parent = ensure_no_symlink(root.parent, "temporary-directory")
     root_existed = root.exists()
-    root.mkdir(parents=True, exist_ok=True)
     original = active.read_bytes()
     if original.decode("utf-8") == output and all(item["detail"] is None or item["target"].is_file() for item in plan):
         return
-    staging = Path(tempfile.mkdtemp(prefix=f".{root.name}.migration-", dir=str(staging_parent)))
+    staging = None
     staged = []
     created = []
     active_temp = None
     active_replaced = False
     try:
+        root.mkdir(parents=True, exist_ok=True)
+        staging = Path(tempfile.mkdtemp(prefix=f".{root.name}.migration-", dir=str(staging_parent)))
         for item in plan:
             detail = item["detail"]
             if detail is None or item["target"].exists():
@@ -317,7 +335,7 @@ def apply_plan(active, details_dir, output, plan):
         os.replace(active_temp, active)
         active_temp = None
         active_replaced = True
-    except Exception as error:
+    except BaseException as error:
         rollback_error = None
         cleanup_errors = []
         if active_replaced:
@@ -351,7 +369,8 @@ def apply_plan(active, details_dir, output, plan):
     finally:
         if active_temp is not None and active_temp.exists():
             active_temp.unlink()
-        shutil.rmtree(staging, ignore_errors=True)
+        if staging is not None:
+            shutil.rmtree(staging, ignore_errors=True)
 
 
 def main(argv=None):
@@ -371,7 +390,7 @@ def main(argv=None):
     active = args.active.expanduser()
     details_dir = args.details_dir.expanduser()
     try:
-        ensure_no_symlink(active, "active")
+        active = ensure_no_symlink(active, "active")
         details_root(details_dir)
     except (OSError, ValueError) as error:
         print(str(error), file=sys.stderr)

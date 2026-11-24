@@ -4,7 +4,8 @@
 # 用法：bash ~/.claude/hooks/skill-description-gate.test.sh
 
 set -uo pipefail
-HOOK="$HOME/.claude/hooks/skill-description-gate.sh"
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+HOOK="$SCRIPT_DIR/skill-description-gate.sh"
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 pass=0; fail=0

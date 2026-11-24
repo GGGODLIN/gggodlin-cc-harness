@@ -20,7 +20,7 @@ class PrReviewGeminiWebContractTest(unittest.TestCase):
     return self.command[start:end]
 
   def gemini_multi(self):
-    return self.section("#### 多目標整組材料", "🔌 接線點：ChatGPT 網頁版席位 — 見 WIRING.md")
+    return self.section("#### 多目標整組材料（Step 2.05", "🔌 接線點：ChatGPT 網頁版席位 — 見 WIRING.md")
 
   def web_multi(self):
     return self.section("🔌 接線點：ChatGPT 網頁版席位 — 見 WIRING.md", "## Step 4: Cross-Axis Verification Pass")
@@ -46,8 +46,6 @@ class PrReviewGeminiWebContractTest(unittest.TestCase):
   def test_gemini_multi_target_keeps_selected_role_and_model(self):
     step = self.gemini_multi()
     self.assertIn("只保留該 cell 的 selected 角色、requested model", step)
-    self.assertIn("Gemini 4 Argon (High)", step)
-    self.assertIn("$GEMINI_FLASH_MODEL", step)
     self.assertIn("不新增通道、不偷換模型", step)
 
   def test_capacity_gate_holds_dispatch_before_adjudication(self):
@@ -68,44 +66,70 @@ class PrReviewGeminiWebContractTest(unittest.TestCase):
     self.assertIn("awaiting-confirmation", step)
     self.assertIn("selection-required", step)
 
-  def test_gemini_argv_matches_existing_equal_bound_shape(self):
+  def test_gemini_keeps_the_prompt_in_the_packet_and_opens_with_a_brief_file(self):
     step = self.gemini_multi()
-    self.assertIn("--print=<prompt 全文>", step)
-    self.assertIn("packet 是唯一持久 receipt", step)
+    self.assertIn("packet 是唯一持久材料 receipt", step)
     self.assertIn("完整 prompt 保留在 packet 的 execution", step)
     self.assertIn("不另寫 `*-prompt.txt`", step)
-    self.assertIn("一組兩個 argv（`--add-dir`，`<review_root>`）", step)
-    self.assertIn("--model=", step)
+    self.assertIn("`<brief-file>`", step)
 
-  def test_multi_target_argon_runs_magpie_first_and_agy_only_as_fallback(self):
+  def test_multi_target_gemini_failure_does_not_dispatch_a_fallback(self):
     step = self.gemini_multi()
-    self.assertIn("Pro 先走 `ccp-gemini-argon`，失敗才換 `agy`", step)
+    self.assertIn("`pr-review-gemini-pro`／`pr-review-gemini-flash`", step)
     self.assertIn("`role: primary`", step)
-    self.assertIn("`role: fallback`", step)
-    self.assertIn("`dispatch_call_count` 只數 primary，兩筆不會都跑", step)
-    self.assertIn("`google/gemini-4-argon:high` 與 `Gemini 4 Argon (High)`", step)
-    self.assertIn("選席鍵沿用 `seat: agy`", step)
+    self.assertIn("`reply.output`／`reply.model`", step)
+    for marker in ("`role: fallback`", "agy", "`run_if`"):
+      with self.subTest(marker=marker):
+        self.assertFalse(marker in step, f"多目標 Gemini 不應指示備援：{marker}")
+    self.assertIn("開席、執行或收席檢查失敗時，依上方步驟 4 處理", step)
 
-  def test_single_target_argon_runs_magpie_read_only_before_agy(self):
+  def test_selected_gemini_uses_seat_result_and_keeps_the_findings_envelope(self):
     block = self.section("### Gemini Pro / Flash Review", "#### 多目標整組材料")
-    pro = block[block.index("case \",$EXTRA_AXES,\" in *,pro,*)"):block.index("case \",$EXTRA_AXES,\" in *,flash,*)")]
-    self.assertLess(pro.index("ccp-gemini-argon"), pro.index("agy --print="))
-    for needle in ("--setting-sources local", "--strict-mcp-config", '{"disableAllHooks": true}',
-                   "--permission-mode dontAsk", "--output-format json", "jq -e '.is_error == false'"):
-      with self.subTest(needle=needle):
-        self.assertIn(needle, pro)
-    self.assertNotIn("GEMINI_FLASH_MODEL", pro)
-    flash = block[block.index("case \",$EXTRA_AXES,\" in *,flash,*)"):]
-    self.assertIn("model-routing.sh\" GEMINI_FLASH_MODEL", flash)
-    self.assertIn("Argon 相容端點", block)
-    self.assertIn("預設 CLI 額度", block)
-    self.assertIn("不用 `--bare`", block)
+    opening = self.section("**開席與收席**", "2. 依「單席交接（新路）」等待")
+    self.assertIn("1. 逐軸核對 `REVIEW_SELECTION` 與 `$EXTRA_AXES`；只有 `status=selected` 的軸才開席。", opening)
+    for marker in ("pr-review-gemini-pro", "pr-review-gemini-flash", "open-seat.py", "worker-turns.py",
+                   "--turn 1", "hc wait", "hc kill", "hc rm", "不自動重送",
+                   '"line_start": <int>', '"anchor":', "If no findings, return []."):
+      with self.subTest(marker=marker):
+        self.assertIn(marker, block)
+    # 拿掉「解析失敗就重試一次」
+    for forbidden in ("retry 1 次", "以相同 id 另開新席", "解析失敗只以同一席位 id 重試一次"):
+      self.assertNotIn(forbidden, block)
+      self.assertNotIn(forbidden, self.gemini_multi())
 
-  def test_flash_model_comes_from_routing_not_invention(self):
-    step = self.gemini_multi()
-    self.assertIn("MODEL_UNAVAILABLE", step)
-    self.assertIn("$GEMINI_FLASH_MODEL", step)
-    self.assertIn("model-routing.sh", step)
+  def test_migration_keeps_the_three_codex_executors_as_exceptions(self):
+    codex = self.section("### Codex Review", "### Gemini Pro / Flash Review")
+    verification = self.section("## Step 4.2:", "## Step 4.3:")
+    for section, marker in ((codex, "codex review"), (codex, "adversarial-review"), (verification, "task --fresh")):
+      with self.subTest(marker=marker):
+        self.assertIn(marker, section)
+    # Gate 10 結論為否：多目標留在舊路並於文件寫明原因
+    self.assertIn("finish-seat.py", self.gemini_multi())
+    self.assertIn("Gate 10", self.gemini_multi())
+
+  def test_single_target_gemini_uses_catalog_permissions_and_fails_without_headless(self):
+    block = self.section("### Gemini Pro / Flash Review", "#### 多目標整組材料")
+    self.assertIn('open-seat.py" "$SEAT_ID"', block)
+    # 權限與白名單只放在席位目錄；指令再帶一份會蓋過目錄，日後改目錄就靜默失效。
+    for duplicate in ("--permission-mode", "--allow-tool"):
+      self.assertFalse(duplicate in block, f"單目標範例不該再帶 {duplicate}")
+    self.assertIn("啟動唯讀鎖", block)
+    failure = "如果席位開不起來、執行出錯、逾時或回件未交付，就保留原因並標該軸 `FAILED`，不自動重送、不改跑 `agy` 或其他無頭指令。"
+    self.assertTrue(failure in block, "缺少開席、執行、收件失敗時標 FAILED 的規則")
+    self.assertFalse("agy" in block.replace(failure, "", 1),
+                     "單目標 Gemini 只有禁止備援規則可提到 agy")
+
+  def test_matrix_rows_for_gemini_seats_name_no_fallback(self):
+    rows = [line for line in self.command.splitlines() if line.startswith("| `pr-review-gemini-")]
+    self.assertEqual(2, len(rows), "矩陣應各有一列 Pro、Flash 唯讀單席")
+    for row in rows:
+      self.assertFalse("備援" in row or "agy" in row, f"矩陣列不該再寫備援：{row[:60]}")
+
+  def test_single_target_parse_failure_marks_failed_and_preserves_raw_without_retry(self):
+    block = self.section("**Parse 與失敗處置**", "**標記** finding source")
+    self.assertIn("標示該席失敗並保留原文，不自動重送", block)
+    self.assertIn("其他已有效的回件照常收", block)
+    self.assertFalse("agy" in block, "解析失敗處置不應指示 agy 備援")
 
   def test_head_marker_and_exam_list_register_the_ninth_exam(self):
     head = self.command[:self.command.index("## Step 1: Parse Input")]

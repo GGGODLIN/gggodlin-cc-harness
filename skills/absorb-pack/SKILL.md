@@ -55,7 +55,7 @@ c. **Stack 對標摘要（兩軸）**，寫成一段可嵌進 subagent prompt �
 1. **帳本行**：「N 件全數裁決、對帳平」——加總各組件數對 Step 1b 的 N，不平就補查漏件，平不了不准宣告
 2. **STACK_RECEIPT v1**：把 Step 1c 產生的同一份收據原樣嵌入成稿，恰好一次
 3. **歷史判決重驗結果**一段（維持 / 動搖，各附證據）
-4. **拍板表分 Tier**：Tier 1 機制級增量（對標物真實缺；判定前先查本機歷史事故庫如 `retro-accumulation`／`session-audit`／`failure-mode-taxonomy`，按唯一場次 session ID 去重計算實際發生次數，採用數據另看 `_index_tool_eval_outcomes.md` 不混算，未查或無法取得時標「未知」而非 0 發；確認本機實戰 0 發且現況無缺口時，預設不因規則文字缺漏而升為推薦）/ Tier 2 有價值但單條輕 / Tier 3 邊際（預設不做、點名即可）。每條：碎片內容一句 + 來源件 + 本機發生場數 + 落點 + 推薦標記
+4. **拍板表分 Tier**：Tier 1 機制級增量（對標物真實缺；判定前先查本機歷史事故庫如 `retro-accumulation`／`session-audit`／`failure-mode-taxonomy`，按唯一場次 session ID 去重計算實際發生次數，採用數據另看 `_index_tool_eval_outcomes.md` 不混算，未查或無法取得時標「未知」而非 0 發；確認本機實戰 0 發且現況無缺口時，預設不因規則文字缺漏而升為推薦；同時對照 `~/.claude/references/mechanism-iteration-materiality.md` 的 H1–H4／N1–N4，僅命中 N1–N4 且未命中 H1–H4 的碎片排除於推薦新增規則或 hook，仍保留於審計附檔並標明條目與理由）/ Tier 2 有價值但單條輕 / Tier 3 邊際（預設不做、點名即可）。每條：碎片內容一句 + 來源件 + 本機發生場數 + 落點 + 推薦標記
 5. **衝突警示段**：上游建議撞自家 deny / 規則清單的，逐條列（引用上游時的地雷圖）
 6. 一輪收斂與單題訪談（CLAUDE.md「問題一次收斂」）：高信心且無治理／架構取捨的簡單項可在表尾給一次收斂拍板方式；若有多項涉及治理、架構或對外行為取捨（或落點含 CLAUDE.md／rules），改走**白話單題訪談**（問題先行、每次一題附本機發生次數與建議 a/b/c，不丟整張表叫使用者點題號 `#1 #4`），**結束回合等使用者拍板**——落點含 CLAUDE.md 的條目在表中預先標記「需逐字討論」
 7. **成稿分兩層**：N 件逐件五欄明細（Step 2 各組回傳的原文）寫進證據附檔 `<scratchpad>/absorb-pack-<pack>-<YYYY-MM-DD>.md`，聊天主報告固定只交三步狀態流「這包看完了→大多數跟現有哪些治理重疊→真正建議只吸哪幾條」＋ Tier 1 候選表＋單一拍板句＋附檔 file:// 連結一行；帳本行、`STACK_RECEIPT v1`、歷史重驗、Tier 2／3 列、衝突段全部只寫進附檔（R0 仍以附檔內的成稿計數）。拍板表每列只留「碎片一句＋來源件號＋落點」，不重貼五欄。為什麼：37 件五欄全進聊天曾讓使用者當場跟丟（2026-08-25 `/wait-what`）；2026-08-29 Paperthin 又因收據＋8 列 Tier 表＋衝突段進聊天再跟丟一次，拍板只需要 Tier 1 候選
@@ -87,7 +87,7 @@ c. **Stack 對標摘要（兩軸）**，寫成一段可嵌進 subagent prompt �
 
 ## Self-Verify（mandatory — 拍板表成稿後、呈現使用者前）
 
-拍板表成稿後（= 內部草稿，**不要**先輸出——tool call 之間的文字不保證顯示），派 verify subagent 對表。Dispatch 規格：`Agent` tool、`subagent_type: skill-verify-auditor`（sonnet+low、tools 僅 Read，定義檔釘死）、description 含 marker `skill-verify:absorb-pack`、內嵌完整拍板表原文 + 下列 rubric：
+拍板表成稿後（= 內部草稿，**不要**先輸出——tool call 之間的文字不保證顯示），派 verify subagent 對表。Dispatch 規格：`Agent` tool、`subagent_type: skill-verify-auditor`（sonnet+medium、tools 僅 Read，定義檔釘死）、description 含 marker `skill-verify:absorb-pack`、內嵌完整拍板表原文 + 下列 rubric：
 
 ```
 你是 adversarial 合規審查員。偏置是「找違規」：無法從文本確認就判 FAIL。

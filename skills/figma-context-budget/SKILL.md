@@ -1,6 +1,6 @@
 ---
 name: figma-context-budget
-description: Use BEFORE any Figma MCP tool call during design-to-code work — reading, planning, or implementing a Figma design. Complements implement-design by adding context-budget discipline on top of its code-generation workflow. Do not use when writing back to Figma or when generating new Figma files from code — no budget rules apply there.
+description: Use BEFORE any Figma MCP tool call during design-to-code work — reading, planning, or implementing a Figma design — to enforce context-budget discipline on top of code generation. Do not use when writing back to Figma or generating new Figma files from code.
 ---
 
 # Figma Context Budget

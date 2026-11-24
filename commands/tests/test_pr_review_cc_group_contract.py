@@ -66,6 +66,12 @@ class PrReviewCcGroupContractTest(unittest.TestCase):
     self.assertIn("test_pr_review_cc_group_contract.py", head)
     self.assertIn("十一套都要跑", head)
 
+  def test_chunked_dispatch_respects_five_concurrent_subagent_wave_cap(self):
+    step3 = self.section("## Step 3:", "### Codex Review")
+    self.assertNotIn("Launch all selected reviews **simultaneously**", step3)
+    self.assertIn("5 concurrent background Agent calls per wave", step3)
+    self.assertIn("waves of ≤ 5 concurrent background Agent calls", step3)
+
 
 if __name__ == "__main__":
   unittest.main()

@@ -1,6 +1,7 @@
 #!/bin/bash
 # model-drift-watch.sh 五案 fixture 回歸
-HOOK="$HOME/.claude/hooks/model-drift-watch.sh"
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+HOOK="$SCRIPT_DIR/model-drift-watch.sh"
 TMP=$(mktemp -d); PASS=0; FAIL=0
 export MODEL_DRIFT_STATE_DIR="$TMP/state"
 export MODEL_DRIFT_AUDIT="$TMP/audit.jsonl"

@@ -298,9 +298,36 @@ class OpusChineseStopTest(unittest.TestCase):
 
   def test_normal_links_and_fenced_or_quoted_links_do_not_trigger(self):
     good = "請見 [upstream-ledger.md](file://~/Desktop/projects/collie-example-owner/docs/owner/upstream-ledger.md) 與 `inline_code` [官網](https://example.com)。"
-    fenced = "範例如下：\n```markdown\n`[doc](file:///tmp/a.md)`\n```\n> `[quoted](https://example.com)`"
+    fenced = "範例如下：\n```markdown\n`[doc](file:///tmp/a.md)`\n`https://github.com/org/repo/issues/1`\n```\n> `[quoted](https://example.com)`\n> `https://example.com/quoted`"
     self.assertEqual(self.run_hook(good), {})
     self.assertEqual(self.run_hook(fenced), {})
+
+  def test_backtick_bare_url_reminds_across_models_and_skips_code_endpoints(self):
+    self.transcript.unlink()
+    self.records("請幫我確認這個連結", model="gpt-6-sol")
+    bad = "問題出在 `https://github.com/org/repo/issues/1`，上游已在 `https://github.com/org/repo/compare/v1.0.0...v2.0.0` 修正。"
+    output = self.run_hook(bad)
+    self.assertNotIn("decision", output)
+    context = output["hookSpecificOutput"]["additionalContext"]
+    self.assertIn("裸網址", context)
+    self.assertIn("唯讀 git 狀態／差異核對，仍照常執行", context)
+    self.assertNotIn("不要重跑已完成的工具工作", context)
+    self.assertEqual(self.run_hook(bad), {})
+    safe_tokens = (
+      "本機端點 `http://localhost:3000/api/health`、`http://app.localhost:8080`、"
+      "`http://127.0.0.1:8317/v1/messages`、`http://192.168.1.10:9000`、"
+      "路由樣板 `https://api.example.com/users/<id>`、`https://api.example.com/v1/{org}/repos`、"
+      "`https://${API_HOST}/v1`、`https://example.com/posts/[slug]`、`https://example.com/...` 都不該誤報。"
+    )
+    next_prompt = "77777777-0000-4000-8000-000000000001"
+    self.records("再檢查一次端點格式", model="claude-opus-5-5", prompt_id=next_prompt)
+    self.assertEqual(self.run_hook(safe_tokens, prompt_id=next_prompt), {})
+
+  def test_english_reminder_allows_readonly_git_closeout_checks(self):
+    output = self.run_hook()
+    context = output["hookSpecificOutput"]["additionalContext"]
+    self.assertIn("不要重做已完成的修改或外部操作（若同輪有收尾檢查要求執行唯讀 git 狀態／差異核對，仍照常執行）", context)
+    self.assertNotIn("不要重跑已完成的工具工作", context)
 
 
 if __name__ == "__main__":

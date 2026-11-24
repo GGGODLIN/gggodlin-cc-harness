@@ -2,7 +2,8 @@
 
 set -euo pipefail
 
-HOOK=~/.claude/hooks/review-spec-tier1-nudge.sh
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+HOOK="$SCRIPT_DIR/review-spec-tier1-nudge.sh"
 PASSES=0
 FAILURES=0
 
@@ -65,6 +66,23 @@ assert_silent 'legacy docs/superpowers boundary stays silent' "$LEGACY_CONTEXT"
 
 SCRATCH_TICKET_CONTEXT=$(context_for '/tmp/project/.scratch/example/issues/001.md')
 assert_silent 'scratch ticket path stays silent' "$SCRATCH_TICKET_CONTEXT"
+
+STATE_TMP=$(mktemp -d)
+trap 'rm -rf "$STATE_TMP"' EXIT
+DEDUP_SPEC="$STATE_TMP/.scratch/demo/spec.md"
+mkdir -p "$(dirname "$DEDUP_SPEC")"
+: > "$DEDUP_SPEC"
+FIRST_OUT=$(jq -nc --arg file_path "$DEDUP_SPEC" --arg sid "sess-dedup-1" '{session_id:$sid,tool_input:{file_path:$file_path}}' | REVIEW_SPEC_NUDGE_STATE_DIR="$STATE_TMP/seen" "$HOOK")
+SECOND_OUT=$(jq -nc --arg file_path "$DEDUP_SPEC" --arg sid "sess-dedup-1" '{session_id:$sid,tool_input:{file_path:$file_path}}' | REVIEW_SPEC_NUDGE_STATE_DIR="$STATE_TMP/seen" "$HOOK")
+assert_contains 'same session first edit fires' "$FIRST_OUT" 'design/spec doc 落檔'
+assert_silent 'same session second edit stays silent (deduped)' "$SECOND_OUT"
+
+REVIEWED_DIR="$STATE_TMP/.scratch/reviewed"
+mkdir -p "$REVIEWED_DIR"
+: > "$REVIEWED_DIR/spec.md"
+: > "$REVIEWED_DIR/2026-11-19-yagni-review.md"
+REVIEWED_OUT=$(jq -nc --arg file_path "$REVIEWED_DIR/spec.md" --arg sid "sess-dedup-2" '{session_id:$sid,tool_input:{file_path:$file_path}}' | REVIEW_SPEC_NUDGE_STATE_DIR="$STATE_TMP/seen" "$HOOK")
+assert_silent 'sibling *-review.md silences nudge' "$REVIEWED_OUT"
 
 printf 'RESULT %d/%d\n' "$PASSES" "$((PASSES + FAILURES))"
 [ "$FAILURES" -eq 0 ]

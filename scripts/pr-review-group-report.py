@@ -2,7 +2,6 @@
 
 import argparse
 import hashlib
-import importlib.util
 import json
 import re
 import sys
@@ -10,7 +9,6 @@ from pathlib import Path
 
 
 CLAUDE_ROOT = Path(__file__).resolve().parent.parent
-MUTATION_CORE = CLAUDE_ROOT / "skills/bitbucket-pr-mutation/scripts/bitbucket_pr_workflow/core.py"
 SCHEMA_LINE = "**Report projection schema**: 3"
 SET_IDENTITY_PATTERN = re.compile(r"sha256:[0-9a-f]{64}")
 LOCATIONS_TITLE = "跨目標位置"
@@ -41,13 +39,6 @@ ATTRIBUTION_HEADERS = ("finding_uid", "target_identity", "目前問題位置", "
 MISSING_REASON = "缺失型 finding：不指派引入者，附近程式作者不是責任人"
 
 
-def load_mutation_core():
-  spec = importlib.util.spec_from_file_location("bitbucket_pr_workflow_core", MUTATION_CORE)
-  module = importlib.util.module_from_spec(spec)
-  spec.loader.exec_module(module)
-  return module
-
-
 def _local_make_finding_uid(file_path, anchor, root_cause):
   normalized_cause = re.sub(r'\s+', ' ', str(root_cause)).strip()
   payload = '\0'.join((str(file_path), str(anchor), normalized_cause))
@@ -55,8 +46,6 @@ def _local_make_finding_uid(file_path, anchor, root_cause):
 
 
 def resolve_make_finding_uid():
-  if MUTATION_CORE.exists():
-    return load_mutation_core().make_finding_uid
   return _local_make_finding_uid
 
 
@@ -184,21 +173,31 @@ def version_entry(target):
   return f"{key}=head:{head}|base:{base}|state:{target['version_state']}"
 
 
+def valid_line_number(value):
+  return isinstance(value, int) and not isinstance(value, bool) and value >= 1
+
+
 def route_findings(findings, declared_targets, attribute=None):
   declared = set(declared_targets)
   admitted = []
   refused = []
   for finding in findings or []:
+    if not isinstance(finding, dict):
+      refused.append({"reason_code": "FINDING_INCOMPLETE", "target_identity": None, "file": None})
+      continue
     source = str(finding.get("source") or "")
     if source == C4_SOURCE and not finding.get("reducer_validated"):
       refused.append({"reason_code": "C4_NOT_VALIDATED", "target_identity": finding.get("target_identity"),
                       "file": finding.get("file")})
       continue
-    if not finding.get("target_identity") or not finding.get("file") or not finding.get("root_cause"):
+    target_id = str(finding.get("target_identity") or "").strip()
+    file_path = str(finding.get("file") or "").strip()
+    cause = normalize_root_cause(finding.get("root_cause"))
+    if not target_id or not file_path or not cause:
       refused.append({"reason_code": "FINDING_INCOMPLETE", "target_identity": finding.get("target_identity"),
                       "file": finding.get("file")})
       continue
-    if str(finding["target_identity"]) not in declared:
+    if target_id not in declared:
       refused.append({"reason_code": "UNDECLARED_TARGET", "target_identity": finding["target_identity"],
                       "file": finding.get("file")})
       continue
@@ -227,12 +226,20 @@ def route_findings(findings, declared_targets, attribute=None):
     suggestion = str(finding.get("suggestion") or "") if str(finding.get("suggestion") or "") in PRIORITY_RANK else "參考用"
     action = str(finding.get("action") or "") if str(finding.get("action") or "") in ACTIONS else "ask-user"
     location = normalize_location(finding)
-    existing = next((item for item in bucket["locations"] if location_key(item) == location_key(location)), None)
+    existing = next((
+      item for item in bucket["locations"]
+      if location_key(item) == location_key(location) or item["finding_uid"] == location["finding_uid"]
+    ), None)
     if existing is None:
       if attribute:
         location["attribution"] = attribute(finding)
       bucket["locations"].append(location)
       existing = location
+    elif not valid_line_number(existing.get("line")) and valid_line_number(location.get("line")):
+      existing["line"] = location["line"]
+    raw_comment = str(finding.get("comment") or "")
+    comment = raw_comment if raw_comment.strip() else normalize_root_cause(finding["root_cause"])
+    raw_title = normalize_root_cause(finding.get("title") or finding["root_cause"])
     # 同 repo 可有多個位置，UID 在這裡綁定；產表時用 target_identity 反查會讓後一個位置蓋掉前一個
     bucket["perspectives"].append({
       "source": str(finding.get("source") or ""),
@@ -241,8 +248,8 @@ def route_findings(findings, declared_targets, attribute=None):
       "suggestion": suggestion,
       "action": action,
       "action_reason": str(finding.get("action_reason") or "需人工判斷"),
-      "title": str(finding.get("title") or normalize_root_cause(finding["root_cause"])),
-      "comment": str(finding.get("comment") or normalize_root_cause(finding["root_cause"])),
+      "title": raw_title,
+      "comment": comment,
       **verification_fields(finding),
     })
 
@@ -290,9 +297,10 @@ def prior_rows_are_loadable(prior):
 
 
 def reconcile_prior(prior, targets, fresh_findings, recheck_responses, current_set_identity):
-  prior = prior or {}
+  prior = prior if isinstance(prior, dict) else {}
+  recheck_responses = recheck_responses if isinstance(recheck_responses, dict) else {}
   rows = [row for row in prior.get("findings") or []
-          if str(row.get("action") or "") in ACTIONABLE_ACTIONS]
+          if isinstance(row, dict) and str(row.get("action") or "") in ACTIONABLE_ACTIONS]
   if not rows:
     return {"continuity": "n-a", "scope": None, "reason": None,
             "rows": [], "tally": {status: 0 for status in STATUSES},
@@ -309,6 +317,7 @@ def reconcile_prior(prior, targets, fresh_findings, recheck_responses, current_s
     finding_uid(finding.get("file"), finding.get("anchor") or "", finding.get("root_cause") or "",
                 finding.get("target_identity"))
     for finding in fresh_findings or []
+    if isinstance(finding, dict)
   }
 
   disposition = []
@@ -320,11 +329,11 @@ def reconcile_prior(prior, targets, fresh_findings, recheck_responses, current_s
       group_uid = finding_uid(row.get("file"), row.get("anchor") or "", row.get("root_cause") or "",
                               target_identity)
     display_uid = group_uid or legacy_uid
-    response = (recheck_responses or {}).get(display_uid)
+    response = recheck_responses.get(display_uid)
     if response is None and group_uid is not None:
-      response = (recheck_responses or {}).get(legacy_uid)
+      response = recheck_responses.get(legacy_uid)
     verdict = str(response.get("status") or "") if isinstance(response, dict) else ""
-    evidence = str(response.get("evidence") or "") if isinstance(response, dict) else ""
+    evidence = str(response.get("evidence") or "").strip() if isinstance(response, dict) else ""
     if scope == "stale-set":
       status, evidence = "STALE", "set identity changed; prior finding not carried forward"
     elif group_uid is None:
@@ -370,10 +379,20 @@ def range_case_token(identity, prs):
 
 
 def normalize_range_target(entry, net_diff):
+  if not isinstance(entry, dict):
+    raise ValueError("range target entry must be an object")
   identity = str(entry.get("target_identity") or "")
-  start = entry.get("start") or {}
-  end = entry.get("end") or {}
-  prs = sorted({int(pr["pr"]) for pr in entry.get("related_prs") or [] if pr.get("pr") is not None})
+  start = entry.get("start") if isinstance(entry.get("start"), dict) else {}
+  end = entry.get("end") if isinstance(entry.get("end"), dict) else {}
+  prs = []
+  for pr in entry.get("related_prs") or []:
+    if not isinstance(pr, dict) or pr.get("pr") is None:
+      continue
+    pr_val = pr["pr"]
+    if isinstance(pr_val, bool):
+      raise ValueError("range target PR number must not be boolean")
+    prs.append(int(pr_val))
+  prs = sorted(set(prs))
   if not identity or not prs:
     raise ValueError("range target requires target identity and source PRs")
   if not FULL_SHA.fullmatch(str(start.get("sha") or "")) or not FULL_SHA.fullmatch(str(end.get("sha") or "")):
@@ -389,7 +408,8 @@ def normalize_range_target(entry, net_diff):
     "target_branch": str(entry.get("target_branch") or ""),
     "start": {"sha": start["sha"], "source": str(start.get("source") or ""),
               "detail": str(start.get("detail") or "")},
-    "end": {"sha": end["sha"], "ref": str(end.get("ref") or "")},
+    "end": {"sha": end["sha"], "ref": str(end.get("ref") or ""),
+            "source": str(end.get("source") or "target-branch"), "pr": str(end.get("pr") or "")},
     "source_prs": prs,
     "net_diff": net_diff,
     "entry_file_count": len(entry_files),
@@ -497,7 +517,15 @@ def build_set(payload):
 
 
 def cell(value):
-  return str(value if value is not None else "").replace("|", "\\|")
+  text = str(value if value is not None else "")
+  text = re.sub(r"\r\n|\r|\n", " ", text)
+  return text.replace("|", "\\|")
+
+
+def comment_fence(text):
+  runs = re.findall(r"`+", str(text or ""))
+  longest = max((len(run) for run in runs), default=0)
+  return "`" * max(3, longest + 1)
 
 
 def continuity_header(history):
@@ -532,10 +560,17 @@ def line_value(location):
   return LINE_SENTINEL
 
 
+def end_ref_text(end):
+  # An open PR head as T means the review holds only while that head stays put; say so in the header.
+  if end.get("source") == "open-pr-head":
+    return f"{end['ref']}（未合併 PR #{end['pr']} 的 head）"
+  return end["ref"]
+
+
 def range_header(targets):
   return [
     "**Range R/T**: " + "; ".join(
-      f"{target['target_identity']}=R:{target['base']}|T:{target['head']}|T-ref:{target['end']['ref']}"
+      f"{target['target_identity']}=R:{target['base']}|T:{target['head']}|T-ref:{end_ref_text(target['end'])}"
       for target in targets),
     "**Range R source**: " + "; ".join(
       f"{target['target_identity']}={target['start']['source']}（{target['start']['detail']}）"
@@ -664,15 +699,17 @@ def render_draft(payload):
     if group["action"] == "no-op":
       continue
     primary = group["locations"][0]
+    comment_text = str(group["comment"])
+    fence = comment_fence(comment_text)
     lines.extend([
       f"#### #{index} {group['title']}",
       f"**File**: {primary['file']}",
       f"**Line**: {line_value(primary)}",
       "",
       "**Comment**:",
-      "```",
-      str(group["comment"]),
-      "```",
+      fence,
+      comment_text,
+      fence,
       "",
     ])
   return "\n".join(lines).rstrip() + "\n"
@@ -727,6 +764,10 @@ def main(argv=None):
   try:
     payload = json.load(sys.stdin)
   except (json.JSONDecodeError, OSError, UnicodeDecodeError):
+    json.dump({"status": "ERROR", "reason_codes": ["INVALID_INPUT_JSON"]}, sys.stdout)
+    sys.stdout.write("\n")
+    return 1
+  if not isinstance(payload, dict):
     json.dump({"status": "ERROR", "reason_codes": ["INVALID_INPUT_JSON"]}, sys.stdout)
     sys.stdout.write("\n")
     return 1

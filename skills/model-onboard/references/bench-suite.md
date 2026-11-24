@@ -9,7 +9,7 @@
 | `BENCH_BASE_URL` | `http://127.0.0.1:8000/v1` | 端點（`client.py` 歷史預設為 `:8000`；現行 Magpie 接線請顯式傳 `http://127.0.0.1:8317/v1`） |
 | `BENCH_API_KEY` | `sk-1234` | 金鑰 |
 | `BENCH_AUTH_STYLE` | `bearer` | 或 `x-api-key` |
-| `BENCH_MAX_TOKENS` | 無（`/models` 無上限欄位時必填） | `smoke.py` 能力探針的單次輸出預算上限；若 `/models` 未回傳 `max_output_tokens`／`max_completion_tokens` 且未設此變數，`smoke.py` 會拋出 `OutputBudgetRequired` |
+| `BENCH_MAX_TOKENS` | 無（`/models` 無上限欄位時必填） | `bench/` 全部 7 支腳本共用的單次輸出預算上限；未設時自動讀取 `/models` 的 `max_output_tokens`／`max_completion_tokens`（若 `/models` 亦無上限欄位，`smoke.py` 會拋出 `OutputBudgetRequired`，其餘題組退回各自保守預設，亦可用 `BENCH_EXTRA_BODY` 覆寫） |
 | `BENCH_DELAY` | `1.5` | 每次請求間隔秒數，撞 429 就調大 |
 | `BENCH_TIMEOUT` | `300` | 單次請求逾時 |
 

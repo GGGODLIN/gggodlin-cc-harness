@@ -20,7 +20,8 @@ keys="$fixture/keys.env"
 relay_url='http://127.0.0.1:8317'
 relay_token='fixture-relay-token'
 models="$fixture/gpt-models.env"
-luna='fixture-luna(max)'
+primary='group/gemini-flash:high'
+sol='fixture-sol(high)[1m]'
 checks=0
 failures=0
 
@@ -151,7 +152,7 @@ require(prompt.count('--since="$WINDOW_START" --until="$WINDOW_END"') == 3, "git
 require(prompt.count('-newermt "$WINDOW_START" ! -newermt "$WINDOW_END"') == 1, "only memory mtime should have both bounds")
 for text in ("WINDOW_START < timestamp <= WINDOW_END", "只當候選預篩", "不得重新取 now", "os.environ", "原檔絕對 path", "實際 basename", "真人 timestamp", "連續 quote", "既有要求原文位置", "assistant 違規原句位置", "少任一項", "證據對照", "不自行輸入 UUID"):
   require(text in prompt, "prompt missing: " + text)
-for text in ("recap 只交候選", "main 核對後才追加", "scan_marker", "掃描未完成", "不得 append、覆寫或刪除兩份 ledger"):
+for text in ("recap 只交候選", "main 核對後才追加", "scan_marker", "掃描未完成", "不得 append、覆寫或刪除兩份 ledger", "禁止用 Read 全檔讀取兩份 .jsonl 帳本"):
   require(text in prompt, "candidate handoff missing: " + text)
 for text in ("Ledger 寫回（read-only", "先寫兩個 ledger、再輸出報告", "唯一例外：上述 rule-adherence ledger"):
   require(text not in prompt, "direct ledger write instruction remains: " + text)
@@ -168,14 +169,14 @@ run_case() {
   local label="$1" vendor="$2" base="$3"
   local capture="$fixture/$label.capture" out="$fixture/$label.out" log="$fixture/$label.log"
   env -i HOME="$HOME" PATH="$PATH" RECAP_PROJECTS_ROOT="$projects" RECAP_CLAUDE_BIN="$fake" RECAP_KEYS_FILE="$keys" RECAP_GPT_MODELS_FILE="$models" RECAP_OUT_DIR="$out" RECAP_LOG_DIR="$log" RECAP_DATE=2026-09-08 RECAP_WINDOW_END='2026-10-21T10:00:00+05:30' RECAP_CAPTURE_FILE="$capture" EXPECTED_RELAY_TOKEN="$relay_token" CC_VENDOR="$vendor" ANTHROPIC_BASE_URL="$base" ANTHROPIC_AUTH_TOKEN='fixture-parent-token' ANTHROPIC_API_KEY='fixture-parent-api-key' bash "$script"
-  assert_line "$capture" "model=$luna"
+  assert_line "$capture" "model=$primary"
   assert_line "$capture" 'cc_vendor=headless-channel'
   assert_line "$capture" "base_url=$relay_url"
   assert_line "$capture" 'auth_matches_fixture=yes'
   assert_line "$capture" 'api_key_set='
-  assert_line "$capture" "anthropic_model=$luna"
-  assert_line "$capture" "opus=$luna"
-  assert_line "$capture" "subagent=$luna"
+  assert_line "$capture" "anthropic_model=$primary"
+  assert_line "$capture" "opus=$primary"
+  assert_line "$capture" "subagent=$primary"
   assert_line "$capture" 'go_available=yes'
   assert_line "$out/2026-09-08-recap.md" '# Daily Recap fixture'
   assert_window_prompt "$capture"
@@ -329,6 +330,24 @@ PLURAL_ENTRY_OVERVIEW_REPORT='56 個窗內 session 檔（27 個自然 session；
 ### 複數單位與 memory entry 總覽行的匿名主題
 驗證 sessions / commits / memory entry 與標題並存時不會被誤判成前言拒收。'
 
+WORK_REPO_OVERVIEW_REPORT='107 sessions / 491 commits（446 個工作 repo + 45 個 `~/.claude`）/ 390 個新或更新的 memory / 跨 31 個工作 repo
+
+# Daily Recap
+
+## 2026-09-08
+
+### 含修飾詞 repo 總覽行的匿名主題
+驗證跨 N 個工作 repo 與標題並存時不會被誤判成前言拒收。'
+
+SLASH_MEMORY_OVERVIEW_REPORT='101 sessions / 272 commits / 91 個新／更新 memory / 跨 23 個 repo（含 `~/.claude`）
+
+# Daily Recap
+
+## 2026-09-08
+
+### 斜線連接新／更新 memory 總覽行的匿名主題
+驗證新／更新 memory 與括號補充 repo 並存時不會被誤判成前言拒收。'
+
 PREFACE='先整理四條來源，完成後再輸出報告。'
 CLOSING='以上是今日整理。'
 PROGRESS='正在核對來源，報告還沒寫。'
@@ -456,6 +475,26 @@ if ! cmp -s "$STREAM_OUT" "$plural_expected"; then
   ((++failures))
 fi
 
+work_repo_expected="$fixture/work-repo-overview.expected"
+printf '%s\n' "$WORK_REPO_OVERVIEW_REPORT" > "$work_repo_expected"
+run_stream_case work-repo-overview "" "$preface_block" "$(assistant_event "$WORK_REPO_OVERVIEW_REPORT")" "$closing_result"
+assert_status work-repo-overview "$STREAM_STATUS" 0
+((++checks))
+if ! cmp -s "$STREAM_OUT" "$work_repo_expected"; then
+  print -ru2 -- 'work repo overview report was not preserved byte-for-byte'
+  ((++failures))
+fi
+
+slash_memory_expected="$fixture/slash-memory-overview.expected"
+printf '%s\n' "$SLASH_MEMORY_OVERVIEW_REPORT" > "$slash_memory_expected"
+run_stream_case slash-memory-overview "" "$preface_block" "$(assistant_event "$SLASH_MEMORY_OVERVIEW_REPORT")" "$closing_result"
+assert_status slash-memory-overview "$STREAM_STATUS" 0
+((++checks))
+if ! cmp -s "$STREAM_OUT" "$slash_memory_expected"; then
+  print -ru2 -- 'slash memory overview report was not preserved byte-for-byte'
+  ((++failures))
+fi
+
 for prefaced_report in "$GOOD_REPORT" "$ANNOTATED_OVERVIEW_REPORT"; do
   run_stream_case inline-preface "" "$(assistant_event "$PREFACE"$'\n\n'"$prefaced_report")" "$closing_result"
   assert_status inline-preface "$STREAM_STATUS" 1
@@ -544,6 +583,60 @@ assert_log_has "$upstream_log/local-analysis-recap-2026-09-08.log" 'upstream fai
 assert_log_has "$upstream_log/local-analysis-recap-2026-09-08.log" 'upstream exit 9'
 ((++checks))
 [[ ! -s "$upstream_out/2026-09-08-recap.md" ]] || { print -ru2 -- 'upstream failure left a report'; ((++failures)); }
+
+# <details><summary> 合法摺疊清單不可被誤判為 compaction summary
+DETAILS_REPORT='# Daily Recap fixture
+
+3 session / 2 commit / 1 個新 memory / 跨 2 個 repo
+
+## 2026-09-08
+
+### 含摺疊清單的匿名主題
+<details>
+<summary>110 個 session</summary>
+`a.jsonl`, `b.jsonl`
+</details>'
+run_stream_case details-summary "" "$(assistant_event "$DETAILS_REPORT")" "$closing_result"
+assert_status details-summary "$STREAM_STATUS" 0
+assert_file_has "$STREAM_OUT" '<summary>110 個 session</summary>'
+
+# 主模型失敗時自動備援 GPT_SOL(high)[1m]，並記錄切換與呼叫順序
+fallback_fake="$fixture/claude-fallback"
+cat > "$fallback_fake" <<'EOF'
+#!/bin/bash
+set -euo pipefail
+model=''
+while (($#)); do
+  case "$1" in
+    --model) model="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+printf '%s\n' "$model" >> "$RECAP_MODELS_LOG"
+if [[ "$model" == "group/gemini-flash:high" ]]; then
+  printf 'primary transient failure\n' >&2
+  exit 1
+fi
+printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"# Daily Recap fallback\n\n3 session / 2 commit / 1 個新 memory / 跨 2 個 repo\n\n## 2026-09-08\n\n### 備援模型產出\n確認由 Sol 備援完成。"}]}}'
+printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"done"}'
+EOF
+chmod +x "$fallback_fake"
+fb_out="$fixture/fb.out"
+fb_log="$fixture/fb.log"
+fb_models="$fixture/fb.models"
+mkdir -p "$fb_out" "$fb_log"
+set +e
+env -i HOME="$HOME" PATH="$PATH" RECAP_PROJECTS_ROOT="$projects" RECAP_CLAUDE_BIN="$fallback_fake" RECAP_KEYS_FILE="$keys" RECAP_GPT_MODELS_FILE="$models" RECAP_OUT_DIR="$fb_out" RECAP_LOG_DIR="$fb_log" RECAP_DATE=2026-09-08 RECAP_MODELS_LOG="$fb_models" CC_VENDOR=gpt ANTHROPIC_BASE_URL='https://parent.invalid/gpt' bash "$script" >/dev/null 2>"$fixture/fb.err"
+fb_status=$?
+set -e
+assert_status fallback-sol "$fb_status" 0
+assert_file_has "$fb_out/2026-09-08-recap.md" '# Daily Recap fallback'
+assert_log_has "$fb_log/local-analysis-recap-2026-09-08.log" "falling back to $sol"
+((++checks))
+if [[ "$(tr '\n' ',' < "$fb_models")" != "$primary,$sol," ]]; then
+  print -ru2 -- "fallback model call sequence unexpected: $(cat "$fb_models")"
+  ((++failures))
+fi
 
 print -r -- "recap-model-route: checks=$checks failures=$failures"
 ((failures == 0))

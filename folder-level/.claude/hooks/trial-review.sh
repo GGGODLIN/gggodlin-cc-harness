@@ -202,7 +202,7 @@ FRICTION_THRESHOLD="${FRICTION_THRESHOLD:-3}"
 SCAN_HOME="${FRICTION_SCAN_HOME:-$HOME}"
 COMPANY_FRICTION_FILES=(
   # acme 的檔案存在但尚無「## 待折」段 → 目前恆計 0；補段後自動生效。
-  # 註：/pr-review 的摩擦另存 ~/.claude/pr-review/friction.md，格式未接本協議、不在掃描口徑內。
+  # 註：/pr-review 的摩擦另存 ~/.claude/pr-review/friction.md，已接入本協議並由下方 PRIVATE_FRICTION_FILES 具名掃描。
   "$SCAN_HOME/Desktop/work/acme/docs/owner/harness-friction.md"
 )
 # 個人側具名檔：落在兩個 glob 之外、但仍走本協議的摩擦檔。
@@ -217,10 +217,13 @@ while IFS= read -r f; do [ -n "$f" ] && FRICTION_FILES+=("$f"); done < <(
   find "$SCAN_HOME/.claude/friction" -maxdepth 1 -type f -name '*.md' ! -name 'PROTOCOL.md' 2>/dev/null
 )
 for f in "${PRIVATE_FRICTION_FILES[@]}"; do [ -f "$f" ] && FRICTION_FILES+=("$f"); done
-for f in "${COMPANY_FRICTION_FILES[@]}"; do [ -f "$f" ] && FRICTION_FILES+=("$f"); done
+# 公司側摩擦檔（COMPANY_FRICTION_FILES）與 doc-drift.md 中 target 指向 /Desktop/work/ 的條目
+# 統一交由 ~/Desktop/work/acme/（acme-friction skill）完整重審與開 PR，不計入全域個人待折門檻。
+# 全場收尾由 friction-review-state.py company-summary 一併彙整待開 PR 與未審待決公司項目。
 
-# 2026-09-12：計數分母改為「待折段中尚未通知過的項目」，所有檔案一致（不分有主／無主）。
+# 2026-09-12：白天提醒的計數分母改為「待折段中尚未通知過的項目」，所有檔案一致（不分有主／無主）。
 # 理由：待折段原本同時容納「沒看過」與「看過但決定不改」，後者已完成審閱卻因計數不變而每天重報。
+# 唯讀預檢不用這個分母，見迴圈內 FRICTION_REPORT 判定處的說明。
 # 休眠段由協議定義、不在待折段內，awk 掃到下一個 `## ` 即止，因此自動不計入。
 # 水位跟著「項目」走（每行內容的 SHA-256），不跟著檔案走——用檔案 mtime 或全文 hash 會讓
 # 「整理格式、搬動歷史段落」也觸發重複提醒（2026-09-12 顧問審查指出，本檔前一版即為檔案級計數）。
@@ -234,7 +237,7 @@ FRICTION_PENDING_TOTAL=0
 FRICTION_PENDING_NAMES=""
 # 本 hook 刻意不開 set -u；若日後要開，空陣列展開需改 ${FRICTION_FILES[@]+"${FRICTION_FILES[@]}"}（bash 3.2 空陣列 + set -u 會炸 unbound）
 for f in "${FRICTION_FILES[@]}"; do
-  CNT=$(awk '/^## 待折$/{if(!seen){seen=1;flag=1};next}flag&&/^## /{flag=0;done=1}done{next}flag&&/^- /&&$0!~/\[pending_implementation /{c++}END{print c+0}' "$f" 2>/dev/null)
+  CNT=$(awk '/^## 待折$/{if(!seen){seen=1;flag=1};next}flag&&/^## /{flag=0;done=1}done{next}flag&&/^- /&&$0!~/\[pending_implementation /&&$0!~/target=[^;\]]*\/Desktop\/work\//{c++}END{print c+0}' "$f" 2>/dev/null)
   PENDING_CNT=$(awk '/^## 待折$/{if(!seen){seen=1;flag=1};next}flag&&/^## /{flag=0;done=1}done{next}flag&&/^- /&&$0~/\[pending_implementation /{c++}END{print c+0}' "$f" 2>/dev/null)
   CNT="${CNT:-0}"
   PENDING_CNT="${PENDING_CNT:-0}"
@@ -254,6 +257,7 @@ try:
 except Exception:
     sys.exit(1)
 pending, seen, flag = [], False, False
+company_target_re = re.compile(r"target=[^;\]]*/Desktop/work/")
 for l in lines:
     if re.fullmatch(r"## 待折", l):
         if not seen: seen, flag = True, True
@@ -261,7 +265,7 @@ for l in lines:
     if flag and l.startswith("## "):
         flag = False
         continue
-    if flag and l.startswith("- ") and "[pending_implementation " not in l:
+    if flag and l.startswith("- ") and "[pending_implementation " not in l and not company_target_re.search(l):
         pending.append(hashlib.sha256(l.encode("utf-8")).hexdigest())
 try:
     known = set(open(state, encoding="utf-8").read().split())
@@ -271,7 +275,14 @@ print(sum(1 for h in pending if h not in known))
 ' 2>/dev/null)
   [[ "$UNNOTIFIED" =~ ^[0-9]+$ ]] || UNNOTIFIED="$CNT"
   FRICTION_REPORT=0
-  [ "$UNNOTIFIED" -ge "$FRICTION_THRESHOLD" ] && FRICTION_REPORT=1
+  # 水位只管白天提醒行不重複。唯讀預檢（晨間工廠、/trial-review 盤點）問的是「現在有沒有工作」，
+  # 要數待折總數：若也套水位，白天任一 session 顯示過提醒，夜裡工廠就判 0 候選、待折永遠沒人處理
+  # （2026-11-07～11-10 doc-drift 白天提醒 10 次、累積 51 條，工廠四晚都判摩擦 0 檔；case 7j 釘住）。
+  if [ "$QUERY_ONLY" = "1" ]; then
+    [ "$CNT" -ge "$FRICTION_THRESHOLD" ] && FRICTION_REPORT=1
+  else
+    [ "$UNNOTIFIED" -ge "$FRICTION_THRESHOLD" ] && FRICTION_REPORT=1
+  fi
   if [ "$FRICTION_REPORT" -eq 1 ] && [ "$QUERY_ONLY" != "1" ]; then
     # 報了就把當前待折段全部項目記為已通知（提醒一行指向整個檔，人進 review 時看得到全部）
     # TRIAL_REVIEW_QUERY_ONLY=1 時（如預檢或 --dry-run）跳過寫入，避免未開 TUI 就吃掉通知水位
@@ -282,6 +293,7 @@ state = os.environ["FRICTION_NOTIFIED"]
 os.makedirs(os.environ["FRICTION_DIR"], mode=0o700, exist_ok=True)
 lines = open(path, encoding="utf-8").read().splitlines()
 out, seen, flag = [], False, False
+company_target_re = re.compile(r"target=[^;\]]*/Desktop/work/")
 for l in lines:
     if re.fullmatch(r"## 待折", l):
         if not seen: seen, flag = True, True
@@ -289,7 +301,7 @@ for l in lines:
     if flag and l.startswith("## "):
         flag = False
         continue
-    if flag and l.startswith("- ") and "[pending_implementation " not in l:
+    if flag and l.startswith("- ") and "[pending_implementation " not in l and not company_target_re.search(l):
         out.append(hashlib.sha256(l.encode("utf-8")).hexdigest())
 open(state, "w", encoding="utf-8").write("\n".join(out) + ("\n" if out else ""))
 ' 2>/dev/null
@@ -308,8 +320,19 @@ FRICTION_LINE=""
 if [ -n "$FRICTION_DUE_NAMES" ]; then
   FRICTION_LINE="🧰 摩擦待折：${FRICTION_DUE_FILE_HITS} 檔共 ${FRICTION_DUE_TOTAL} 項，過門檻：${FRICTION_DUE_NAMES}（跑 /trial-review 處理；協議 ~/.claude/friction/PROTOCOL.md）\n"
 fi
-if [ -n "$FRICTION_PENDING_NAMES" ]; then
-  FRICTION_LINE="${FRICTION_LINE}🧾 已拍板待落地：${FRICTION_PENDING_TOTAL} 項，位置：${FRICTION_PENDING_NAMES}（跑 /trial-review 對帳 implementation）\n"
+# 公司側採週期批次開 PR，白天一般 session 不顯示待落地提醒以免每日打擾；僅 QUERY_ONLY=1 供 /trial-review 盤點讀取。
+if [ "$QUERY_ONLY" = "1" ] && [ -n "$FRICTION_PENDING_NAMES" ]; then
+  FRICTION_LINE="${FRICTION_LINE}🧾 已拍板待落地：${FRICTION_PENDING_TOTAL} 項，位置：${FRICTION_PENDING_NAMES}（公司側待開 PR 落地，於 /trial-review 結尾彙整）\n"
+fi
+# 唯讀預檢順跑結構 lint（缺待折／缺已折／已折段後無歸因條目），避免隱形檔案永久漏審；失敗時 fail-open 不阻擋原提醒。
+if [ "$QUERY_ONLY" = "1" ]; then
+  FRICTION_STATE_HELPER="$(dirname "${BASH_SOURCE[0]}")/friction-review-state.py"
+  if [ -f "$FRICTION_STATE_HELPER" ]; then
+    FRICTION_LINT_LINE=$(python3 "$FRICTION_STATE_HELPER" lint --scan-home "$SCAN_HOME/.claude" --work-root "$SCAN_HOME/Desktop/work/acme" 2>/dev/null)
+    if [ -n "$FRICTION_LINT_LINE" ]; then
+      FRICTION_LINE="${FRICTION_LINE}${FRICTION_LINT_LINE}\n"
+    fi
+  fi
 fi
 # ===== 事件制分區結束 =====
 

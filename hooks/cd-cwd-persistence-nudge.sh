@@ -7,11 +7,15 @@
 # Disable: touch ~/.claude/hooks/.cd-cwd-disabled
 set -uo pipefail
 
-SENTINEL="$HOME/.claude/hooks/.cd-cwd-disabled"
-[ -f "$SENTINEL" ] && exit 0
+SENTINEL="${HOME:-}/.claude/hooks/.cd-cwd-disabled"
+[ -n "${HOME:-}" ] && [ -f "$SENTINEL" ] && exit 0
 
 input=$(cat)
-cmd=$(printf '%s' "$input" | jq -r '.tool_input.command // ""' 2>/dev/null)
+case "$input" in
+  *cd*|*'\u'*) ;;
+  *) exit 0 ;;
+esac
+cmd=$(printf '%s' "$input" | jq -r 'if type == "object" and (.tool_input | type) == "object" and (.tool_input.command | type) == "string" then .tool_input.command else "" end' 2>/dev/null)
 
 # 只認完整根目錄形狀。~unresolved user 不推論，仍走相對 cd 提醒。
 is_home_root_cd() {

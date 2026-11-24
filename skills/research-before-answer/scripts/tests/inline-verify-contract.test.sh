@@ -32,9 +32,11 @@ def validate(source):
     ('blocked external no history fallback', r'\*\*外部搜尋受阻或沒答案\*\*[^\n]*不改查本機歷史收錄', routing),
     ('R1 local evidence', r'^- \*\*R1[^\n]*個人或本地現況可用權威檔案的 Read、git／CLI 原始輸出', inline),
     ('R2 decision claims', r'^- \*\*R2[^\n]*decision table 每一列[^\n]*不得拿來推薦或排除方案', inline),
+    ('R2 memory state vs behavior evidence', r'^- \*\*R2[^\n]*memory／文件對環境、執行或採用狀態的轉述[^\n]*僅引記憶或狀態轉述宣稱現況已接入／已採用者 R2 判 FAIL', inline),
     ('decision table source column', r'^- \*\*Decision table 固定形狀\*\*[^\n]*欄名逐字為 `來源`[^\n]*每列[^\n]*逐項對應[^\n]*不得交付推薦', inline),
     ('unknown is not counterevidence', r'^- \*\*未知不是反證\*\*[^\n]*不能改寫成「因此不選 X」[^\n]*判斷只引用已驗證部分', inline),
     ('R3 proxy target', r'^- \*\*R3[^\n]*observed metric → target outcome → attribution', inline),
+    ('R4 region currency uncertainty', r'^- \*\*R4[^\n]*未明示提問指定的地區／幣別適用範圍[^\n]*不靜默改寫成 `US\$` 等確定值', inline),
     ('dispatch alternatives', r'^2\. decision table／兩個以上替代方案比較', dispatch),
     ('exclusive verdict', r'最後一行只能是 `VERDICT: COMPLIANT` 或 `VERDICT: VIOLATIONS:', dispatch),
     ('malformed verdict override', r'任一 FAIL 時，即使最後一行誤寫 COMPLIANT 也按 VIOLATIONS 處理', dispatch),
@@ -119,7 +121,18 @@ if not validate(text.replace(blocked_line, '', 1)):
   raise SystemExit(1)
 print('PASS blocked-routing mutant rejected')
 
-print('PASS=10 FAIL=0')
+r4_line = next(line for line in text.splitlines() if line.startswith('- **R4 '))
+if not validate(text.replace('或官方頁未明示提問指定的地區／幣別適用範圍（例如問美國價卻僅顯示裸 `$`、未標地區或 `USD`）', '', 1)):
+  print('FAIL region-currency-uncertainty mutant passed')
+  raise SystemExit(1)
+print('PASS region-currency-uncertainty mutant rejected')
+
+if not validate(text.replace('僅引記憶或狀態轉述宣稱現況已接入／已採用者 R2 判 FAIL', '可引記憶檔作為採用出處', 1)):
+  print('FAIL memory-adoption-pointer mutant passed')
+  raise SystemExit(1)
+print('PASS memory-adoption-pointer mutant rejected')
+
+print('PASS=12 FAIL=0')
 PY
 
 python3 "$SCRIPT_DIR/decision-table-output-contract.py" --self-test

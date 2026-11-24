@@ -3,9 +3,10 @@
 # 四件起跳（known-good／known-bad／邊界／自身生命週期）＋ 寫檔 gate 必測（旁路未受影響／state 病態）。
 # 跑法：bash ~/.claude/hooks/ticket-yagni.test.sh   全過時最後一行印 TICKET_YAGNI_TESTS_ALL_PASS_7f3a
 set -u
-HOOK=${TICKET_YAGNI_HOOK:-$HOME/.claude/hooks/ticket-yagni.py}
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+HOOK=${TICKET_YAGNI_HOOK:-$SCRIPT_DIR/ticket-yagni.py}
 REAL_RUNNER=${TICKET_YAGNI_REAL_RUNNER:-$(dirname "$HOOK")/ticket-yagni-runner.py}
-T=$(mktemp -d /tmp/ticket-yagni-test.XXXXXX)
+T=$(mktemp -d "${TMPDIR:-/tmp}/ticket-yagni-test.XXXXXX")
 export TICKET_YAGNI_ROOT="$T/root" MATT_TDD_ROOT="$T/matt" TICKET_YAGNI_OFF="$T/off" TICKET_YAGNI_RUNNER="$T/stub-runner.py"
 export TICKET_YAGNI_PENDING_TTL=700 TICKET_YAGNI_RUNNER_TIMEOUT=20 TICKET_YAGNI_FAIL_OPEN=1
 unset TICKET_YAGNI_FAKE_RESPONSE
@@ -74,11 +75,11 @@ hook(){ # $1 subcmd, $2 json ; sets OUT ERR RC
   OUT=$(printf '%s' "$2" | python3 "$HOOK" "$1" 2>"$T/err.txt"); RC=$?; ERR=$(cat "$T/err.txt")
 }
 j(){ python3 -c 'import json,sys;print(json.dumps(dict(a.split("=",1) for a in sys.argv[1:])))' "$@"; }
-reg_input(){ # desc prompt resp session
-  python3 - "$1" "$2" "$3" "$4" "$REPO" <<'EOF'
+reg_input(){ # desc prompt resp session [subagent_type]
+  python3 - "$1" "$2" "$3" "$4" "$REPO" "${5:-routed-impl}" <<'EOF'
 import json,sys
-d,p,r,s,cwd=sys.argv[1:]
-print(json.dumps({"hook_event_name":"PostToolUse","session_id":s,"cwd":cwd,"tool_name":"Agent","tool_use_id":"toolu_fg_0001","tool_input":{"description":d,"prompt":p,"subagent_type":"routed-impl"},"tool_response":r}))
+d,p,r,s,cwd,st=sys.argv[1:]
+print(json.dumps({"hook_event_name":"PostToolUse","session_id":s,"cwd":cwd,"tool_name":"Agent","tool_use_id":"toolu_fg_0001","tool_input":{"description":d,"prompt":p,"subagent_type":st},"tool_response":r}))
 EOF
 }
 notif(){ # task-id status session
@@ -115,7 +116,15 @@ hook register "$(reg_input 'do some stuff' 'no ticket here' "$ASYNC_RESP" $SESSI
 check "R3 unmatched ticket -> audit, no registry line" "[ \$RC -eq 0 ] && [ \$(wc -l < '$REG') -eq $N_BEFORE ] && grep -q register-unmatched '$AUD'"
 N_BEFORE_PROMPT_ONLY=$(wc -l < "$REG")
 hook register "$(reg_input '<review-implement-selection:v1 model=opus axis=scope>' "review the diff, see .scratch/foo/issues/03-wire-watcher.md for context" "$ASYNC_RESP" $SESSION)"
-check "R3b prompt-only ticket number does not register" "[ \$RC -eq 0 ] && [ \$(wc -l < '$REG') -eq \$N_BEFORE_PROMPT_ONLY ] && grep -q register-unmatched '$AUD'"
+check "R3b relative prompt-only ticket path does not register" "[ \$RC -eq 0 ] && [ \$(wc -l < '$REG') -eq \$N_BEFORE_PROMPT_ONLY ] && grep -q register-unmatched '$AUD'"
+hook register "$(reg_input '<review-implement-selection:v1 model=opus axis=scope>' "review the diff, see $T03 for context" "$ASYNC_RESP" $SESSION routed-judge)"
+check "R3c non-worker reviewer with absolute ticket path in prompt does not register" "[ \$RC -eq 0 ] && [ \$(wc -l < '$REG') -eq \$N_BEFORE_PROMPT_ONLY ] && grep -q register-non-worker '$AUD'"
+hook register "$(reg_input '票 03實作' "work in $REPO" 'Async agent launched successfully. agentId: cjk0300001 (internal)' $SESSION)"
+check "R2b Unicode CJK-adjacent ticket description ('票 03實作') registers" "[ \$RC -eq 0 ] && grep -q 'cjk0300001' '$REG'"
+hook register "$(reg_input '實作Ticket 03完成' "work in $REPO" 'Async agent launched successfully. agentId: cjk0300002 (internal)' $SESSION)"
+check "R2c Unicode CJK-wrapped Ticket description ('實作Ticket 03完成') registers" "[ \$RC -eq 0 ] && grep -q 'cjk0300002' '$REG'"
+hook register "$(reg_input 'implement watcher wiring' "既有流程續作狀態：implement\n票檔：$T03" 'Async agent launched successfully. agentId: fb03000001 (internal)' $SESSION)"
+check "R2d WORKER_AGENT_TYPES fallback to unique absolute prompt ticket path registers" "[ \$RC -eq 0 ] && grep -q 'fb03000001' '$REG' && grep -q '\"ticket_file\": \"$T03\"' '$REG'"
 STUB_MODE=keep hook register "$(reg_input 'ticket 03 inline' "path $REPO" 'Final result: done, all tests green.' $SESSION)"
 check "R4 foreground agent reviewed immediately (all keep -> exit 0)" "[ \$RC -eq 0 ] && ls '$TICKET_YAGNI_ROOT/$SESSION/${RUN}__03/'fg-*/verdict.json >/dev/null 2>&1 && grep -q review-done '$AUD'"
 
@@ -151,9 +160,79 @@ check "G3 non-implement session silent" '[ $RC -eq 0 ] && [ -z "$OUT" ]'
 hook gate "$(gate_input Edit "$REPO/.scratch/feat/issues/05-none.md" "$DONE_LINE" $SESSION)"
 check "G4 ticket not in decision silent" '[ $RC -eq 0 ] && [ -z "$OUT" ]'
 hook gate "$(gate_input Edit "$T09" "$DONE_LINE" $SESSION)"
-check "G5 verdict with kill -> deny once with item list" "[ \$RC -eq 0 ] && echo \"\$OUT\" | grep -q '\"permissionDecision\": \"deny\"' && echo \"\$OUT\" | grep -q 'kill Foo' && [ -f '$V09/delivered' ]"
+check "G5 verdict with kill -> deny with item list, Verification Log guidance, no single-deny bypass wording" "[ \$RC -eq 0 ] && echo \"\$OUT\" | grep -q '\"permissionDecision\": \"deny\"' && echo \"\$OUT\" | grep -q 'kill Foo' && echo \"\$OUT\" | grep -q 'Verification Log' && ! echo \"\$OUT\" | grep -q '這個 deny 只出現一次' && [ -f '$V09/delivered' ]"
 hook gate "$(gate_input Edit "$T09" "$DONE_LINE" $SESSION)"
-check "G6 second attempt after delivery -> allow" '[ $RC -eq 0 ] && [ -z "$OUT" ]'
+check "G6a immediate identical retry without repo or Verification Log progress -> still deny" "[ \$RC -eq 0 ] && echo \"\$OUT\" | grep -q '\"permissionDecision\": \"deny\"' && grep -q 'gate-deny-verdict-retry' '$AUD'"
+hook gate "$(gate_input Edit "$T09" "$DONE_LINE" $SESSION)"
+check "G6b third identical retry -> still deny with escalated count" "[ \$RC -eq 0 ] && echo \"\$OUT\" | grep -q '\"permissionDecision\": \"deny\"' && echo \"\$OUT\" | grep -q '已連擋 3 次'"
+DONE_WITH_VLOG=$(printf '%s\n\n## Verification Log\n\n- 2026-11-14 YAGNI disposition: Foo/bar kept per Story 1.' "$DONE_LINE")
+hook gate "$(gate_input Edit "$T09" "$DONE_WITH_VLOG" $SESSION)"
+check "G6c Edit adding Verification Log disposition -> allow" '[ $RC -eq 0 ] && [ -z "$OUT" ]'
+# Isolated repo fixture to test git working-tree, git HEAD, checkbox-only boundary, and inspect error without touching $REPO ($SNAP_BEFORE)
+PROG="$T/prog-repo"; mkdir -p "$PROG/.scratch/feat/issues"
+git -C "$PROG" init -q; git -C "$PROG" config user.email t@t; git -C "$PROG" config user.name t
+PROG_T09="$PROG/.scratch/feat/issues/09-wire.md"
+cat > "$PROG_T09" <<'EOF'
+# 09 — Prog ticket
+
+**Status:** `ready-for-agent`
+
+- [ ] Item A
+EOF
+printf 'class Foo:\n  pass\n' > "$PROG/mod.py"
+git -C "$PROG" add -A; git -C "$PROG" commit -qm base
+printf 'class Foo:\n  pass\n\ndef extra():\n  return 1\n' > "$PROG/mod.py"
+PROG_SESS="sess-prog-0001"; mkdir -p "$MATT_TDD_ROOT/$PROG_SESS/$RUN"
+cp "$MATT_TDD_ROOT/$SESSION/$RUN/decision.json" "$MATT_TDD_ROOT/$PROG_SESS/$RUN/decision.json"
+python3 - "$PROG_SESS" "$PROG" "$PROG_T09" <<'EOF' | python3 "$HOOK" register >/dev/null
+import json,sys
+s,cwd,tf=sys.argv[1:]
+print(json.dumps({"hook_event_name":"PostToolUse","session_id":s,"cwd":cwd,"tool_name":"Agent","tool_input":{"description":"Ticket 09 prog","prompt":f"work in {cwd} {tf}","subagent_type":"routed-impl"},"tool_response":"Async agent launched successfully. agentId: prog090001 (internal)"}))
+EOF
+STUB_MODE=kill hook deliver "$(python3 - "$PROG_SESS" "$PROG" <<'EOF'
+import json,sys
+s,cwd=sys.argv[1:]
+print(json.dumps({"hook_event_name":"UserPromptSubmit","session_id":s,"cwd":cwd,"prompt":"<task-notification>\n<task-id>prog090001</task-id>\n<status>completed</status>\n</task-notification>"}))
+EOF
+)"
+prog_gate(){
+  python3 - "$PROG_T09" "$DONE_LINE" "$PROG_SESS" "$1" <<'EOF'
+import json,sys
+f,new,s,cwd=sys.argv[1:]
+print(json.dumps({"hook_event_name":"PreToolUse","session_id":s,"cwd":cwd,"tool_name":"Edit","tool_input":{"file_path":f,"old_string":"**Status:** `ready-for-agent`","new_string":new}}))
+EOF
+}
+hook gate "$(prog_gate "$PROG")"
+check "G6d prog first deny records baseline" 'echo "$OUT" | grep -q deny'
+sed -i '' 's/- \[ \] Item A/- [x] Item A/' "$PROG_T09"
+hook gate "$(prog_gate "$PROG")"
+check "G6e boundary: editing ticket checkbox outside Verification Log does NOT unlock gate" 'echo "$OUT" | grep -q deny'
+printf 'class Foo:\n  pass\n' > "$PROG/mod.py"
+hook gate "$(prog_gate "$PROG")"
+check "G6f trimming dirty file in working tree unlocks gate" '[ $RC -eq 0 ] && [ -z "$OUT" ]'
+# Reset delivered to test git HEAD progression
+rm -f "$TICKET_YAGNI_ROOT/$PROG_SESS/${RUN}__09/prog090001/delivered"
+hook gate "$(prog_gate "$PROG")"
+git -C "$PROG" commit -am "trim extra" -q
+hook gate "$(prog_gate "$PROG")"
+check "G6g new git commit (HEAD change) unlocks gate" '[ $RC -eq 0 ] && [ -z "$OUT" ]'
+# Test pathological delivered (symlink & FIFO) and git inspect failure policy
+DELIV_P="$TICKET_YAGNI_ROOT/$PROG_SESS/${RUN}__09/prog090001/delivered"
+rm -f "$DELIV_P"; ln -s "$AUD" "$DELIV_P"
+hook gate "$(prog_gate "$PROG")"
+check "P3 delivered as symlink: denied fail-closed, target untouched" 'echo "$OUT" | grep -q deny && grep -q gate-deny-bad-delivered "$AUD"'
+rm -f "$DELIV_P"; mkfifo "$DELIV_P"
+( printf '%s' "$(prog_gate "$PROG")" | python3 "$HOOK" gate >"$T/p4.out" 2>&1; echo $? > "$T/p4.rc" ) &
+P4PID=$!; for i in 1 2 3 4 5 6; do kill -0 $P4PID 2>/dev/null || break; sleep 0.5; done
+if kill -0 $P4PID 2>/dev/null; then kill $P4PID 2>/dev/null; RC=124; else RC=$(cat "$T/p4.rc"); OUT=$(cat "$T/p4.out"); fi
+check "P4 delivered as FIFO: no hang, denied fail-closed" '[ $RC -eq 0 ] && echo "$OUT" | grep -q deny'
+rm -f "$DELIV_P"
+hook gate "$(prog_gate "$PROG")"
+rm -rf "$PROG/.git"
+TICKET_YAGNI_FAIL_OPEN=1 hook gate "$(prog_gate "$PROG")"
+check "G6h git inspect error with FAIL_OPEN=1 -> allow + audit" '[ $RC -eq 0 ] && [ -z "$OUT" ] && grep -q gate-allow-fail-open-inspect "$AUD"'
+TICKET_YAGNI_FAIL_OPEN=0 hook gate "$(prog_gate "$PROG")"
+check "G6i git inspect error with FAIL_OPEN=0 -> deny" 'echo "$OUT" | grep -q deny'
 hook gate "$(gate_input Edit "$T03" "$DONE_LINE" $SESSION)"
 check "G7 latest worker has error.json -> fail-open allow + audit" "[ \$RC -eq 0 ] && [ -z \"\$OUT\" ] && grep -q gate-allow-fail-open-error '$AUD'"
 hook register "$(reg_input 'Ticket 03 pending worker' "$REPO" 'Async agent launched successfully. agentId: pend010000 (internal)' $SESSION)"
@@ -170,12 +249,12 @@ hook gate "$(gate_input Edit "$T12" "$DONE_LINE" $SESSION)"
 check "G10 unregistered ticket -> deny with remedy" "echo \"\$OUT\" | grep -q deny && echo \"\$OUT\" | grep -q '沒有登記' && echo \"\$OUT\" | grep -q -- '--manual'"
 # 2026-10-14：Inline（沒有 worker）時補救指令要直接可跑——票檔與 worktree 填好、不要求不存在的 worker worktree
 REPO_TOP=$(git -C "$REPO" rev-parse --show-toplevel)
-check "G10b unregistered remedy is runnable for Inline: ticket-file + toplevel worktree filled, no worker placeholder" "echo \"\$OUT\" | grep -qF -- '--ticket-file $T12' && echo \"\$OUT\" | grep -qF -- '--worktree $REPO_TOP ' && ! echo \"\$OUT\" | grep -qF '<worker worktree>' && echo \"\$OUT\" | grep -q '開工前'"
+check "G10b unregistered remedy is runnable for Inline: --run + ticket-file + toplevel worktree filled, no worker placeholder" "echo \"\$OUT\" | grep -qF -- '--run $RUN' && echo \"\$OUT\" | grep -qF -- '--ticket-file $T12' && echo \"\$OUT\" | grep -qF -- '--worktree $REPO_TOP ' && ! echo \"\$OUT\" | grep -qF '<worker worktree>' && echo \"\$OUT\" | grep -q '開工前'"
 hook gate "$(gate_input Edit "$T12" '**Status:** implementation complete — thin runner verified' $SESSION)"
 check "G11 boundary: R1-style 'implementation complete' counts as completion" 'echo "$OUT" | grep -q deny'
 hook gate "$(gate_input Write "$T12" "# 12\n\n$DONE_LINE\n" $SESSION)"
 check "G12 Write tool content also gated" 'echo "$OUT" | grep -q deny'
-hook register "$(reg_input 'Ticket 12 nodeliver' "$REPO" 'Async agent launched successfully. agentId: nodl010000 (internal)' $SESSION)"
+hook register "$(reg_input 'nodeliver' "$REPO" 'Async agent launched successfully. agentId: nodl010000 (internal)' $SESSION)"
 hook gate "$(gate_input Edit "$T12" "$DONE_LINE" $SESSION)"
 check "G13 registered but no delivery -> deny" 'echo "$OUT" | grep -q "沒有交件審查紀錄"'
 mkdir -p "$TICKET_YAGNI_ROOT/$SESSION/${RUN}__12/manual"; printf '{"verdicts":[],"counts":{"keep":0,"demote":0,"kill":0}}' > "$TICKET_YAGNI_ROOT/$SESSION/${RUN}__12/manual/verdict.json"

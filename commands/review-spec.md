@@ -1,5 +1,5 @@
 ---
-description: 對 spec / plan / design doc 做分層 adversarial review（T1 唱反調自審 → T2 單一 Opus architecture-critic → T3 多 lens Opus＋Fable 雙跑 → T4 外部跨模型暗門）。補需求探索階段的自審只掃衛生、抓不到「想得對不對」的洞。另有獨立 yagni 軸審「值不值得」（來源追溯／分母／簡單版舉證），`/review-spec yagni <spec>` 單獨跑、不與 T1–T4 疊加——spec 由模型代寫、範圍源頭是一句模糊憂慮時最該跑。依當下複雜度選 Tier，手動 invoke。
+description: 對 spec / plan / design doc 做分層 adversarial review（T1 唱反調自審 → T2 雙席平行：架構批判＋獨立新人理解席 → T3 多 lens Opus＋Fable 雙跑 → T4 外部跨模型暗門）。補需求探索階段的自審只掃衛生、抓不到「想得對不對」的洞。另有獨立 yagni 軸審「值不值得」（來源追溯／分母／簡單版舉證），`/review-spec yagni <spec>` 單獨跑、不與 T1–T4 疊加——spec 由模型代寫、範圍源頭是一句模糊憂慮時最該跑。依當下複雜度選 Tier，手動 invoke。
 argument-hint: "[tier 1-4 | yagni] [spec 路徑，省略則取最新 local spec]"
 ---
 
@@ -56,7 +56,7 @@ command **路徑無關**：任何 spec / plan / PRD 都能審，不綁定特定 
 
 這是 `/review-spec` 自己擁有的情境規則，不改 `architecture-critic` 的全域預設：
 
-- Tier 1 不派 critic；Tier 2 維持單一 Opus；Tier 4 維持外部跨模型流程。Tier 3 支援單席與配對，但不預設單席或雙跑。
+- Tier 1 不派 critic；Tier 2 維持雙席（架構批判＋獨立新人理解，皆 opus 級）；Tier 4 維持外部跨模型流程。Tier 3 支援單席與配對，但不預設單席或雙跑。
 - 使用者選 Tier 3 後，先把本次適用角度與已有執行路徑完整列成矩陣；模型／執行路徑為直列，角度為橫欄。每格明示 `推薦`、`可選`、`需補材料` 或 `不可用：原因`。推薦只是建議，不是授權，也不限制使用者選擇。
 
   | 模型／執行路徑 | 簡化軸 | 弱點軸 | repo 軸 | 相容軸 |
@@ -64,8 +64,8 @@ command **路徑無關**：任何 spec / plan / PRD 都能審，不綁定特定 
   | Opus（`<expected_opus_model>`） | 推薦／可選／條件 | 推薦／可選／條件 | 推薦／可選／條件 | 推薦／可選／條件 |
   | Fable（`<expected_fable_model>`） | 可選／條件 | 可選／條件 | 可選／條件 | 可選／條件 |
 
-  角度欄只放本次適用的 slug，不把其他流程的角度塞進矩陣；模型列沿用當前設定與既有派工路徑，不建立 model registry。main 在詢問使用者前，將推薦席位以同一 session 的 top-level assistant envelope `<review-spec-recommendation:v1 permit_id=<id> seats=<lens:model,...>>` 留在 transcript；使用者可以回「照推薦」、指定換模型、同角度加席、減席、取消角度或逐格選擇；自然語言由 main 轉成明示席位配置，未選定不啟動。`--seats` 只能在同一輪推薦 envelope 與 top-level user selection 都存在後 finalize；「照推薦」必須與 envelope 的席位集合完全相同，明示換選可不同。helper 只核對既有 transcript evidence 與明示配置，不從待派 prompt 推斷授權，也不建立自然語意分類器。
-- Tier 3 只接受原始 invocation 形狀 `/review-spec 3 <spec 路徑>`；Tier 與路徑缺一就不發 permit。**先不要 Read spec**。先讀 model binding：`CC_VENDOR` 空值走原生 Claude，最終要求 resolved model 依選定角色分別為 `claude-opus-*`／`claude-fable-*`；`CC_VENDOR` 非空時讀 `ANTHROPIC_DEFAULT_OPUS_MODEL` 與 `ANTHROPIC_DEFAULT_FABLE_MODEL`，移除尾端 effort 標記（例如 `(max)`）後兩者必須非空且不同，permit 會綁定這組 vendor mapping，最終 verifier 以 exact model ID 驗收。mapping 缺失、相同或中途變更都停止，不得拿同一 vendor model 冒充不同角色。
+  角度欄只放本次適用的 slug，不把其他流程的角度塞進矩陣；模型列沿用當前設定與既有派工路徑，不建立 model registry。main 在詢問使用者前，將推薦席位以同一 session 的 top-level assistant envelope `<review-spec-recommendation:v1 permit_id=<id> seats=<lens:model,...>>` 留在 transcript；使用者可以回「照推薦」、指定換模型、同角度加席、減席、取消角度或逐格選擇；自然語言由 main 轉成明示席位配置，未選定不啟動（例外：自動模式開啟時，依 ADR 0012 可由 `review-spec-dual-permit.py` 照同輪推薦 envelope 帶 `--task <本任務 task>` finalize）。`--seats` 只能在同一輪推薦 envelope 與 top-level user selection（或上述自動模式條件）都存在後 finalize；「照推薦」必須與 envelope 的席位集合完全相同，明示換選可不同。helper 只核對既有 transcript evidence 與明示配置，不從待派 prompt 推斷授權，也不建立自然語意分類器。
+- Tier 3 只接受原始 invocation 形狀 `/review-spec 3 <spec 路徑>`；Tier 與路徑缺一就不發 permit。**先不要 Read spec**。目標 spec 與其所有上層目錄須為個人可信路徑（不得位於 `/tmp` 等系統暫存或 group／world 可寫目錄）；若 `issue` 回 `untrusted-spec`，明報該路徑不符可信權限條件，先將 spec 搬回 `$HOME` 底下，再請使用者重送 `/review-spec 3 <新路徑>`。先讀 model binding：`CC_VENDOR` 空值走原生 Claude，最終要求 resolved model 依選定角色分別為 `claude-opus-*`／`claude-fable-*`；`CC_VENDOR` 非空時讀 `ANTHROPIC_DEFAULT_OPUS_MODEL` 與 `ANTHROPIC_DEFAULT_FABLE_MODEL`，移除尾端 effort 標記（例如 `(max)`）後兩者必須非空且不同，permit 會綁定這組 vendor mapping，最終 verifier 以 exact model ID 驗收。mapping 缺失、相同或中途變更都停止，不得拿同一 vendor model 冒充不同角色。
 - preflight 通過後，在任何 spec 內容進入 context 前執行：`python3 ~/.claude/hooks/review-spec-dual-permit.py issue --session "$CLAUDE_CODE_SESSION_ID" --spec "<目標 spec 絕對路徑>"`。只接受工具回傳的 `permit_id`、`snapshot_path`、`expires_at`、`vendor`、`expected_opus_model`、`expected_fable_model`；issue 失敗就停止，不得手動補 marker。helper 會 full-match 真實 command envelope、核對 command 自帶路徑，建立 owner-only snapshot，並把當前 model mapping 綁進 session-bound permit；任何後續使用者訊息都會撤銷尚未建立的授權。同一 command UUID 只建立一張 permit，程序中斷後重跑只回傳同一張，不會新增 snapshot。
 - permit 建立後只 `Read` 回傳的 `snapshot_path`，不要再讀原始 spec。依 snapshot 完成角度裁剪與矩陣選擇；拍板完成後，將同輪 top-level user selection 與 recommendation event 的 UUID 交給 `python3 ~/.claude/hooks/review-spec-dual-permit.py finalize --session "$CLAUDE_CODE_SESSION_ID" --seats <逗號分隔的 lens:model 配置> --recommendation-event <assistant event UUID>`。使用者回覆「照推薦」時再加 `--follow-recommendation`；helper 會要求席位集合與同輪 envelope 完全相同。`model` 只可填 `opus` 或 `fable`；同一 lens 可選一席或兩席，未選 lens 不列入配置。既有 `--lenses <逗號分隔的 slug>` 保留為明示的雙跑快捷方式，但仍須有同一輪 top-level user 的明示配對選擇，不是預設，也不會暗加任何未列席位；新核可的 legacy shortcut 同樣使用 reference＋完整 Read。finalize 成功後告知實際席位數、每席模型與角度，不把推薦寫成已選。
 - 每個實際派出的席位先執行 `python3 ~/.claude/hooks/review-spec-dual-permit.py packet --session "$CLAUDE_CODE_SESSION_ID" --lens <slug> --model <opus|fable> --reference`。helper 會建立 owner-only packet file，stdout 是綁定 packet path／permit／到期時間／lens 的短 reference；把 stdout **逐字放在 prompt 最前面**，緊接一句「第一個動作必須用 Read 完整讀取 `REVIEW_SPEC_PACKET_PATH`，不可指定 offset／limit」，再接該 lens 指示與需求約束。gate 比對 Fable reference 與 packet 檔文字是否相等，final verifier 另驗 reviewer 確實完整 Read 該 owner-only file；不再由 main 手動轉貼大型 snapshot：
@@ -93,7 +93,7 @@ command **路徑無關**：任何 spec / plan / PRD 都能審，不綁定特定 
 
 ## Tier 2 — 雙席平行：單一 architecture-critic + 獨立新人理解席（fresh-context）
 
-在同一則訊息平行派出 **2 隻獨立零記憶 subagent**（兩隻皆 `subagent_type: architecture-critic`、`model: opus`，職責嚴格分離，避免同一視窗內重述與批評互相錨定）：
+在同一則訊息平行派出 **2 隻獨立零記憶 subagent**（兩隻皆 `subagent_type: architecture-critic`、`model: opus`，職責嚴格分離，避免同一視窗內重述與批評互相錨定）。若 `CC_VENDOR` 或 `ANTHROPIC_DEFAULT_OPUS_MODEL` 非空，報告必須當場核對並標出兩席實際解析出的 resolved model，不得把 vendor／free 映射模型誤標成原生 Opus：
 
 1. **席位 A — 架構批判席（architecture-proposal lens）**，prompt 前置 framing（關掉 migration lens）：
 
@@ -183,26 +183,28 @@ Spec:
 
 ## Tier 4 — 外部跨模型暗門（手動，高風險 spec 才用）
 
-> **當下路徑狀態**：`gemini -p` 個人 AI Pro 路 6/18 已退役（401 `IneligibleTierError: This client is no longer supported for Gemini Code Assist for individuals`，本機 v0.47.0 驗證、不可恢復）；`agy -p` Antigravity CLI 1.1.0（2026-07-10 實測）正常可用——**現役可選路徑 = codex、agy Gemini Flash 與 opt-in 的 agy Gemini Pro**；只派使用者選定的席位，不自動雙路。此結論沿用 trial `agy-review-flash-vs-pro` 結案 verdict（2026-07-10，全文見 ~/Desktop/projects/.claude/trials/archived.md）：Flash 在 5 個 PR 抓到全場唯一 CONFIRMED finding → 升 pr-review 永久軸；Pro unique 命中僅 2 PR 且帶結構性幻覺（高信心假警報）→ 降 opt-in 預設關。
-
 外部模型給**不相關架構盲點**的第二意見。T4 先列出當次可用外部席位與推薦；只有使用者明示選定的席位才派工，不預設雙路，也不因未回覆而自動啟動任何外部席位。
+
+**互動 session 中 dispatch 前先問一句**：「派工擇一：T4 外部 lens（可複選）— a. codex b. Gemini Flash（`review-spec-gemini-flash`） c. web GPT Pro」。列選單前用 `python3 ~/.claude/skills/agent-dispatch/scripts/open-seat.py --list` 讀席位目錄，按 Gemini 席位 id 取 `quota_source` 顯示；如果沒有可用的 Herdr App／Core 身分與後端，就把 Gemini 席標為不可用並附原因。AFK 或無回應維持未選狀態，不派任何外部席位，也不把跳過或未完成標成 PASS。選 Gemini 才接下方「Gemini 開席與收席」。
 
 🔌 接線點：ChatGPT 網頁版席位 — 見 WIRING.md
 
-- **codex-rescue**：單 job（一次只跑一個）、**prompt 內硬性禁止開放式外查**（不准 WebSearch / WebFetch / 開 URL / 查 GitHub 星數）。T4 的 xhigh＋長 spec 一律視為可能超過 8–10 分鐘，照 `~/.claude/commands/pr-review.md` 的 canonical Run 段走 `subshell + nohup detach + rollout jsonl poll`；不要用 companion 自帶 background、Agent subagent 或 Bash `run_in_background` 直包。把 spec 當 prompt 要它讀一次就 adversarial 評，同 severity scale。（你的 codex 已配 `~/.codex/config.toml` 的 `model = gpt-6.1-sol` + `model_reasoning_effort = xhigh` = 旗艦，不用另指定 model；effort 比 model 更決定聰明度。）
-- **agy Gemini Flash**——預設外部第二路；model id 只從 `~/.claude/model-routing.env` 的 `GEMINI_FLASH_MODEL` 讀取（trial 用 3.5 Flash 結案收編，後續升版不再分散寫進 command）：
-  ```bash
-  GEMINI_FLASH_MODEL=$(bash "$HOME/.claude/scripts/model-routing.sh" GEMINI_FLASH_MODEL)
-  : "${GEMINI_FLASH_MODEL:?missing or invalid GEMINI_FLASH_MODEL in ~/.claude/model-routing.env}"
-  agy --model "$GEMINI_FLASH_MODEL" --print-timeout 10m \
-    -p "<禁外查 adversarial 評審 prompt + spec 全文>" 2>&1
-  ```
-- **agy Gemini 3.1 Pro (High)**——**opt-in、預設不跑**；僅使用者點名才加跑（trial 結案：unique 命中低 + `attributes-undefined` 類結構性幻覺、高信心假警報比漏抓更傷）：
-  ```bash
-  agy --model "Gemini 3.1 Pro (High)" --print-timeout 10m \
-    -p "<禁外查 adversarial 評審 prompt + spec 全文>" 2>&1
-  ```
-- **agy 共通**：⚠️ **參數順序 hard rule（2026-07-05 實測）**：`-p` 取「下一個參數」為 prompt 值——`agy -p --model X "prompt"` 會把字面 `--model` 當 prompt 送出、回無關廢話（本日 T4 前兩發空轉主因）；`--model` / `--print-timeout` 一律放 `-p` 之前。`--print-timeout` 預設 5 分鐘，長 spec 拉到 10 分鐘比較穩；prompt 硬禁外查（同 codex）；OAuth 已登入（2026-06-24 本機驗證 `agy -p "ping"` 正常回應）；**不走 free REST API**（要吃訂閱、且 free 層會拿 spec 訓練）；findings 標 `[agy-Flash]`，使用者點名加跑 Pro 時另標 `[agy-Pro]`、不合併。
+- **codex-rescue**：單 job（一次只跑一個）、**prompt 內硬性禁止開放式外查**（不准 WebSearch / WebFetch / 開 URL / 查 GitHub 星數）。T4 的 xhigh＋長 spec 一律視為可能超過 8–10 分鐘，照 `~/.claude/commands/pr-review.md` 的 canonical Run 段走 `subshell + nohup detach + rollout jsonl poll`；不要用 companion 自帶 background、Agent subagent 或 Bash `run_in_background` 直包。把 spec 當 prompt 要它讀一次就 adversarial 評，同 severity scale。（你的 codex 已配 `~/.codex/config.toml` 的旗艦 `GPT_SOL`（讀 `config/gpt-models.env`）+ `model_reasoning_effort = xhigh`，不用另指定 model；effort 比 model 更決定聰明度。）
+### Gemini 開席與收席
+
+- Gemini Flash 是推薦的外部第二路，仍須使用者選定。`review-spec-gemini-pro` 是 **opt-in、預設不跑**，僅使用者點名才開（實測獨立命中率低，故不作預設）。
+
+1. 只為已選定的 Gemini 席執行。開席前讀 `~/.claude/skills/agent-dispatch/SKILL.md` 的「唯讀單席」，依該段操作。把已選席位 id 填入 `SEAT_ID`，將守則 0 的原樣材料（禁外查 adversarial 評審 prompt + spec 全文，保留原 rubric 與輸出要求）寫到 `BRIEF_FILE`。先建立每席獨立、僅 main 帳號可存取的暫存目錄作為 `SEAT_LOG_DIR`，將 `BRIEF_FILE` 放在該目錄，因為 brief 與收席結果含完整審查材料。席位權限模式由目錄提供。
+
+   ```bash
+   SEAT_SCRIPTS="$HOME/.claude/skills/agent-dispatch/scripts"
+   python3 "$SEAT_SCRIPTS/open-seat.py" "$SEAT_ID" "$BRIEF_FILE" "$PWD" \
+     --log-dir "$SEAT_LOG_DIR" > "$SEAT_LOG_DIR/receipt.json" 2> "$SEAT_LOG_DIR/open.err"
+   ```
+
+2. 依「單席交接（新路）」掛單席背景等待 `hc wait <terminal> --timeout 300 --json`；喚醒後跑 `python3 "$SEAT_SCRIPTS/worker-turns.py" --harness claude --session <session_id> --cwd "$PWD" --turn 1 > "$SEAT_LOG_DIR/reply.json"` 收件。零工具席於啟動時即下 `--tools ""` 鎖；收件完成後用 `hc kill <terminal>` 與 `hc rm <terminal>` 關席。
+3. 如果回件讀取器回 `delivered=true`（首行「做完了」），取 `.reply` 當原 findings 回覆並沿用同一格式。保留原標籤 `[agy-Flash]`／`[agy-Pro]` 以維持報告格式，另記實際通道與 observed model（取自該 session 紀錄檔）。如果回件未交付或空白，不把答案納入合成，也不影響其他有效席位。
+4. 如果席位開不起來、執行出錯、逾時或回件未交付，就保留原因並標該軸 `FAILED`，不自動重送、不改跑 `agy` 或其他無頭指令。
 
 全路徑回齊後把各份批判 diff，標出**只有一方提的點**（這是 T4 的核心產出——交集是信心加成，差集才是跨模型盲點）；與 T2/T3 已有 findings 合成時同樣標注來源模型。完成後接「標準 Tier 1–4 共用收斂」。
 
@@ -213,6 +215,8 @@ Spec:
 - `root`：唯一承重問題；它若不成立，其餘 findings 會失去理由或降成次要。若多個問題彼此獨立，誠實寫「無單一承重問題」，不要硬湊假 root。
 - `first_nail`：針對 root 的最便宜可證偽檢查。必須寫出輸入或樣本、動作、PASS／FAIL 訊號，以及時間或成本上限；規模要小於完整實作。
 - root 為「無單一承重問題」時，每個獨立 root 各配一個 first_nail，並明寫哪些工作可平行；不要拿共同排程或同一份 spec 當成假根因。
+
+**SSoT 選配入口。** 如果 first_nail 有具體的跨事件順序疑問、普通檢查尚不足以回答，或同題已選用／已有 SSoT 模型回件，就在準備選用提案、執行或回收模型前讀 `~/.claude/references/review-spec-ssot.md`，完成該配方後回本段呈現。普通檢查已足夠且未明選 SSoT 時沿原 first_nail；未選用或已拒絕模型時不啟動，已完成的同題結果直接回收，不重跑。這不新增 Tier、YAGNI 路徑或每次 review 必跑的關卡。
 
 單一 root 時，主報告先用兩行交付：
 
@@ -227,39 +231,45 @@ root 為「無單一承重問題」時，`第一個驗證` 按每個獨立 root 
 
 ## YAGNI 軸 — 需求定價（獨立呼叫）
 
-觸發：`/review-spec yagni <spec 路徑>`；或 to-spec 落檔後的審查選單（最後一行有 `<review-spec-entry-menu:v1>`，由 `review-spec-tier1-nudge.sh` 要求）緊接著回 `f`——Fable 許可把這則 `f` 當成親手輸入的指令，不必再請使用者重打。與 T1–T4 正交：它們審「想得對不對」，本軸審「值不值得」。找洞型 review 對過度設計的 spec 是火上加油（每個洞的修補＝更多行），本軸方向相反——reviewer 的預設答案是「不做」。誕生脈絡：2026-08 closeout hook 案，模型代寫 spec 把一句「怎麼知道真的有東西散落在外」翻譯成證明級機械＋防篡改治理，7,200 行上線後複雜層被用 0 次。
+觸發：`/review-spec yagni <spec 路徑>`；或 to-spec 落檔後的審查選單（最後一行有 `<review-spec-entry-menu:v1>`，由 `review-spec-tier1-nudge.sh` 要求）回覆含 `f` 或中途改口切跑 YAGNI 皆可直接進入，不必重打指令。與 T1–T4 正交：它們審「想得對不對」，本軸審「值不值得」。找洞型 review 對過度設計的 spec 是火上加油（每個洞的修補＝更多行），本軸方向相反——reviewer 的預設答案是「不做」。誕生脈絡：2026-08 closeout hook 案，模型代寫 spec 把一句「怎麼知道真的有東西散落在外」翻譯成證明級機械＋防篡改治理，7,200 行上線後複雜層被用 0 次。
 
-1. **席位（預設單席 c；b 席每輪呈現給使用者拍板）**：**沒明示時不得逕自只派 c**——packet 組好後、派工前呈現一次**席位＋模型合併成一題**的選單，使用者只回一個字母。逐字照下方範本，`<…>` 換成當場解出的值，packet 路徑填步驟 2 實際寫入的絕對路徑、不要手打縮寫；同一則附當次 packet 字元數當成本依據（空問一句會退化成橡皮圖章）：
+1. **席位（預設單席 c；平鋪選單讓使用者自由單選或搭配）**：**沒明示時不得逕自開跑**——packet 組好後、派工前呈現一次**平鋪席位選單**，把四種獨立席位各自列出，使用者可單選任一席（含單跑 web GPT Pro）或自由組合（例如 `1`、`1+4`、`2+4`、`3+4`、`4` 或自然語言點名），同一則附當次 packet 字元數當成本依據（空問一句會退化成橡皮圖章）：
    ```
-   派工擇一（席位＋模型，回一個字母）：
-   - a. c 席・fable 級 → <Fable 實際值>
-   - b. c 席・opus 級 → <Opus 實際值>
-   - c. c 席＋web GPT Pro 席（多約 17 分鐘、燒 Pro 額度）・fable 級 → <Fable 實際值>
-   - d. c 席＋web GPT Pro 席（多約 17 分鐘、燒 Pro 額度）・opus 級 → <Opus 實際值>
-   <review-spec-yagni-model-menu:v1 packet=<packet 絕對路徑>>
+   派工選席（平鋪自由搭配，可單選或多選，例如 1、1+4、3+4、4；回「不跑」取消）：
+   - 1. c 席・fable 級（原生 subagent）→ <Fable 實際值>
+   - 2. c 席・opus 級（原生 subagent）→ <Opus 實際值>
+   - 3. c 席・第三方 Fable（Herdr 唯讀席）→ <quota_source><推薦或不可用標記>
+   - 4. web GPT Pro 席（耗時較長、消耗獨立網頁額度）
    ```
-   不要拆成席位、模型兩題，也不要請使用者分兩則回：Fable 許可只看最新一則選單後的第一則回覆，拆題會讓第二個答案永遠不算（2026-09-30 實例：使用者回「a,a」與隨後的「fable」都被拒）。指令已明示席位（如 `yagni b+c <spec>`）時不再問席位，但仍用同一個範本、只留該席位的兩個選項。AFK 或無回應走 b（單席 c＋opus 級）、不阻塞。b 席從 agy Gemini Flash 換成 web GPT Pro 的依據（2026-09-08 全量對帳 20 份雙席報告、813 對 verdict）：agy 席 unique 貢獻 22 條但 unique 誤報 29 條（誤報多於獨佔貢獻），砍除的 99 條裡 48 條與 c 席重複，漏抓 40 條是 c 席的兩倍；另有兩場全表只交出 0 砍與 2 砍，一場因把 rubric 明文保護的量測證據條目判成該砍而整席作廢。席位定義：
+   呈現前執行 `python3 ~/.claude/skills/agent-dispatch/scripts/open-seat.py --list`，取 `third-party-fable` 的 `quota_source` 原文填入選項 3。席位不在目錄、未啟用或無完整 Herdr 身分時標「當下不可用」並附原因。
+   沿用 `/advisor` Step 2 的 active 帳號額度讀法。如果原生高階模型週額接近上限且第三方端點可用，就把選項 3 標「推薦」，說明額度已達門檻，等使用者明選。額度未知就明標，不當成 0。推薦、「照推薦」或沉默都不授權開第三方席或原生 Fable 席。
+   指令已明示席位組合（如 `yagni b+c <spec>` 或當輪已明說要哪些席）時不重複問已決定的部分。選 3 就接下方「第三方 Fable（Herdr）分支」處理 c 席；選 4 依原路執行 web GPT Pro 席（可單跑或與 1／2／3 並跑）。AFK 或無回應走選項 2（單席 c＋opus 級，不掛 `<fable-ok>`）、不阻塞。b 席從 agy Gemini Flash 換成 web GPT Pro 的依據（2026-09-08 全量對帳 20 份雙席報告、813 對 verdict）：agy 席 unique 貢獻 22 條但 unique 誤報 29 條（誤報多於獨佔貢獻），砍除的 99 條裡 48 條與 c 席重複，漏抓 40 條是 c 席的兩倍；另有兩場全表只交出 0 砍與 2 砍，一場因把 rubric 明文保護的量測證據條目判成該砍而整席作廢。席位定義：
    - a. headless 原生 Claude：`bash ~/.claude/scripts/review-spec-yagni-native.sh <packet檔>`——清空 vendor env 後以 `opus` alias 的原生解析值一次性執行（腳本不寫死版號）；席位開始的證據是真正 request，不是 `claude auth status`；c 席被判同族自審且使用者不接受時的替補
 🔌 接線點：ChatGPT 網頁版席位 — 見 WIRING.md
-   - c. 本 session fresh subagent（`routed-judge`），**派工前先問模型級別、不代選**：模型級別併在步驟 1 的合併選單裡問、不另開一題，選項寫成 `fable 級 → <實際值>` 與 `opus 級 → <實際值>`，並在選單同一則說明「選定級別套用到 stories 與 decisions 兩批；這是範圍拆分，不代表增加不同模型視角」，兩個實際值當場解出——vendor session 取 `ANTHROPIC_DEFAULT_FABLE_MODEL` 與 `ANTHROPIC_DEFAULT_OPUS_MODEL`（各去掉尾端 effort 標記如 `(max)`），原生 session 為當前 Claude Fable 與 `opus` alias 的當下解析值（取 `~/.claude/logs/model-drift-watch.jsonl` 最新一筆 `claude-opus-*` 的 `model`；查不到就寫 `opus（解析值未確認）`，不寫舊版號）。**opus 級解出的值落在 free 池就在該行標 `⚠️ free 池`**：`routed-judge` 定義自帶的 opus 在 vendor wrapper 下被映射到 free 池，2026-09-08 全量實測 28 批 0 批跑到 Opus，8 批落 `z-ai/glm-5.3-flash`、1 批落 `deepseek-v4-flash`，那批砍除率 4.9%（對照 luna 17.4%／sol 15.8%）且 5 次 sentinel 無交件全出在它。使用者回答後才派，並把選定級別寫進 Run；AFK 或無回應走 opus 級——Fable 的可信 permit 必須綁定本輪真實人類選擇，沉默不能代替授權。`CC_VENDOR` 非空時先警告「同族自審、盲點可能同源」，使用者可換 a。**c 席走 deterministic 分批契約**：packet 條目拆成 stories／decisions 兩批各派一席，每席開工第一步先 Write sentinel 檔 `~/.claude/.scratch/yagni-c-<batch>-<session-id>.started`，逐條表寫進同目錄 `.report.md`，該檔**首行固定寫 `resolved_model: <值>`**（值取自該 subagent 回報的實際模型；拿不到就寫 `unknown`，不留空、不猜）；main 起跑後 60 秒查不到 sentinel 即標該批 invalid、不用同一契約 focused retry，只保留另一批與其他席（2026-08-27 兩次 60 秒、08-29 三次 600 秒無 final 的同型卡死）；**report 檔是交付物本身**——2026-09-09／09-10 四次派工都帶了 report 指示，c 席四次都只回 final、自稱「本席輸出限制不允許寫 report 檔」，其中一批的完整逐條表因此從未落磁碟。那個限制不存在：`routed-judge` 工具集全開，同一席剛寫成功的 sentinel 就是反證。派工 prompt 要寫進「你有 Write 權限、sentinel 已證明；final 只回計數與路徑」，但不能只靠這句——真正的落檔保證在下方步驟 3 的 main backstop
-     **Fable permit 接線（只在模型選單明確選 Fable 時走）**：
-     1. 步驟 1 合併選單的最後一行固定放 `<review-spec-yagni-model-menu:v1 packet=<packet 絕對路徑>>`；路徑就是步驟 2 的 canonical path（`~/.claude/.scratch/review-spec-yagni-packet-<session-id>.md` 展開成絕對路徑），也是下一步 `issue --packet` 要傳的同一個值，兩者不相等 helper 就拒發。選單先於 permit 存在、帶不了 permit_id，所以改帶 packet 路徑。使用者回代表 fable 的字母（範本裡是 `a` 或 `c`）或 `fable` 才算選 Fable——helper 從選單文字讀出哪些字母是 Fable；`照推薦`、沉默或其他文字不授權，改走 Opus，或重新列一次完整選單再問（helper 只看最新一則選單後的第一則回覆）。
-     2. 選 Fable 後、任何新使用者訊息出現前，執行 `python3 ~/.claude/hooks/review-spec-yagni-permit.py issue --session "$CLAUDE_CODE_SESSION_ID" --packet "<packet 絕對路徑>"`。helper 會從 top-level transcript 重驗同 session `/review-spec yagni`、模型選單與最新人類選擇，建立 owner-only 的 packet 快照副本（不可變靠複製與檔案權限）；非 0、`allowed != true` 或缺欄即停止，不手補 state／marker。
-     3. stories／decisions 各自在 dispatch 前執行 `python3 ~/.claude/hooks/review-spec-yagni-permit.py marker --session "$CLAUDE_CODE_SESSION_ID" --permit-id "<issue 回傳 permit_id>" --batch <stories|decisions>`。Agent 使用 `subagent_type: routed-judge`、`model: fable`；description **只放**回傳的 `<review-spec-yagni:v1 ...>` marker，不加 generic `<fable-ok>`。prompt 必須各自只出現一次 helper 回傳的 `snapshot_path`、該 batch 的 `.started` 與 `.report.md` 絕對路徑；第一個動作 Write sentinel、第二個動作 Read 完整 snapshot。
-     4. 兩個 Agent call 都被 gate 接受後保留 snapshot；close 會刪除它，派工接受不代表 reviewer 已讀完。完成後接步驟 3 的交件核對與 3.1「Fable permit 收尾」。任一 batch 被拒或未派就不 close；permit 固定到期且 batch 單次消耗，重試需重新 invoke `/review-spec yagni` 取得新的人類選擇。
-     Done when：Fable 路徑有 issue 收據、stories／decisions 各一筆 permit consume audit、close 成功（在 3.1 收尾核對）；Opus 路徑沒有建立 YAGNI permit。
+   - c. 本 session fresh subagent（`routed-judge`），**派工前先問模型級別、不代選**：模型級別直接列在步驟 1 平鋪選單的選項 1（`fable 級 → <實際值>`）與選項 2（`opus 級 → <實際值>`），並在選單同一則說明「選定 c 席會拆成 stories 與 decisions 兩批；這是範圍拆分，不代表增加不同模型視角」。兩個實際值當場解出——**無論 `CC_VENDOR` 是否為空，一律先檢查環境變數 `ANTHROPIC_DEFAULT_FABLE_MODEL` 與 `ANTHROPIC_DEFAULT_OPUS_MODEL`（各去掉尾端 effort 標記如 `(max)`）**，只要對應環境變數非空就直接顯示該實際值（避免 `CC_VENDOR` 為空但槽位已被 `cc-pick` 等映射成 GPT 時誤標成原生 Claude）；僅在對應環境變數未設且 `CC_VENDOR` 為空時，才走原生 Claude 解析（`fable` 為當前 Claude Fable，`opus` 取 `~/.claude/logs/model-drift-watch.jsonl` 最新一筆**不以 `-fast` 結尾**的 `claude-opus-*` 的 `model`，排除快速模式留下的 `-fast` 變體；查不到就寫 `opus（解析值未確認）`，不寫舊版號）。**opus 級解出的值落在 free 池就在該行標 `⚠️ free 池`**：`routed-judge` 定義自帶的 opus 在 vendor wrapper 下被映射到 free 池，2026-09-08 全量實測 28 批 0 批跑到 Opus，8 批落 `z-ai/glm-5.3-flash`、1 批落 `deepseek-v4-flash`，那批砍除率 4.9%（對照 luna 17.4%／sol 15.8%）且 5 次 sentinel 無交件全出在它。使用者回答後才派，並把選定級別寫進 Run；AFK、無回應或未明選選項 1（原生 Fable）一律走 opus 級——沉默、「照推薦」或僅輸入 `/review-spec yagni` 都不構成派原生 Fable 的授權。`CC_VENDOR` 非空（或槽位映射到同族模型）時先警告「同族自審、盲點可能同源」，使用者可改選 a 或單跑 4。**c 席走 deterministic 分批契約**：packet 條目拆成 stories／decisions 兩批各派一席，每席開工第一步先 Write 帶當輪 `<round>` 的 sentinel 檔 `~/.claude/.scratch/yagni-c-<batch>-<session-id>-r<round>.started`（`<round>` 與步驟 2 packet 的輪次號一致，避免同 session 多輪誤讀前輪 sentinel 或覆蓋前輪報告），第二個動作以 `Read` 完整讀取步驟 2 的當輪 `packet` 絕對路徑，逐條表寫進同目錄 `~/.claude/.scratch/yagni-c-<batch>-<session-id>-r<round>.report.md`，該檔**首行固定寫 `resolved_model: <值>`**（值取自該 subagent 回報的實際模型；拿不到就寫 `unknown`，不留空、不猜）；main 起跑後 60 秒查不到 sentinel 即標該批 invalid、不用同一契約 focused retry，只保留另一批與其他席（2026-08-27 兩次 60 秒、08-29 三次 600 秒無 final 的同型卡死）；**report 檔是交付物本身**——2026-09-09／09-10 四次派工都帶了 report 指示，c 席四次都只回 final、自稱「本席輸出限制不允許寫 report 檔」，其中一批的完整逐條表因此從未落磁碟。那個限制不存在：`routed-judge` 工具集全開，同一席剛寫成功的 sentinel 就是反證。派工 prompt 要寫進「你有 Write 權限、sentinel 已證明；final 只回計數與路徑」，但不能只靠這句——真正的落檔保證在下方步驟 3 的 main backstop。
+     **原生 Fable 輕量放行接線（只在選單中明確選到選項 1／原生 Fable 時走）**：
+     1. 不再呼叫 `review-spec-yagni-permit.py`（`issue`／`marker`／`close`）也不必建立 snapshot 副本；原腳本與 gate 分支暫留磁碟作回退保險（透過審計 log 追蹤 main 有無未經點選派發）。
+     2. 只有使用者在步驟 1 選單明確點選選項 1（例如 `1`、`1+4` 或明說原生 Fable）後，才對 `stories`／`decisions` 兩批各派 `subagent_type: routed-judge`、`model: fable`，並在 `description` 加上 `<fable-ok> yagni-c:<stories|decisions>`（**不要放** `<review-spec-yagni:v1 ...>`）；未明選選項 1、選 2（opus）或 AFK 時嚴禁掛 `<fable-ok>`，亦不得在對話中自行替使用者決定改用 Fable。
+     3. 兩批直接以 `Read` 完整讀取步驟 2 的當輪 `packet` 絕對路徑，完成後直接接步驟 3 交件核對與 main backstop。
+     Done when：原生 Fable 派工皆有當輪使用者明選紀錄、description 帶 `<fable-ok> yagni-c:<batch>` 且未呼叫 `review-spec-yagni-permit.py`；Opus 路徑與下方第三方 Fable（Herdr）路徑皆未帶 `<fable-ok>`。
+     **第三方 Fable（Herdr）分支（選到選項 3 時走）**：
+     1. 使用者在平鋪選單選到選項 3（例如 `3` 或 `3+4`）後，先讀 `~/.claude/skills/agent-dispatch/SKILL.md` 的「單席交接（新路）」與 `~/.claude/skills/agent-dispatch/references/session-routing.md`，依該新路唯讀單席入口開席，不另問派工同意。缺少 Herdr 身分時明報「第三方 Fable 路徑當下不可用（無 Herdr 身分）」並等使用者改選。本分支**不呼叫** `review-spec-yagni-permit.py`，也不走原生 subagent 的 sentinel 分批派工。
+     2. main 在 `<scratchpad>` 建立權限 `600` 的 brief，指示席位只用 `Read` 讀步驟 2 的當輪 `packet` 絕對路徑，不讀其他檔、不外查、不寫任何檔。依新路首行規則與步驟 3 的三檢查與反方下限，要求**最終回覆第一行只寫 `做完了`（或 `卡住了：缺什麼`）**，第二行起依序交 stories、decisions 兩份完整逐條表，分別以獨立一行 `<!-- YAGNI:stories -->` 與 `<!-- YAGNI:decisions -->` 標示段首作分隔，不包 code fence。開席執行：`python3 ~/.claude/skills/agent-dispatch/scripts/open-seat.py third-party-fable <brief-file> <cwd> --log-dir <收據目錄>`，確認回傳 JSON 的 `first_message.sent` 與 `started` 均為 true。
+     3. 依「單席交接（新路）」掛背景等待 `hc wait <terminal> --timeout 300 --json`，被叫醒後執行 `python3 ~/.claude/skills/agent-dispatch/scripts/worker-turns.py --harness claude --session <session_id> --cwd <cwd> --turn 1` 收件，收完用 `hc kill <terminal>` 與 `hc rm <terminal>` 關席。如果開席失敗、等待逾時或回件 `delivered` 非 true（首行非 `做完了`），就標 c 席 invalid、說明原因，不重送、不換模型，保留其他席已取得的結果。
+     4. 收件成功後，main 剝除 `reply` 首行 `做完了`，依兩個段首拆成兩份並保留段內全文。若段首缺漏、重複、順序錯誤或任一段為空，就標 c 席 invalid，不寫報告、不重送、不換模型。拆分通過後用 Write 分別存 `~/.claude/.scratch/yagni-c-stories-<session-id>-r<round>.report.md` 和 `~/.claude/.scratch/yagni-c-decisions-<session-id>-r<round>.report.md`，`<session-id>` 與 `<round>` 沿用當輪 packet。兩檔首行 `resolved_model: <值>` 取該席本地 session 紀錄檔中 `type=="assistant"` 的 `message.model` 實際值（讀不到寫 `unknown`）。
+     5. 兩份當輪報告落檔後接步驟 3 的條目枚舉與反方下限檢查，未通過即標 c 席 invalid、不重送。通過後接步驟 4，主報告標明「第三方 Fable（<紀錄檔模型名>）」。
+     Done when：收件判 `delivered=true` 並已關席、main 已把完整回件拆存為兩份通過步驟 3 的當輪報告，且本分支未建立 YAGNI permit。
    - d. 這次不跑
    Done when: 席位組合確定（預設或使用者指定）。
-2. **組 packet**：packet 用 Write tool 寫到 neutral canonical path `~/.claude/.scratch/review-spec-yagni-packet-<session-id>.md`，不得沿用 spec／工具名稱進 packet 路徑，也不得用 shell redirect 寫 packet。內容＝spec 全文＋使用者原話引文附錄（彙整 spec 內 `[user: …]` 標註；spec 沒標時回對話撈原話補上）。**引文是指涉型短答時必須連前一則一起收**——`a`／`b`／`照這個`／`可以`／`當然要驗證可用性` 這類回答的語意住在它所指的那則選項或提案裡，只收短答會讓 reviewer 把已拍板的邊界誤判成模型推導（2026-08-23 實例：只抽 `[user: "a，當然要驗證可用性"]`、漏掉選項 a 原文「讀現有 NIM key 並複製進隔離 config」，routed-judge 因此要求 demote 一條使用者已拍板的 credential 邊界）。收法：短答與被指涉的選項／提案文字成對放進附錄，標明哪句是問、哪句是答＋步驟 3 的 rubric 全文。照貫穿守則 0（CLAIM 隔離）：不放 spec 作者或 main 的評估與辯護理由。**研究數字與 wayfinder resolution 要附**：spec 引用的研究檔關鍵數字表（大小／次數／頻率）與 wayfinder 逐題拍板紀錄一併進附錄——2026-08-21／08-23 三場翻案共同根因是 reviewer 把「spec 沒寫」判成「沒發生」。Done when: packet 檔存在且 grep 不到作者結論字樣。
+2. **組 packet**：先盤點 `~/.claude/.scratch/review-spec-yagni-packet-<session-id>-r*.md` 取下一輪號 `<round>`（首輪為 `1`、次輪為 `2`…），packet 用 Write tool 寫到 neutral canonical path `~/.claude/.scratch/review-spec-yagni-packet-<session-id>-r<round>.md`（避免同 session 多輪覆寫無輪次後綴的 `review-spec-yagni-packet-<session-id>.md`），不得沿用 spec／工具名稱進 packet 路徑，也不得用 shell redirect 寫 packet。內容＝spec 全文＋使用者原話引文附錄（彙整 spec 內 `[user: …]` 標註；spec 沒標時回對話撈原話補上）。**引文是指涉型短答時必須連前一則一起收**——`a`／`b`／`照這個`／`可以` 這類回答的語意住在它所指的那則選項或提案裡，只收短答會讓 reviewer 把已拍板的邊界誤判成模型推導（例如只抽簡短同意詞而漏掉選項原文，會讓 reviewer 誤判已拍板的邊界）。收法：短答與被指涉的選項／提案文字成對放進附錄，標明哪句是問、哪句是答＋步驟 3 的 rubric 全文。照貫穿守則 0（CLAIM 隔離）：不放 spec 作者或 main 的評估與辯護理由。**研究數字、引用規範原文與 wayfinder resolution 要附**：spec 引用的研究檔關鍵數字表（大小／次數／頻率）、wayfinder 逐題拍板紀錄、被 spec 引用的 repo 規則／ADR／個人 skill 硬規定原文，以及該 repo 既有的測試基建清冊（避免 reviewer 誤把既有硬規定或現有測試工具當成模型過度設計）一併進附錄——2026-08-21／08-23 與後續五場翻案共同根因是 reviewer 把「packet 沒附原文」判成「沒這條規定或沒發生」。Done when: packet 檔存在且 grep 不到作者結論字樣。
 3. **派席執行三檢查**，輸出逐條表 `# | 條目 | 來源類 | verdict | 一句理由`：
    - **來源追溯**：逐條 requirement／user story 分類——(a) 使用者原話（核對引文真偽）／(b) 量測證據（附數據出處）／(c) 模型推導。(a)(b) 受保護不砍；(c) 逐條要求「砍掉會發生什麼具體損失」，答不出 → verdict 為 `demote-v2` 或 `kill`。
    - **分母檢查**：spec 是否回答「這問題過去實際發生幾次、每次損失多少」。沒有 → 標「未定價」，未定價問題的解法以最簡版為上限。
    - **簡單版舉證**：reviewer 先寫出一頁最簡版方案，逐條列 spec 超出最簡版的部分——舉證責任在 spec 方，不在砍方。
    - **反方下限**：一席若輸出 0 個 `demote-v2`／`kill`，必須對每一條模型推導逐條證明砍掉的具體損失；缺任一條就視為 output shape 不合，回守則 4 focused retry。
    Done when: spec 每條 requirement 都出現在表中（枚舉核對條數，不抽樣），且每席通過守則 4 的席位驗收；c 席落檔的 `resolved_model` **只作紀錄、不作驗收條件**——唯一會標該批不可信的情況是選了 fable 級卻跑出別的級別（靜默降級）。選單解出 `free` 時池內任何一顆都算相符，選 free 就是接受不指定具體模型；`unknown` 照記，不因此作廢。主報告寫出實際落在哪個模型與當初選的級別。**main backstop（每席都做）**：c 席 final 回來後先確認該批 `.report.md` 存在；不存在就當場用 Write 把 final 全文落檔（首行照樣 `resolved_model:`，值取 final 自報、拿不到寫 `unknown`），確認兩批都有檔才進步驟 4——逐條表只留在 transcript 等於下一輪讀不到，2026-09-10 已因此遺失一批完整表。
-3.1 **Fable permit 收尾**：步驟 3 核對交件後接本步。兩批都已完成、失敗或取消，且 main 已核對交件結果後，才執行 `python3 ~/.claude/hooks/review-spec-yagni-permit.py close --session "$CLAUDE_CODE_SESSION_ID" --permit-id "<permit_id>"`；只要任一批仍在執行，就保留 snapshot 等完成通知。失敗／取消先記錄結果，缺表不算審查通過；清理不重跑舊審查。任一批未被接受或未派出時不 close；helper 拒絕時保留原回件，不重建 permit。Done when：兩批已停止、交件結果已記錄，且 close 成功或拒絕原因已記錄；有效交件才接步驟 4，無效交件維持未完成。
 4. **主報告三句再 dispute 上呈**：surface 前固定先講三句「這輪在審值不值得做／兩席（或 reviewer）一致認為哪裡太早／你現在只決定要不要縮 scope」，逐條表、內部 ID 與來源分類統計下沉到 yagni-review 檔、聊天不重播。接著表交回 spec 作者（或 main session），作者對每條只能填 `accept`／`dispute`。accept → 改 spec；**dispute → 條目與 reviewer 理由原文上呈使用者拍板，作者不得自行關閉、不得以完備性為由保留 (c) 類條目**。Done when: 每條 verdict 都有 accept 或使用者裁決，零懸置。
-5. 落檔照下方「落檔」段，檔名 `<YYYY-MM-DD>-<topic>-yagni-review.md`，接摩擦盤點。
+5. 落檔照下方「落檔」段，檔名 `<YYYY-MM-DD>-<topic>-r<round>-yagni-review.md`（`<round>` 依同目錄既有 `*-yagni-review.md` 數 + 1 取 `1、2…`，避免同 session／同日多輪互蓋），接摩擦盤點。
 
 ## 呈現紀律
 
@@ -279,9 +289,9 @@ root 為「無單一承重問題」時，`第一個驗證` 按每個獨立 root 
 - 每條給 spec 原文核心句 + 1–2 句濃縮抓重點，**結論強度不變**
 - **跨元件／多分支 trade-off 先畫目前流程**：最後一輪拍板若涉及跨 component／service／module／package／process 的呼叫順序，或含 branch／fallback，先在拍板表前用 call tree／pseudocode 畫「目前怎麼走」。本輪推翻舊結論時，緊接 `之前／現在` diff，只標唯一翻案；不改核心決策的 findings 另列「旁支發現」，每條附預設建議。
 - **先 triage 完才開口、只把真衝突留到最後一輪拍板**：題目誤讀→補 spec 該段並重審；actionable 且不動 scope／行為／風險承擔→直接改 spec、在 review 檔逐條記「改了什麼、依據哪條既有決策」；事實更正與既有決策可推導項同樣直接落；immaterial→記條目編號與理由、不改 spec，並在給使用者的回覆列一行「本輪 immaterial N 條：F?（M?）…」，讓使用者能抽查；noise→記理由。剩下的 trade-off（scope、行為、風險承擔、reviewer polarity 真衝突）彙總成**最後一輪拍板表**：一列一題、每列 a／b／c、推薦放第一、選後效果先講。不逐條停下問 act／ignore
-- **架構意圖圖 decision nudge（trial）**：Tier 3／重大架構 spec 若改變 domain／deployment／trust／data-ownership boundary，或 component／service／module／package／process 間的 cross-boundary edge，就在最後一輪拍板表追加「此 spec 適合先看架構意圖圖：a. 生成  b. 跳過」。API／schema／config／retry／lifecycle 只有造成上述 boundary／edge 變化才觸發。
+- **開工前計畫頁 decision nudge（原架構意圖圖，trial）**：只有當 spec 改變 domain／deployment／trust／data-ownership boundary 或 component／service／module／package／process 間的 cross-boundary edge，**而且你整體判斷先看圖確實有助於核對架構意圖（推薦生成）**時，才在最後一輪拍板表追加「此 spec 適合先看開工前計畫頁（改動清單＋圖）：a. 生成（推薦）  b. 跳過」（本輪沒有其他待拍板項但同時滿足上述跨邊界與推薦生成兩條件時，仍可單獨詢問）。單純新增、修改或刪除畫面、互動流程、API、資料欄位，純內部重構與 config／retry／lifecycle 調整，或你判斷不需要生成（原本會推薦跳過）的情況，一律**不問、不等回覆，直接交棒下一步**。
 🔌 接線點：架構圖產生與審批 — 見 WIRING.md
-  - 只有 Archify wrapper 成功且 intent artifact 與 wrapper receipt validation 通過，才啟動唯一一支共用 adapter background task：`Bash(run_in_background=true): node ~/.claude/scripts/plannotator-review.mjs intent <wrapper-receipt>`；記錄 `adapterTaskId` 與 wrapper receipt identity，同一 identity 同時只能有一支 live task。
+  - 只有 seecode-intent wrapper 成功且 intent artifact 與 wrapper receipt validation 通過，才啟動唯一一支共用 adapter background task：`Bash(run_in_background=true): node ~/.claude/scripts/plannotator-review.mjs intent <wrapper-receipt>`；記錄 `adapterTaskId` 與 wrapper receipt identity，同一 identity 同時只能有一支 live task。
   - Bash 回報 `running in background` 或 `moved to background` 代表 adapter task 仍在執行，不是 adapter timeout。adapter task 還是 live 時不得啟動第二支、不得讀未完成 receipt，也不得要求 top-level human 用 user shell 重跑；若收到重跑要求，回覆現有瀏覽器審閱仍在等待，繼續等同一支 task。
   - 等 harness `task-notification` 明確回報 `completed` 或 `failed`，不主動輪詢。通知後只用 Read 讀 output file 一次，接受唯一 final JSON 的 `receipt` path；task failed、final JSON 缺失／重複或 receipt path 不唯一都維持 `BLOCKED`。
   - 只有 adapter exit0 且唯一 receipt `decision=approved`、`transition=intent-accepted` 才放行 review-spec completion／to-tickets／implement；`intent-accepted` 只放行這三個下游階段。
@@ -289,14 +299,14 @@ root 為「無單一承重問題」時，`第一個驗證` 按每個獨立 root 
   - adapter exit1 且 receipt `decision=annotated`、`transition=classification-required` 時，持久化 feedback 並維持 `BLOCKED`；只向 top-level human 要求分類 `artifact-inaccurate` 或 `architecture-rejected`，agent 不得自行猜測。
   - `artifact-inaccurate` 只能針對同一份已接受的 spec 與同一個 intent source 重生圖並重跑 adapter；`architecture-rejected` 回到 spec revision，並使舊 artifact／adapter decision 同時失效。
   - `dismissed`、timeout、gate-error、invalid result、receipt/artifact drift 全部維持 `BLOCKED`，不得轉成 waiver 或放行；classification no answer 也維持 `BLOCKED`。
-  - 選 b 或不回答為 0 次 Archify、0 次 Plannotator，不阻塞 to-tickets／implement，也不得取代 post-implement actual delta。
+  - 選 b 或不回答為 0 次產圖、0 次 Plannotator，不阻塞 to-tickets／implement，也不得取代 post-implement actual delta。
   - `/wait-what` 互動圖接線已在 trial review 退役；Figma、native PlanMode 行為與觸發條件保持不變。
 - 使用者隨時可要 `show all`（完整 triage 表）或 `反駁` 任一條；改 spec 以外的 code 仍是另一個 explicit request，不主動提
 - **拍板表收齊回覆（或使用者說夠了）→ 必進下方「落檔」段寫 review.md，這是 review 的收尾動作不是可選項**
 
 ## 落檔
 
-審完把 findings 寫到 spec 旁：`<spec 同目錄>/<YYYY-MM-DD>-<topic>-review.md`（date 用 `date +%F`）。它是 persistent source of truth — 之後實作出 bug 可指回這份自我修正。**不要** git commit（交給使用者）。
+審完把 findings 寫到 spec 旁：`<spec 同目錄>/<YYYY-MM-DD>-<topic>-r<round>-review.md`（date 用 `date +%F`；`<round>` 依同目錄既有非 YAGNI 的 `*-review.md` 數 + 1 取 `1、2…`，避免同 session／同日多輪覆寫舊輪紀錄與 `## Dispositions`）。它是 persistent source of truth — 之後實作出 bug 可指回這份自我修正。提交照全域 `git-workflow.md` 自動 commit 規範（落入 gitignored 暫存目錄如 `.scratch/` 者除外）。
 
 落檔時每條 finding 給穩定 ID（`F1`、`F2`…，同一份檔內不重號），並在檔末 `## Dispositions` 段逐條寫一行固定形狀，讓下一輪能用一個 grep 統計：
 
@@ -312,4 +322,4 @@ root 為「無單一承重問題」時，`第一個驗證` 按每個獨立 root 
 
 沒有拍板表的輪次也要寫這段——全部 `user=n/a` 是有資訊的紀錄（代表這輪沒有任何條目上呈）。
 
-落檔後做摩擦盤點再收工：本次 review 過程有無預見或撞到的摩擦（含 critic 派工不順、材料準備缺口）→ append 所屬機制的 `friction-log.md`，無主的落 `~/.claude/friction/workflow-general.md`（規則見 `~/.claude/friction/PROTOCOL.md`）；無摩擦不留紀錄。
+落檔後做摩擦盤點再收工：本次 review 過程有無預見或撞到的摩擦（含 critic 派工不順、材料準備缺口）→ 對所屬機制的 `friction-log.md`（無主的落 `~/.claude/friction/workflow-general.md`）用 Edit 插入目標檔的 ## 待折 段（禁止用 >> 往檔尾追加），規則見 `~/.claude/friction/PROTOCOL.md`；無摩擦不留紀錄。

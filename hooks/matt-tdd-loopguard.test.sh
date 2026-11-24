@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # matt-tdd-gate Stop loop guard fixtures（gate-authoring §3／§5）：正反配對、total 保險、旁路、log 病態；2026-09-06 起 gate 為提示型，guard 是提醒上限
 set -u
-HOOK=~/.claude/hooks/matt-tdd-gate.sh
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+HOOK="$SCRIPT_DIR/matt-tdd-gate.sh"
 TMP=$(mktemp -d)
 export MATT_TDD_ROOT="$TMP/state" MATT_TDD_PENDING_DIR="$TMP/pending" MATT_TDD_LOOPGUARD_DIR="$TMP/lg"
 mkdir -p "$MATT_TDD_ROOT" "$MATT_TDD_PENDING_DIR"

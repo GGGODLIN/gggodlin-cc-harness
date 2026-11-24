@@ -3,7 +3,7 @@ set -uo pipefail
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CLI="$DIR/validate-registry.py"
-TMP="$(mktemp -d)"
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/index-relation-test.XXXXXX")" || exit 1
 trap 'rm -rf "$TMP"' EXIT
 
 python3 - "$TMP/valid.json" "$TMP/invalid.json" <<'PY'

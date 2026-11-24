@@ -29,7 +29,7 @@ assert_grep "controller creates rearmed twenty-minute check" '20-minute progress
 assert_grep "watchdog rearms after verified progress" 'let the worker continue and immediately arm a fresh .reminderTaskId'
 assert_grep "watchdog never leaves a live worker unobserved" 'no live worker is ever left without a scheduled next look|no other scheduled observer'
 assert_grep "controller cancels reminder by handle" 'TaskStop.*reminderTaskId'
-assert_grep "watchdog uses exact non-blocking retrieval" 'TaskOutput.*workerTaskId.*block: false.*timeout: 1000'
+assert_grep "watchdog uses non-destructive progress inspection without removed TaskOutput" 'inspect the worker once non-destructively.*do not rely on the removed `TaskOutput` tool'
 assert_grep "watchdog stops only the worker handle" 'TaskStop.*workerTaskId'
 assert_grep "watchdog never stops automatically" 'must not automatically stop'
 assert_grep "guardrails are wired before dispatch" 'Before dispatching each worker|派出每支 worker 前'

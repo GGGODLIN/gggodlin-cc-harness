@@ -2,7 +2,7 @@
 set -u
 
 CLI="$(cd "$(dirname "$0")" && pwd)/validate-registry.py"
-TMP="$(mktemp -d)"
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/validate-registry-test.XXXXXX")" || exit 1
 REGISTRY="$TMP/registry.json"
 OUTPUT="$TMP/output.json"
 BAD_REGISTRY="$TMP/bad-registry.json"

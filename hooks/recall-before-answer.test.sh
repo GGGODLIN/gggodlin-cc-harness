@@ -105,7 +105,9 @@ expect_context '剝 調查一下 後 當初 仍須觸發' "$(run_prompt '幫我�
 expect_context '剝 做過濾 後 那次 仍須觸發' "$(run_prompt '我做過濾器的那次是用哪個方案' 'keep-4')" '回答前先翻 session 紀錄'
 expect_context '剝 那之前 後 當年 仍須觸發' "$(run_prompt '在那之前當年的配方是什麼' 'keep-5')" '回答前先翻 session 紀錄'
 INTERVIEW=$(run_prompt '訪談我')
-expect_context '訪談進入注入一題一問格式' "$INTERVIEW" '訪談模式：一次只問一題、附來龍去脈與建議答案、等答案再問下一題、不代答'
+expect_context '訪談進入注入一題一問與白話格式' "$INTERVIEW" '訪談模式：一次只問一題、自帶白話（先附來龍去脈＋一個具體例子或前後差異，禁拿內部代號／檔名／參數當選項標題）與建議答案、等答案再問下一題、不代答'
+expect_context '訪談注入明含白話與禁代號規範' "$INTERVIEW" '自帶白話'
+expect_context '訪談注入明含禁代號選項規範' "$INTERVIEW" '禁拿內部代號'
 check '訪談進入建立 session sentinel' 1 "$([ -f "$STATE_DIR/interview-mode-test-session" ] && echo 1 || echo 0)"
 NEGATIVE_ENTER=$(run_prompt '不要進入訪談模式' 'negative-enter')
 expect_silent '不要進入訪談模式不注入' "$NEGATIVE_ENTER"
@@ -154,10 +156,10 @@ check '長文一次問完刪除 sentinel' 0 "$([ -e "$STATE_DIR/interview-mode-l
 
 echo '== 訪談生命週期：下一回合延續、退出清除 =='
 NEXT=$(run_prompt '請先處理這一題')
-expect_context '沒有觸發詞仍延續訪談' "$NEXT" '訪談模式：一次只問一題、附來龍去脈與建議答案、等答案再問下一題、不代答'
+expect_context '沒有觸發詞仍延續訪談' "$NEXT" '訪談模式：一次只問一題、自帶白話（先附來龍去脈＋一個具體例子或前後差異，禁拿內部代號／檔名／參數當選項標題）與建議答案、等答案再問下一題、不代答'
 for phrase in '停車場' '停止服務' '停留'; do
   ORDINARY_STOP=$(run_prompt "$phrase")
-  expect_context "普通停用語 ${phrase} 不退出訪談" "$ORDINARY_STOP" '訪談模式：一次只問一題、附來龍去脈與建議答案、等答案再問下一題、不代答'
+  expect_context "普通停用語 ${phrase} 不退出訪談" "$ORDINARY_STOP" '訪談模式：一次只問一題、自帶白話（先附來龍去脈＋一個具體例子或前後差異，禁拿內部代號／檔名／參數當選項標題）與建議答案、等答案再問下一題、不代答'
   check "普通停用語 ${phrase} 保留 session sentinel" 1 "$([ -e "$STATE_DIR/interview-mode-test-session" ] && echo 1 || echo 0)"
 done
 EXIT_OUTPUT=$(run_prompt '停')
@@ -214,7 +216,7 @@ check '非詞表短訊息不呼叫 RECALL_JEV_CMD' 0 "$([ -e "$JEV_CALLED" ] && 
 expect_context '退役後詞表仍注入' "$(RECALL_JEV_CMD="$JEV_MARKER" run_prompt '上次的決定是什麼？' 'jev-retired-lexicon')" '命中：上次'
 check '詞表命中不呼叫 RECALL_JEV_CMD' 0 "$([ -e "$JEV_CALLED" ] && echo 1 || echo 0)"
 RETIRE_INTERVIEW=$(RECALL_JEV_CMD="$JEV_MARKER" run_prompt '訪談我' 'jev-retired-interview')
-expect_context '退役後訪談仍注入' "$RETIRE_INTERVIEW" '訪談模式：一次只問一題、附來龍去脈與建議答案、等答案再問下一題、不代答'
+expect_context '退役後訪談仍注入' "$RETIRE_INTERVIEW" '訪談模式：一次只問一題、自帶白話（先附來龍去脈＋一個具體例子或前後差異，禁拿內部代號／檔名／參數當選項標題）與建議答案、等答案再問下一題、不代答'
 check '訪談進入不呼叫 RECALL_JEV_CMD' 0 "$([ -e "$JEV_CALLED" ] && echo 1 || echo 0)"
 check '退役後訪談仍建立 sentinel' 1 "$([ -f "$STATE_DIR/interview-mode-jev-retired-interview" ] && echo 1 || echo 0)"
 check '現役 helper 已不在 hooks' 0 "$([ -e "$(dirname "$HOOK")/recall-before-answer-jev.py" ] && echo 1 || echo 0)"

@@ -37,13 +37,47 @@ check_case() {
   FAIL=$((FAIL + 1)); printf 'FAIL %s shell_status=%s shell=%s python=%s\n' "$name" "$shell_status" "$shell_value" "$python_result"
 }
 
-check_case unquoted gemini-3.8-flash-high 'GEMINI_FLASH_MODEL=gemini-3.8-flash-high'
-check_case quoted gemini-3.8-flash-medium 'GEMINI_FLASH_MODEL="gemini-3.8-flash-medium"'
-check_case whitespace gemini-3.8-flash-low 'GEMINI_FLASH_MODEL=  gemini-3.8-flash-low  '
-check_case duplicate '' $'GEMINI_FLASH_MODEL=gemini-3.8-flash-high\nGEMINI_FLASH_MODEL=gemini-3.7-flash-high'
-check_case inline-comment '' 'GEMINI_FLASH_MODEL=gemini-3.8-flash-high # current'
+check_case unquoted gemini-4-hydrogen-high 'GEMINI_FLASH_MODEL=gemini-4-hydrogen-high'
+check_case quoted gemini-4-hydrogen-medium 'GEMINI_FLASH_MODEL="gemini-4-hydrogen-medium"'
+check_case whitespace gemini-4-hydrogen-low 'GEMINI_FLASH_MODEL=  gemini-4-hydrogen-low  '
+check_case legacy-flash gemini-3.8-flash-high 'GEMINI_FLASH_MODEL=gemini-3.8-flash-high'
+check_case duplicate '' $'GEMINI_FLASH_MODEL=gemini-4-hydrogen-high\nGEMINI_FLASH_MODEL=gemini-4-hydrogen-low'
+check_case inline-comment '' 'GEMINI_FLASH_MODEL=gemini-4-hydrogen-high # current'
 check_case wrong-provider '' 'GEMINI_FLASH_MODEL=groq-qwen-3.8-27b'
 check_case command-substitution '' 'GEMINI_FLASH_MODEL=$(touch '"$MARKER"')'
+
+check_magpie_case() {
+  local name="$1" expected="$2" content="$3" shell_value shell_status python_result
+  local file="$TMP/magpie-$name.env"
+  printf '%s\n' "$content" > "$file"
+  shell_value=$(bash "$SCRIPT" GEMINI_FLASH_MAGPIE_MODEL "$file" 2>/dev/null)
+  shell_status=$?
+  python_result=$(python_value "$file")
+  if [[ -n "$expected" && "$shell_status" -eq 0 && "$shell_value" == "$expected" && "$python_result" == "$expected" ]]; then
+    PASS=$((PASS + 1)); printf 'PASS magpie-%s\n' "$name"; return
+  fi
+  if [[ -z "$expected" && "$shell_status" -ne 0 && -z "$shell_value" && -z "$python_result" ]]; then
+    PASS=$((PASS + 1)); printf 'PASS magpie-%s\n' "$name"; return
+  fi
+  FAIL=$((FAIL + 1)); printf 'FAIL magpie-%s shell_status=%s shell=%s python=%s\n' "$name" "$shell_status" "$shell_value" "$python_result"
+}
+
+# gate-authoring 4-fixture regression: known-good, known-bad, boundary, lifecycle
+check_magpie_case known-good 'group/gemini-flash:high' $'GEMINI_FLASH_MODEL=gemini-4-hydrogen-high\nGEMINI_FLASH_MAGPIE_MODEL=group/gemini-flash:high'
+check_magpie_case boundary-bare-group 'group/gemini-flash' $'GEMINI_FLASH_MODEL=gemini-4-hydrogen-high\nGEMINI_FLASH_MAGPIE_MODEL=group/gemini-flash'
+check_magpie_case boundary-bad-effort '' $'GEMINI_FLASH_MODEL=gemini-4-hydrogen-high\nGEMINI_FLASH_MAGPIE_MODEL=group/gemini-flash:bogus'
+check_magpie_case known-bad-evil-group '' $'GEMINI_FLASH_MODEL=gemini-4-hydrogen-high\nGEMINI_FLASH_MAGPIE_MODEL=group/evil:high'
+check_magpie_case known-bad-duplicate '' $'GEMINI_FLASH_MAGPIE_MODEL=group/gemini-flash:high\nGEMINI_FLASH_MAGPIE_MODEL=group/gemini-flash:low'
+
+PROD_ENV="$(dirname "$0")/../model-routing.env"
+PROD_AGY=$(bash "$SCRIPT" GEMINI_FLASH_MODEL "$PROD_ENV" 2>/dev/null)
+PROD_MAGPIE=$(bash "$SCRIPT" GEMINI_FLASH_MAGPIE_MODEL "$PROD_ENV" 2>/dev/null)
+PROD_PY=$(python_value "$PROD_ENV")
+if [[ "$PROD_AGY" == "gemini-4-hydrogen-high" && "$PROD_MAGPIE" == "group/gemini-flash:high" && "$PROD_PY" == "group/gemini-flash:high" ]] && ! /usr/bin/grep -q 'gemini-3\.' "$PROD_ENV"; then
+  PASS=$((PASS + 1)); printf 'PASS lifecycle-prod-routing-env\n'
+else
+  FAIL=$((FAIL + 1)); printf 'FAIL lifecycle-prod-routing-env agy=%s magpie=%s py=%s\n' "$PROD_AGY" "$PROD_MAGPIE" "$PROD_PY"
+fi
 
 if [ ! -e "$MARKER" ]; then
   PASS=$((PASS + 1)); printf 'PASS command-substitution-not-executed\n'

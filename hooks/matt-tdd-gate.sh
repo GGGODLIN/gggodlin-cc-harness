@@ -16,9 +16,10 @@ set -u
 #   不承諾：用 Bash 改檔不算動工；transcript 讀不懂時照舊提醒。
 
 INPUT=$(cat)
-ROOT=${MATT_TDD_ROOT:-$HOME/.claude/logs/matt-tdd}
-PENDING=${MATT_TDD_PENDING_DIR:-$ROOT/pending}
-POLICY=${MATT_TDD_POLICY:-$HOME/.claude/skills/implement/scripts/tdd-policy.mjs}
+HOME_DIR="${HOME:-}"
+ROOT=${MATT_TDD_ROOT:-${HOME_DIR:+$HOME_DIR/.claude/logs/matt-tdd}}
+PENDING=${MATT_TDD_PENDING_DIR:-${ROOT:+$ROOT/pending}}
+POLICY=${MATT_TDD_POLICY:-${HOME_DIR:+$HOME_DIR/.claude/skills/implement/scripts/tdd-policy.mjs}}
 PYTHON=${MATT_TDD_PYTHON:-$(command -v python3)}
 
 json_output() {
@@ -45,7 +46,8 @@ try:
   tool=value.get("tool_name","")
   tool_input=value.get("tool_input",{})
   skill=tool_input.get("skill","") if isinstance(tool_input,dict) else ""
-  fields=[event,tool,skill,value.get("session_id",""),value.get("tool_use_id",""),value.get("transcript_path",""),value.get("agent_id","")]
+  stop_active="1" if value.get("stop_hook_active") in (True,"true") else ""
+  fields=[event,tool,skill,value.get("session_id",""),value.get("tool_use_id",""),value.get("transcript_path",""),value.get("agent_id",""),stop_active]
   fields=["" if field is None else field for field in fields]
   if not all(isinstance(field,str) for field in fields): raise ValueError()
   print("\x1f".join(fields))
@@ -270,11 +272,13 @@ FIELDS=$(printf '%s' "$INPUT" | json_fields 2>/dev/null) || {
   stop_event_payload && exit 0
   pretool_deny 'invalid hook payload.'
 }
-IFS=$'\x1f' read -r EVENT TOOL SKILL SESSION TOOL_USE TRANSCRIPT AGENT_ID <<< "$FIELDS"
+IFS=$'\x1f' read -r EVENT TOOL SKILL SESSION TOOL_USE TRANSCRIPT AGENT_ID STOP_ACTIVE <<< "$FIELDS"
 
 [ -z "$AGENT_ID" ] || exit 0
 
 if [ "$EVENT" = "PreToolUse" ]; then
+  # 非 implement 的 Skill 提早放行，避免 claude -p 無 transcript 檔時誤擋其他 skill。
+  [ "$TOOL" = "Skill" ] && [ -n "$SKILL" ] && [ "$SKILL" != "implement" ] && exit 0
   [ -n "$TOOL" ] && [ -n "$SKILL" ] && [ -n "$SESSION" ] && [ -n "$TOOL_USE" ] && [ -n "$TRANSCRIPT" ] || pretool_deny 'required arming payload is missing or invalid.'
   [ "$TOOL" = "Skill" ] && [ -n "$SKILL" ] && [ -n "$SESSION" ] && [ -n "$TOOL_USE" ] && [ -n "$TRANSCRIPT" ] && is_regular_file "$TRANSCRIPT" || pretool_deny 'required arming payload is missing or invalid.'
   safe_id "$SESSION" || pretool_deny 'session id is invalid or dot/dot-dot.'
@@ -340,16 +344,7 @@ print(json.dumps({"contract":"MATT_TDD_PENDING v3","session_id":session,"run_id"
 fi
 
 [ "$EVENT" = "Stop" ] || exit 0
-
-stop_continuation() {
-  printf '%s' "$INPUT" | "$PYTHON" -c 'import json,sys
-try:
-  value=json.loads(sys.stdin.read())
-  sys.exit(0 if value.get("stop_hook_active") in (True,"true") else 1)
-except Exception:
-  sys.exit(1)' 2>/dev/null
-}
-stop_continuation && exit 0
+[ "$STOP_ACTIVE" = "1" ] && exit 0
 
 work_started_after_arm() {
   local path=$1 implement_id=$2 prefix_bytes=$3

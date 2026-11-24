@@ -163,6 +163,29 @@ c = text.find("7. reconcile 輸出")
 print(1 if 0 <= a < b < c else 0)
 ')"
 
+echo "== 第 8 條：distill A 線／habits 候選不被產品 repo 排除濾掉 =="
+check "distill A 線與 habits 候選例外存在" 1 "$(printf '%s' "$C" | grep -cF 'distill A 線與 habits channel 的固化／規則候選不套用本條排除')"
+
+echo "== habits channel 候選歸「需要你決策」（第 14 條）=="
+check "第 14 條把 habits 候選與 recurring-errors 升格項歸同一組" 1 "$(printf '%s' "$C" | grep -c '^    - 自決清單只收.*recurring-errors 升格項，與 habits channel 的工作習慣候選.*一律歸這組')"
+check "habits 候選行動項只列寫進規則／不寫／再觀察" 1 "$(printf '%s' "$C" | grep -cF '「寫進規則／不寫／再觀察」，agent 不得代做')"
+
+echo "== 顧問停點（注入文字指向的範本必須存在，否則停點靜默失效）=="
+ADV_REF="$HOME/.claude/references/advisor-checkpoint.md"
+ADV_FIXTURE="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)/references/advisor-checkpoint.md"
+check "注入含顧問停點條" 1 "$(printf '%s' "$C" | grep -c '^16\. 顧問停點')"
+check "注入指向範本絕對路徑" 1 "$(printf '%s' "$C" | grep -cF "$ADV_REF")"
+check "範本檔存在" 1 "$([ -f "$ADV_FIXTURE" ] && echo 1 || echo 0)"
+check "範本保留固定開頭（觀察期靠它計數）" 1 "$(grep -cF '顧問停點（動手前）：這批' "$ADV_FIXTURE")"
+check "兩處停點都在同一條" 1 "$(printf '%s' "$C" | grep '^16\. 顧問停點' | grep -c '(b).*(c)')"
+check "未觸發的 prompt 不帶顧問停點" 0 "$(ctx '今天天氣如何' | grep -c '顧問停點')"
+check "編號 1..17 連續無重號" 1 "$(printf '%s' "$C" | python3 -c '
+import re, sys
+body = sys.stdin.read().split("照下列規範執行，逐條做完：", 1)[-1]
+nums = [int(m.group(1)) for line in body.splitlines() if (m := re.match(r"^(\d+)\. ", line))]
+print(1 if nums == list(range(1, 18)) else 0)
+')"
+
 echo "== 動態值擺位（prefix cache：日期必須在尾端）=="
 LAST=$(printf '%s' "$C" | tail -1)
 check "最後一行是本次 args" 1 "$(printf '%s' "$LAST" | grep -c '本次 args')"

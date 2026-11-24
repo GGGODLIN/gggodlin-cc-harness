@@ -1,12 +1,12 @@
 ---
-description: Memory 系統健康度 read-only 診斷（不動 file，輸出 structured health report）
+description: "Memory 系統健康度診斷（除 append 驗證帳本外不動檔，輸出 structured health report）。Use when 需要檢查 ~/.claude/memory 結構完整性、cluster 指標、死路徑、冷條目或易腐宣稱（如 /memory-audit 或 local-analysis memory channel）。Do not use for 直接修改或新增記憶條目、重建索引、或把 cluster promote 成 wiki entity（改走 /wiki-promote）。"
 ---
 
 <!-- 本檔在契約測試底下：commands/tests/memory-audit-contract.test.sh — 改動後跑 `bash ~/.claude/commands/tests/memory-audit-contract.test.sh` -->
 
 # Memory Audit
 
-跑 read-only 健康度檢查。**不動任何 file**，輸出結構化 health report。
+跑 `~/.claude/memory` 健康度診斷（用於檢查記憶結構、cluster 指標、死路徑、冷條目與易腐宣稱；不直接修改或新增記憶條目，也不負責 promote 成 wiki）。**除 append 驗證帳本（及 M 維度更新 `~/.claude/logs/` 狀態檔）外不動檔**，輸出結構化 health report。
 
 ⚠️ **Multi-session safety**: 跨 session 平行編輯 memory 是常態。本 command 永遠讀**當下 file 系統實際狀態**（Bash / Read tool），**不依賴** CC inject 的 MEMORY.md snapshot（那是 session start 時的，不會即時 update）。看到 mismatch 先確認是當下狀態還是某個 session 的 mid-process。
 
@@ -246,9 +246,9 @@ MEMORY_DIR="$1"
 PATH_RE='~/(\.claude/(scripts|hooks|workflows|commands|skills|rules)|Desktop/projects|code/social-info)/[A-Za-z0-9._/+*?-]+'
 cd "$MEMORY_DIR"
 { find . -maxdepth 1 -name '*.md' -print0; find general work projects -name '*.md' -print0; } \
-| xargs -0 grep -HnoE "$PATH_RE" 2>/dev/null \
+| xargs -0 /usr/bin/grep -HnoE "$PATH_RE" 2>/dev/null \
 | awk -F: '{f=$1; n=$2; p=$0; sub(/^[^:]+:[0-9]+:/, "", p); print f"\t"n"\t"p}' \
-| grep -vE 'YYYY|MM-DD|/[XY]\.|/[XY]/|\.\.\.|\.bak|-$|/-' \
+| /usr/bin/grep -vE 'YYYY|MM-DD|/[XY]\.|/[XY]/|\.\.\.|\.bak|-$|/-' \
 | sort -u \
 | while IFS=$'\t' read -r f n p; do
     raw_p="$p"
@@ -289,7 +289,7 @@ OUT=$(mktemp -t wired); "$W_CHECK" > "$OUT"; RC=$?
 [ "$RC" -eq 0 ] && { awk '{print $1}' "$OUT" | sort | uniq -c; grep -v '^OK ' "$OUT"; } || echo "WIRED-CHECK-UNAVAILABLE"
 ```
 
-- stdout 三態每行 `<STATE> <ref> ← <file>:<line>`：`MISSING`（引用的 hook／script／local-bin 工具不在磁碟）、`UNWIRED`（在磁碟，但 settings 兩檔、hooks 目錄內其他腳本、commands／skills 定義都沒提到它）、`OK`。test 檔、placeholder、helper 自己判為歷史敘述的行不會出現。
+- stdout 三態每行 `<STATE> <ref> ← <file>:<line>`：`MISSING`（引用的 hook／script／local-bin 工具不在磁碟）、`UNWIRED`（在磁碟，但 settings 兩檔、hooks、LaunchAgents、commands、skills、rules、references、agents、workflows、`~/.zshrc` 及已被上述點名的一層 `scripts/`／`workflows/` 傳遞來源都沒提到它）、`OK`。test 檔、placeholder、helper 自己判為歷史敘述的行不會出現。
 - 第一行計數表是三態總數（真實樹 2026-09-25：OK 約 1400 行、UNWIRED 約 160、MISSING 約 14），`OK` 行不進 context。**只把 `UNWIRED` 行當候選**，先按 `<ref>` 去重（同一 ref 多處引用算一條、附全部出處），**每輪最多讀 10 條的上下文**，其餘下輪；`MISSING` 與上方 H 的 `DEAD` 重疊，計數列出但不重複列條目。候選先過與 DEAD 相同的 ledger cross-check（以整行為鍵 grep `pending-actions.jsonl` 已結案 note），命中即 suppress。
 - `UNWIRED` 是候選不是結論：對剩下的每條，讀該記憶行的上下文，判「這句把它當現行機制」才列 ⚠️（附建議修法），「只是歷史敘述」只在報告記一行、**不寫 ledger**（ledger 以檔為單位，行級判定寫進去會讓 I／K 對整檔停驗）。
 - **stdout 含 `WIRED-CHECK-UNAVAILABLE` 或 helper 非零退出** → 報告 H 段寫一行「接線檢查：本輪未查（helper 不可用）」，**不得寫成 0 條**。
@@ -304,9 +304,9 @@ OUT=$(mktemp -t wired); "$W_CHECK" > "$OUT"; RC=$?
 ```bash
 cd "$HOME/.claude/projects"
 find . -name '*.jsonl' -not -path '*/subagents/*' -newermt "$(date -v-24H '+%Y-%m-%d %H:%M:%S')" -print0 \
-| xargs -0 grep -hoE '[A-Za-z0-9_/.-]*\.claude/memory/[A-Za-z0-9_./-]+\.md' 2>/dev/null \
+| xargs -0 /usr/bin/grep -hoE '[A-Za-z0-9_/.-]*\.claude/memory/[A-Za-z0-9_./-]+\.md' 2>/dev/null \
 | sed 's|.*\.claude/memory/||' \
-| grep -vE '^(MEMORY\.md|_index_|_orphan_registry)' \
+| /usr/bin/grep -vE '^(MEMORY\.md|_index_|_orphan_registry)' \
 | sort | uniq -c | sort -rn \
 | while read -r n f; do [ -e "$HOME/.claude/memory/$f" ] && printf '%7d %s\n' "$n" "$f"; done
 ```
@@ -342,7 +342,7 @@ find . -name '*.jsonl' -not -path '*/subagents/*' -newermt "$(date -v-24H '+%Y-%
 - 宣稱的設定 / 機制仍如描述？（grep 對應 config / settings.json 比對）
 - 宣稱的工具版本 / 狀態與當下實況矛盾？（能便宜查就查，不能就標「無法驗證」不要猜）
 
-**Step 4 — append ledger**（本 command read-only 的唯一例外；只 append 不改舊行）。verdict=stale 的條目進 report ⚠️ 區，附矛盾證據，**不自動改 memory file**——修不修由使用者決定。
+**Step 4 — append ledger**（本 command 除 append 驗證帳本與更新 logs 狀態檔外不動檔；此處只 append 不改舊行）。verdict=stale 的條目進 report ⚠️ 區，附矛盾證據，**不自動改 memory file**——修不修由使用者決定。
 
 判定：⚠️ suggestion（stale 條目列出待人工處理）；驗證全 ok 或無候選 → ✅ 一行帶過。
 
@@ -356,13 +356,13 @@ find . -name '*.jsonl' -not -path '*/subagents/*' -newermt "$(date -v-24H '+%Y-%
 cd "$MEMORY_DIR"
 # 2026-07-10 擴充：leaf 集合含分域子目錄（排除各層 _INDEX.md 結構檔；archive/ 不掃）
 { ls *.md; find general work projects -name '*.md'; } \
-| grep -vE '(^|/)(MEMORY|_index_.*|_orphan_registry|_INDEX)\.md$' > /tmp/memory-leaf-files.txt
+| /usr/bin/grep -vE '(^|/)(MEMORY|_index_.*|_orphan_registry|_INDEX)\.md$' > /tmp/memory-leaf-files.txt
 
 CUTOFF=$(date -v-30d '+%Y-%m-%d %H:%M:%S')
 find ~/.claude/projects -name '*.jsonl' -not -path '*/subagents/*' -newermt "$CUTOFF" -print0 2>/dev/null \
-| xargs -0 grep -hoE '\.claude/memory/[A-Za-z0-9_./-]+\.md' 2>/dev/null \
+| xargs -0 /usr/bin/grep -hoE '\.claude/memory/[A-Za-z0-9_./-]+\.md' 2>/dev/null \
 | sed 's|.*\.claude/memory/||' \
-| grep -vE '^(MEMORY\.md|_index_|_orphan_registry)' \
+| /usr/bin/grep -vE '^(MEMORY\.md|_index_|_orphan_registry)' \
 | sort | uniq -c | sort -rn > /tmp/memory-hits-30d.txt
 
 # hit=0 的 file = leaf file 集合 ∖ 被引用過的 file 集合
@@ -490,14 +490,14 @@ jq -cR --arg since "$SINCE" 'fromjson? | select(.fired == true and (.ts // "") >
 - `$PENDING`（路徑會印出）是**待處理清單**（依 ts 排序）。報告固定先列三個數字：待處理事件數、待處理不同檔數、最舊待處理 ts；**最舊待處理超過 7 天就列 ⚠️ 積壓**，讓使用者看得到消化不完。
 - `fromjson?` 讓壞行被跳過而不是讓整條 pipe 中斷。log 不存在或清單為空 → 一行「M-1：無新 ripple 事件」，不當錯誤。
 - **每輪處理上限 10 個不同檔**：由舊到新掃清單、同一檔只算最新一筆，湊滿 10 個檔後，**把最後那個 ts 相同的事件全部一起納入**（ts 只到秒，不把同秒事件切開）；`last_ripple_ts` = 本輪納入的最後一個事件的 ts。沒納入的下輪接著來，不能跳到「現在」。
-- 每個事件的兄弟檔清單不在 log 裡，用 hook 自己的規則取回（同一份程式，不另寫 grep）：
+- 每個事件的兄弟檔清單不在 log 裡，用 hook 共用的詞界 BM25 規則取回（前段固定為日常配額內最高分葉檔與索引，後段接剩餘長尾；同一份程式，不另寫 grep）：
 
 ```bash
 F=$(find "$MEMORY_DIR" -name "<file 欄的檔名>" -not -path '*/archive/*' | head -1)
 bash "$HOME/.claude/hooks/memory-ripple.sh" --siblings "$F"
 ```
 
-- 對每個事件：讀 `F` 找那次寫入反轉了什麼前提；兄弟檔先看葉檔、再看索引，**每個事件最多讀 8 檔**（比照 hook 原本 6＋2 的顯示配額），逐檔判「仍把舊前提當現行」→ 列 ⚠️ 候選（條目／矛盾證據／建議修法，修法照修復紀律）；「歷史敘述」不列、也不寫 ledger。
+- 對每個事件：讀 `F` 找那次寫入反轉了什麼前提；兄弟檔先看葉檔、再看索引，**每個事件最多讀日常配額前段（上限 6 葉＋2 索引＝8 檔）**，逐檔判「仍把舊前提當現行」→ 列 ⚠️ 候選（條目／矛盾證據／建議修法，修法照修復紀律）；「歷史敘述」不列、也不寫 ledger。如果單一事件仍有超出日常配額（6 葉＋2 索引）的未讀長尾兄弟檔，就在該事件摘要旁附註剩餘長尾檔數，提示需要全量排查時可對該檔執行 `/deep-check` 記憶波及長尾清查（`--siblings --with-scores`）。
 
 **M-2 settings hooks 段 diff**（識別字 = command 字串裡出現的每個腳本檔名；包裝型 hook 如 `fable-gate.sh X.sh` 會抽出兩個；直接呼叫二進位檔的 hook 不在偵測範圍）：
 
@@ -564,7 +564,7 @@ Audit time: <UTC timestamp>
 
 ## 4. 不要做的事
 
-- **不動任何 file** — read-only diagnostic（唯一例外：I / K 維度 append `.verification-ledger.jsonl`，只 append 不改舊行、不動任何 `.md`；M 維度在報告成功寫出後更新 `~/.claude/logs/` 下的兩個狀態檔）
+- **除 append 驗證帳本與 logs 狀態檔外不動檔** — 不動任何記憶 `.md` 檔（僅 I / K 維度 append `.verification-ledger.jsonl` 且只 append 不改舊行，以及 M 維度在報告成功寫出後更新 `~/.claude/logs/` 下的兩個狀態檔）
 - **不改記憶檔、不替使用者拍板** — 所有 stale／UNWIRED／M 候選都只列「條目＋證據＋建議修法」；使用者在 digest 拍板後由 main session 修並記 ledger
 - **不 ls scan 把 cluster file 當「孤兒」索引進 MEMORY.md** — `_index_*` 開頭永遠排除
 - **不依賴 CC inject 的 MEMORY.md snapshot** — 用 Bash / Read tool 拿當下狀態

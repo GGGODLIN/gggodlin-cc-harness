@@ -144,8 +144,8 @@ class PrReviewCodexGroupContractTest(unittest.TestCase):
 
   def test_step42_codex_verify_pins_gpt6_sol_and_records_both_models(self):
     step = self.section("#### Codex 通道", "#### Verification Prompt to Codex")
-    self.assertIn('task --fresh --model gpt-6.1-sol --effort xhigh "$(cat /tmp/codex-verify-cc-prompt.txt)"', step)
-    self.assertIn("requested_model=gpt-6.1-sol", step)
+    self.assertIn('task --fresh --model gpt-6.2-sol --effort xhigh "$(cat /tmp/codex-verify-cc-prompt.txt)"', step)
+    self.assertIn("requested_model=gpt-6.2-sol", step)
     self.assertIn("observed_model", step)
 
   def test_header_registers_the_new_contract(self):

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { constants } from 'node:fs'
 import { spawnSync } from 'node:child_process'
-import { chmod, lstat, mkdir, mkdtemp, open, readdir, realpath, writeFile } from 'node:fs/promises'
+import { chmod, lstat, mkdir, mkdtemp, open, readdir, realpath, rm, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 
@@ -96,7 +96,7 @@ const readFileBytes = async (path, label, options) => {
   await assertOwnedRegular(path, label, options)
   let handle
   try {
-    handle = await open(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0))
+    handle = await open(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0))
     const metadata = await handle.stat()
     if (!metadata.isFile()) fail(`${label} must be a regular file`)
     if (metadata.nlink !== 1) fail(`${label} must have one link`)
@@ -131,12 +131,19 @@ const appendAudit = async (path, row) => {
 
 const writeAdapterReceipt = async (path, value) => {
   await writeFile(path, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600, flag: 'wx' })
+  await chmod(path, 0o600)
   await assertOwnedRegular(path, 'adapter receipt', { exactMode: 0o600 })
 }
 
 const parseJson = (bytes, label) => {
+  let text
   try {
-    return JSON.parse(bytes.toString('utf8'))
+    text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes)
+  } catch {
+    fail(`${label} is invalid UTF-8`)
+  }
+  try {
+    return JSON.parse(text)
   } catch {
     fail(`${label} is invalid JSON`)
   }
@@ -168,7 +175,7 @@ const readIdentity = async (trialRoot, binaryPath) => {
   const identityBytes = await readFileBytes(identityPath, 'identity', { ownerOnly: false })
   const identity = parseJson(identityBytes, 'identity')
   await assertOwnedRegular(binaryPath, 'binary', { ownerOnly: false, executable: true })
-  if (identity.schemaVersion !== productionIdentity.schemaVersion || identity.release !== productionIdentity.release || identity.tagCommit !== productionIdentity.tagCommit || identity.asset !== productionIdentity.asset || identity.versionOutput !== productionIdentity.versionOutput) {
+  if (identity === null || typeof identity !== 'object' || Array.isArray(identity) || identity.schemaVersion !== productionIdentity.schemaVersion || identity.release !== productionIdentity.release || identity.tagCommit !== productionIdentity.tagCommit || identity.asset !== productionIdentity.asset || identity.versionOutput !== productionIdentity.versionOutput) {
     fail('Plannotator binary identity does not match the pinned identity')
   }
   const { schemaVersion, release, tagCommit, asset, versionOutput } = identity
@@ -181,10 +188,17 @@ const readReceipt = async path => {
   const bytes = await readFileBytes(sourcePath, 'wrapper receipt')
   const receipt = parseJson(bytes, 'wrapper receipt')
   if (receipt?.schemaVersion !== 1 || receipt.ok !== true || typeof receipt.receipt !== 'string' || !isAbsolute(receipt.receipt) || resolve(receipt.receipt) !== resolve(path)) fail('wrapper receipt is not bound to its input path')
-  if (typeof receipt.type !== 'string' || !shaPattern.test(receipt.pinnedSha ?? '')) fail('wrapper receipt is missing safe-wrapper identity')
-  const expectedCommand = receipt.mode === 'actual-delta' ? 'compare' : 'deliver'
-  if (receipt.archify?.ok !== true || receipt.archify.command !== expectedCommand || receipt.archify.type !== receipt.type) {
-    fail('wrapper receipt is missing a valid Archify child receipt')
+  // seecode-intent.mjs 的開工前計畫頁沒有 Archify 子收據與釘版 SHA；它只准走 intent，
+  // 做完後的 actual-delta 仍必須是 Archify 產物，否則 head SHA 綁定就沒有來源。
+  const fromSeecodeIntent = receipt.producer === 'seecode-intent'
+  if (fromSeecodeIntent) {
+    if (receipt.mode !== 'intent') fail('seecode-intent receipt can only be reviewed as intent')
+  } else {
+    if (typeof receipt.type !== 'string' || !shaPattern.test(receipt.pinnedSha ?? '')) fail('wrapper receipt is missing safe-wrapper identity')
+    const expectedCommand = receipt.mode === 'actual-delta' ? 'compare' : 'deliver'
+    if (receipt.archify?.ok !== true || receipt.archify.command !== expectedCommand || receipt.archify.type !== receipt.type) {
+      fail('wrapper receipt is missing a valid Archify child receipt')
+    }
   }
   if (typeof receipt.outputRoot !== 'string' || typeof receipt.artifact !== 'string' || !isAbsolute(receipt.outputRoot) || !isAbsolute(receipt.artifact)) fail('wrapper receipt is missing absolute paths')
   const outputRoot = resolve(receipt.outputRoot)
@@ -193,8 +207,12 @@ const readReceipt = async path => {
   const artifact = resolve(receipt.artifact)
   if (artifact.startsWith(`${outputRoot}${sep}`) === false || relative(outputRoot, artifact).includes(sep)) fail('wrapper artifact is not a direct child')
   const artifactBytes = await readFileBytes(artifact, 'artifact')
-  if (receipt.archify.artifact.bytes !== undefined && receipt.archify.artifact.bytes !== artifactBytes.length) fail('Archify child receipt artifact size does not match')
-  return { receipt, receiptBytes: bytes, artifactBytes, artifact }
+  if (fromSeecodeIntent) {
+    if (receipt.artifacts?.page?.path !== artifact || receipt.artifacts.page.bytes !== artifactBytes.length) fail('seecode-intent receipt does not bind its page artifact')
+  } else if (typeof receipt.archify.artifact?.bytes !== 'number' || receipt.archify.artifact.bytes !== artifactBytes.length) {
+    fail('Archify child receipt artifact size does not match')
+  }
+  return { receipt, receiptBytes: bytes, artifactBytes, artifact, fromSeecodeIntent }
 }
 
 const main = async () => {
@@ -211,14 +229,14 @@ const main = async () => {
   if (reviewKind === 'actual-delta') {
     if (!shaPattern.test(expectedHeadSha)) fail('expected final head SHA is invalid')
     if (source.receipt.headSha !== expectedHeadSha) fail('actual-delta receipt head does not match expected head')
-    if (source.receipt.artifacts?.delta?.path !== source.artifact || (source.receipt.artifacts?.delta?.bytes !== undefined && source.receipt.artifacts.delta.bytes !== source.artifactBytes.length)) {
+    if (source.receipt.artifacts?.delta?.path !== source.artifact || typeof source.receipt.artifacts?.delta?.bytes !== 'number' || source.receipt.artifacts.delta.bytes !== source.artifactBytes.length) {
       fail('actual-delta receipt does not bind its delta artifact')
     }
     if (typeof source.receipt.repoRoot !== 'string' || !isAbsolute(source.receipt.repoRoot)) fail('actual-delta receipt is missing an absolute repository root')
     repositoryBefore = await readRepoState(source.receipt.repoRoot)
     if (repositoryBefore.headSha !== expectedHeadSha || !repositoryBefore.clean) fail('repository must be clean at the expected head')
   }
-  if (source.receipt.pinnedSha !== productionArchifyPinnedSha) fail('Archify wrapper identity is not pinned')
+  if (!source.fromSeecodeIntent && source.receipt.pinnedSha !== productionArchifyPinnedSha) fail('Archify wrapper identity is not pinned')
   const trialRoot = productionTrialRoot
   await assertOwnedDirectory(trialRoot, 'Plannotator trial root')
   const binaryPath = join(trialRoot, 'tool/plannotator-darwin-arm64')
@@ -248,7 +266,6 @@ const main = async () => {
     resultPath,
   ], {
     cwd: reviewRoot,
-    encoding: 'utf8',
     timeout: productionReviewTimeoutMs,
   })
   const timedOut = child.error?.code === 'ETIMEDOUT'
@@ -275,7 +292,7 @@ const main = async () => {
   }
   if (errorMessage === null) {
     try {
-      stdout = parseJson(Buffer.from(child.stdout ?? ''), 'Plannotator stdout')
+      stdout = parseJson(child.stdout ?? Buffer.alloc(0), 'Plannotator stdout')
       if (JSON.stringify(stableJson(stdout)) !== JSON.stringify(stableJson(result))) fail('Plannotator stdout and result disagree')
     } catch (error) {
       recordError(error)
@@ -305,7 +322,7 @@ const main = async () => {
   const validDecision = rawDecision === 'approved' || rawDecision === 'annotated' || rawDecision === 'dismissed'
   const expectedExit = rawDecision === 'approved' ? 0 : rawDecision === 'annotated' || rawDecision === 'dismissed' ? 1 : null
   if (!validDecision) recordError(new Error('Plannotator result decision is invalid'))
-  if (rawDecision === 'annotated' && (!feedbackIsString || feedback.length === 0)) recordError(new Error('annotated result requires feedback'))
+  if (rawDecision === 'annotated' && (!feedbackIsString || feedback.trim().length === 0)) recordError(new Error('annotated result requires feedback'))
   if (rawDecision === 'dismissed' && feedback !== null) recordError(new Error('dismissed result cannot contain feedback'))
   if (errorMessage === null && (child.status !== expectedExit || child.signal !== null)) recordError(new Error('Plannotator exit status does not match result'))
   const decision = errorMessage === null ? rawDecision : 'gate-error'
@@ -363,21 +380,39 @@ const main = async () => {
       ...(reviewKind === 'actual-delta' ? { headSha: expectedHeadSha } : {}),
     })
   } catch (error) {
+    const auditError = error?.message ?? String(error)
     finalDecision = 'gate-error'
-    finalError = error?.message ?? String(error)
+    finalError = finalError === null ? auditError : `${finalError}; audit failed: ${auditError}`
   }
-  const finalTransition = finalDecision === 'approved'
-    ? reviewKind === 'intent' ? 'intent-accepted' : 'accepted'
-    : finalDecision === 'annotated' ? 'classification-required' : 'BLOCKED'
-  const completed = {
-    ...normalized,
-    ok: finalDecision !== 'gate-error',
-    decision: finalDecision,
-    transition: finalTransition,
-    ...(finalError !== null ? { error: finalError } : {}),
-    auditPath,
+  const buildCompleted = () => {
+    const finalTransition = finalDecision === 'approved'
+      ? reviewKind === 'intent' ? 'intent-accepted' : 'accepted'
+      : finalDecision === 'annotated' ? 'classification-required' : 'BLOCKED'
+    return {
+      ...normalized,
+      ok: finalDecision !== 'gate-error',
+      decision: finalDecision,
+      transition: finalTransition,
+      ...(finalError !== null ? { error: finalError } : {}),
+      ...(finalDecision === 'gate-error' && validDecision ? { rawDecision } : {}),
+      auditPath,
+    }
   }
-  await writeAdapterReceipt(adapterReceiptPath, completed)
+  let completed = buildCompleted()
+  try {
+    await writeAdapterReceipt(adapterReceiptPath, completed)
+  } catch (error) {
+    const receiptError = error?.message ?? String(error)
+    try {
+      await assertOwnedDirectory(reviewRoot, 'adapter review directory')
+      await rm(reviewRoot, { recursive: true, force: true })
+    } catch {
+      // Directory may be read-only or untrusted; still emit the structured gate-error below.
+    }
+    finalDecision = 'gate-error'
+    finalError = finalError === null ? `adapter receipt write failed: ${receiptError}` : `${finalError}; adapter receipt write failed: ${receiptError}`
+    completed = buildCompleted()
+  }
   process.stdout.write(`${JSON.stringify(completed)}\n`)
   process.exitCode = finalDecision === 'approved' ? 0 : finalDecision === 'annotated' || finalDecision === 'dismissed' ? 1 : 2
 }

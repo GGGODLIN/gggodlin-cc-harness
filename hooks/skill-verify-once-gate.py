@@ -33,6 +33,11 @@
 #     的 sdk prompt（claude -p 實測 origin 缺席、turnOrigin=sdk）。只認真人會讓所有
 #     headless 與 /goal 流程的 Self-Verify 全被 deny，那是靜默打斷功能、不是保護。
 #   - 不依賴 settings.json 的 hook 陣列順序；三個掛點各自獨立、可並行。
+#   - FILE_SNAPSHOT 標頭預檢只在 prompt 出現頂格的 `AUDIT_INPUT_MODE:`、`SNAPSHOT_PATH:`
+#     或 `SNAPSHOT_TOTAL_LINES:` 行時觸發，在消耗單次額度前檢查三行齊全、路徑為單一既存非 symlink
+#     一般檔絕對路徑且行數為正整數；未帶上述頂格標頭的一般全文內嵌模式直接進入額度檢查，本 gate
+#     不驗證內嵌模式是否貼齊交付物全文（由 auditor 負責）。若全文內嵌模式的原文剛好出現頂格的
+#     `SNAPSHOT_PATH:` 等字樣，請縮排或加 `> ` 引用前綴，否則會被當成殘缺快照標頭攔下。
 #
 # 自身生命週期（Locked surface 的三條路）
 #   bootstrap：本檔與其 settings 註冊由一般 Edit/Write 寫入，gate 不保護自己的原始碼。
@@ -57,6 +62,11 @@ MARKER_RE = re.compile(r"skill-verify:([A-Za-z0-9][A-Za-z0-9._-]{0,63})")
 AGENT_ID_RE = re.compile(r"agentId:\s*([0-9A-Za-z_-]{6,64})")
 LAUNCH_OK_RE = re.compile(r"agent launched successfully", re.I)
 SAFE_ID_RE = re.compile(r"[A-Za-z0-9._-]{1,128}")
+SNAPSHOT_MODE_RE = re.compile(r"^AUDIT_INPUT_MODE\s*:\s*([^\r\n]*?)\s*$", re.M)
+SNAPSHOT_PATH_RE = re.compile(r"^SNAPSHOT_PATH\s*:\s*([^\r\n]*?)\s*$", re.M)
+SNAPSHOT_LINES_RE = re.compile(r"^SNAPSHOT_TOTAL_LINES\s*:\s*([^\r\n]*?)\s*$", re.M)
+POSITIVE_INT_RE = re.compile(r"[1-9][0-9]*")
+UNSAFE_ECHO_RE = re.compile(r"[\x00-\x1f\x7f-\x9f‎‏‪-‮⁦-⁩]")
 
 TURN_ORIGINS = {"human", "sdk"}
 BLOCKED_ORIGINS = {"task-notification", "peer", "system", "injection", "hook"}
@@ -233,6 +243,73 @@ def marker_skill(tool_input):
   return found.pop()
 
 
+def safe_preview(value, limit=120):
+  cleaned = UNSAFE_ECHO_RE.sub("?", str(value or ""))
+  return cleaned[:limit]
+
+
+def validate_file_snapshot(tool_input):
+  """只在選擇啟用或疑似殘缺宣告 FILE_SNAPSHOT 時預檢三行標頭；一般全文內嵌模式回傳 None。"""
+  prompt = tool_input.get("prompt")
+  if not isinstance(prompt, str) or not prompt:
+    return None
+  modes = SNAPSHOT_MODE_RE.findall(prompt)
+  paths = SNAPSHOT_PATH_RE.findall(prompt)
+  totals = SNAPSHOT_LINES_RE.findall(prompt)
+  if not modes and not paths and not totals:
+    return None
+
+  hint = (
+    "FILE_SNAPSHOT 讀檔模式必須在 prompt 頂格同時提供三行："
+    "`AUDIT_INPUT_MODE: FILE_SNAPSHOT`、"
+    "`SNAPSHOT_PATH: <單一既存非 symlink 一般檔絕對路徑>`、"
+    "`SNAPSHOT_TOTAL_LINES: <正整數>`（本次攔截未消耗單次額度，修正後可直接重派；"
+    "若為全文內嵌模式且內文引用了上述欄位名，請縮排或加 `> ` 引用前綴）。"
+  )
+  if len(modes) != 1 or modes[0] != "FILE_SNAPSHOT":
+    return f"偵測到不完整或無效的 FILE_SNAPSHOT 標頭（缺少或重複 `AUDIT_INPUT_MODE: FILE_SNAPSHOT`）。{hint}"
+  if len(paths) != 1 or len(totals) != 1:
+    return f"FILE_SNAPSHOT 標頭不完整（必須恰好各有一行 `SNAPSHOT_PATH:` 與 `SNAPSHOT_TOTAL_LINES:`）。{hint}"
+
+  raw_path = paths[0]
+  raw_total = totals[0]
+  if not raw_path.startswith("/") or "\x00" in raw_path:
+    return f"`SNAPSHOT_PATH` 必須是單一絕對路徑（收到 `{safe_preview(raw_path)}`）。{hint}"
+  if POSITIVE_INT_RE.fullmatch(raw_total) is None:
+    return f"`SNAPSHOT_TOTAL_LINES` 必須是正整數（收到 `{safe_preview(raw_total)}`）。{hint}"
+
+  try:
+    metadata = Path(raw_path).lstat()
+  except OSError:
+    return f"`SNAPSHOT_PATH` 指向的檔案不存在或無法讀取（`{safe_preview(raw_path)}`）。{hint}"
+  if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode):
+    return f"`SNAPSHOT_PATH` 必須是既存的非 symlink 一般檔（`{safe_preview(raw_path)}`）。{hint}"
+  return None
+
+
+LIVE_TRANSCRIPT_JSONL_RE = re.compile(
+  r"(?:~|/Users/[^/\s\"'`]+|/home/[^/\s\"'`]+)/\.claude[^/\s\"'`]*/projects/[^\s\"'`<>]+\.jsonl"
+)
+RBA_VIOLATION_RE = re.compile(r"(?m)^\s*(?:VERDICT:\s*VIOLATIONS\b|R\d+:\s*FAIL\b)")
+
+
+def validate_rba_no_live_transcript(skill, tool_input):
+  if skill != "research-before-answer":
+    return None
+  prompt = tool_input.get("prompt")
+  if not isinstance(prompt, str) or ".jsonl" not in prompt:
+    return None
+  match = LIVE_TRANSCRIPT_JSONL_RE.search(prompt)
+  if match is None:
+    return None
+  return (
+    f"禁止把活動對話紀錄檔（`{safe_preview(match.group(0))}`）交給 `research-before-answer` 審查員直接讀"
+    "（避免整檔重讀造成大量 token 消耗與行號漂移；本次攔截未消耗單次額度）。"
+    "請將需要的 CLI 原始輸出或單筆 `tool_result` 投影存成獨立證據小檔（如 `<scratchpad>/rba-evidence/<名稱>.txt`），"
+    "再附該副檔絕對路徑與行號重新派工。"
+  )
+
+
 def transcript_lines_reverse(transcript_path):
   if not isinstance(transcript_path, str) or not transcript_path:
     raise ValueError("no transcript path")
@@ -341,6 +418,20 @@ def judge_existing(path, attempt_id):
   if existing.get("attempt_id") == attempt_id:
     return "replay", existing
   return "spent", existing
+
+
+def peek_claim(root, session_id, prompt_id, skill, attempt_id, caller):
+  directory = session_dir(root, session_id)
+  legacy = directory / f"claim-{key_digest(session_id, prompt_id, skill)}.json"
+  try:
+    return judge_existing(legacy, attempt_id)
+  except FileNotFoundError:
+    pass
+  path = directory / f"claim-{key_digest(session_id, prompt_id, skill, caller)}.json"
+  try:
+    return judge_existing(path, attempt_id)
+  except FileNotFoundError:
+    return None, None
 
 
 def claim(root, session_id, prompt_id, skill, attempt_id, caller):
@@ -459,7 +550,42 @@ def pre_agent(payload):
     caller = caller_identity(payload)
     prompt_id = turn_prompt_id(payload.get("transcript_path"))
     root = runtime_root()
-    state, record = claim(root, session_id, prompt_id, skill, attempt_identity(payload, tool_input), caller)
+    attempt_id = attempt_identity(payload, tool_input)
+    existing_state, existing_record = peek_claim(root, session_id, prompt_id, skill, attempt_id, caller)
+    if existing_state is None:
+      snapshot_error = validate_file_snapshot(tool_input)
+      if snapshot_error is not None:
+        append_audit(
+          {
+            "ts": now_iso(),
+            "mode": "pre-agent",
+            "result": "deny",
+            "reason": "invalid-file-snapshot",
+            "skill": skill,
+            "session": session_id,
+            "prompt": prompt_id,
+            "caller": caller,
+          }
+        )
+        return deny(snapshot_error)
+      live_jsonl_error = validate_rba_no_live_transcript(skill, tool_input)
+      if live_jsonl_error is not None:
+        append_audit(
+          {
+            "ts": now_iso(),
+            "mode": "pre-agent",
+            "result": "deny",
+            "reason": "rba-live-transcript-jsonl",
+            "skill": skill,
+            "session": session_id,
+            "prompt": prompt_id,
+            "caller": caller,
+          }
+        )
+        return deny(live_jsonl_error)
+      state, record = claim(root, session_id, prompt_id, skill, attempt_id, caller)
+    else:
+      state, record = existing_state, existing_record
   except (OSError, TypeError, ValueError) as error:
     append_audit({"ts": now_iso(), "mode": "pre-agent", "result": "deny", "reason": f"state:{type(error).__name__}"})
     return deny(
@@ -494,18 +620,37 @@ def post_agent(payload):
   response = payload.get("tool_response")
   if isinstance(response, (dict, list)):
     response = json.dumps(response, ensure_ascii=False)
-  if not isinstance(response, str) or not LAUNCH_OK_RE.search(response):
-    return passthrough()
-  match = AGENT_ID_RE.search(response)
-  if match is None:
+  if not isinstance(response, str):
     return passthrough()
 
-  try:
-    root = runtime_root()
-    record_auditor(root, payload.get("session_id"), match.group(1))
-  except (OSError, TypeError, ValueError):
-    return passthrough()
-  append_audit({"ts": now_iso(), "mode": "post-agent", "result": "recorded", "agent_id": match.group(1)})
+  if LAUNCH_OK_RE.search(response):
+    match = AGENT_ID_RE.search(response)
+    if match is not None:
+      try:
+        root = runtime_root()
+        record_auditor(root, payload.get("session_id"), match.group(1))
+        append_audit({"ts": now_iso(), "mode": "post-agent", "result": "recorded", "agent_id": match.group(1)})
+      except (OSError, TypeError, ValueError):
+        pass
+
+  if marker_skill(tool_input) == "research-before-answer" and RBA_VIOLATION_RE.search(response):
+    append_audit({"ts": now_iso(), "mode": "post-agent", "result": "remind", "reason": "rba-sidecar-sync"})
+    print(
+      json.dumps(
+        {
+          "hookSpecificOutput": {
+            "hookEventName": "PostToolUse",
+            "additionalContext": (
+              "[rba-sidecar-sync] 審查員回報違規（VIOLATIONS/FAIL）。"
+              "若本回合另有寫入交付給使用者的報告副檔（如 .md/.html/sidecar），"
+              "修正聊天草稿時請務必同步修正所有報告副檔中的相同錯誤主張，避免錯誤結論殘留副檔（H3）。"
+            ),
+          }
+        },
+        ensure_ascii=False,
+      )
+    )
+    return 0
   return passthrough()
 
 

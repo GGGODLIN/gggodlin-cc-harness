@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
 # 本檔在契約測試底下：python3 ~/.claude/hooks/review-spec-yagni-permit.test.py
+# Threat model：防誠實但健忘的 agent 未經當輪人類選擇派 Fable，或同 session 多輪覆蓋舊輪 packet／sentinel／report。
+#   不承諾抵抗同 UID 主動竄改 transcript、環境變數或本機檔案；不承諾完整語意解析，只認固定 canonical 路徑格式（含可選 -r<N> 輪次後綴），認不出來就 fail closed。
+#   提示文字若缺路徑或誤夾舊輪路徑會被攔；替代路徑為以 marker 回傳的 snapshot_path、sentinel_path、report_path 組 prompt。
+#   核可是同意單次 Fable 審查派工，不是證明審查內容品質，也不遞移到外部腳本。
+# Surface：Locked = 本檔、review-spec-yagni-permit.test.py、T2-routing-gate.sh（bootstrap 首入 HEAD 放行留 log；update 經 agent-contract-gate-permit.sh issue 單次核可並過測試；recovery 用 .agent-contract-gate-disabled 或外部終端機，均留稽核紀錄）；
+#   Editable = ~/.claude/.scratch/ 下帶輪次的 packet／sentinel／report；Append-only = issued tombstone 與 audit log；Human-controlled = /review-spec yagni 與選單回覆。
 
 import argparse
 import contextlib
@@ -17,6 +23,7 @@ from pathlib import Path
 
 BATCHES = ("stories", "decisions")
 SESSION_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+ROUND_TAG_RE = re.compile(r"^-r[1-9][0-9]{0,3}$")
 PERMIT_RE = re.compile(r"^[0-9a-f]{32}$")
 # Used only to make an event uuid safe as a tombstone filename; not a content check.
 EVENT_KEY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
@@ -387,14 +394,14 @@ def find_menu(records, session, command_index, packet):
     matches = MENU_RE.findall(text)
     if not matches:
       continue
-    if len(matches) != 1 or matches[0] != str(packet):
+    if len(matches) != 1 or menu_fable_letters(text) is None:
       deny("model-menu-invalid")
-    if menu_fable_letters(text) is None:
-      deny("model-menu-invalid")
-    found = (index, record, text)
+    found = (index, record, text, matches[0])
   if found is None:
     deny("model-menu-missing")
-  index, record, text = found
+  index, record, text, menu_packet = found
+  if menu_packet != str(packet):
+    deny("model-menu-invalid")
   if not isinstance(record.get("uuid"), str):
     deny("model-menu-identity-missing")
   return index, record, text
@@ -450,8 +457,25 @@ def find_selection(records, session, menu_index, menu_text):
   return index, record, text
 
 
-def expected_packet_path(session):
-  return Path.home() / ".claude" / ".scratch" / f"review-spec-yagni-packet-{session}.md"
+def parse_packet_round_suffix(packet, session):
+  scratch = Path.home() / ".claude" / ".scratch"
+  if packet.parent != scratch:
+    return None
+  prefix = f"review-spec-yagni-packet-{session}"
+  name = packet.name
+  if not name.startswith(prefix) or not name.endswith(".md"):
+    return None
+  middle = name[len(prefix) : -len(".md")]
+  if middle == "" or ROUND_TAG_RE.fullmatch(middle):
+    return middle
+  return None
+
+
+def expected_batch_paths(session, batch, round_suffix):
+  scratch = Path.home() / ".claude" / ".scratch"
+  sentinel = str(scratch / f"yagni-c-{batch}-{session}{round_suffix}.started")
+  report = str(scratch / f"yagni-c-{batch}-{session}{round_suffix}.report.md")
+  return sentinel, report
 
 
 def snapshot_path(root, state):
@@ -527,6 +551,8 @@ def validate_state(state):
 def validate_session(state, session):
   if state["session_id"] != session:
     deny("permit-session-mismatch")
+  if parse_packet_round_suffix(Path(state["packet_path"]), session) is None:
+    deny("invalid-permit-state")
 
 
 def validate_binding(state):
@@ -608,7 +634,7 @@ def issue(args):
   session = args.session
   transcript, transcript_payload = resolve_transcript(session)
   packet = Path(os.path.abspath(os.path.expanduser(args.packet)))
-  if packet != expected_packet_path(session):
+  if parse_packet_round_suffix(packet, session) is None:
     deny("packet-path-mismatch")
   packet_payload = read_owned_file(packet, "packet-untrusted")
   records = load_records(transcript_payload)
@@ -638,7 +664,11 @@ def issue(args):
         validate_snapshot(root, previous, current)
         validate_transcript_state(previous)
         emit(issue_response(previous))
-      deny("permit-already-active")
+      # A brand-new valid selection at the tail of the transcript already superseded the prior round's permit.
+      prev_snapshot = Path(previous["snapshot_path"])
+      if prev_snapshot.parent == root:
+        prev_snapshot.unlink(missing_ok=True)
+      path.unlink(missing_ok=True)
     if tombstone_path(session, selection["uuid"]).exists():
       deny("selection-already-issued")
     permit_id = secrets.token_hex(16)
@@ -703,6 +733,10 @@ def marker(args):
     validate_transcript_state(state)
     if args.batch not in state["remaining_batches"]:
       deny("batch-already-consumed")
+    round_suffix = parse_packet_round_suffix(Path(state["packet_path"]), state["session_id"])
+    if round_suffix is None:
+      deny("invalid-permit-state")
+    sentinel_path, report_path = expected_batch_paths(state["session_id"], args.batch, round_suffix)
     value = (
       f"<review-spec-yagni:v1 permit_id={state['permit_id']} "
       f"batch={args.batch}>"
@@ -712,6 +746,8 @@ def marker(args):
     "marker": value,
     "batch": args.batch,
     "snapshot_path": state["snapshot_path"],
+    "sentinel_path": sentinel_path,
+    "report_path": report_path,
     "expires_at": state["expires_at"],
   })
 
@@ -763,8 +799,10 @@ def consume():
     validate_transcript_state(state)
     if batch not in state["remaining_batches"]:
       deny("batch-already-consumed")
-    expected_sentinel = str(Path.home() / ".claude" / ".scratch" / f"yagni-c-{batch}-{session}.started")
-    expected_report = str(Path.home() / ".claude" / ".scratch" / f"yagni-c-{batch}-{session}.report.md")
+    round_suffix = parse_packet_round_suffix(Path(state["packet_path"]), session)
+    if round_suffix is None:
+      deny("invalid-permit-state")
+    expected_sentinel, expected_report = expected_batch_paths(session, batch, round_suffix)
     for required in (state["snapshot_path"], expected_sentinel, expected_report):
       if exact_path_count(prompt, required) != 1:
         deny("prompt-binding-mismatch")

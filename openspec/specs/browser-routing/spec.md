@@ -7,21 +7,26 @@ Route every general browser task through LCU on the user's daily Chrome, keep ch
 
 ### Requirement: General browser route uses LCU on daily Chrome
 
-Every active Claude Code route for general page navigation, reading, search, or authenticated interaction SHALL use the formal LCU MCP (`mcp__lcu__js`) on the approved daily Chrome. It MUST NOT fall back to Open Browser Use, Agent Chrome, Cua, or a directly launched runtime when LCU is unavailable.
+Every active Claude Code route for general page navigation, reading, search, or authenticated interaction SHALL use the formal LCU MCP (`mcp__lcu__js`) on the approved daily Chrome. It MUST NOT fall back to Open Browser Use, Agent Chrome, Cua, or a directly launched runtime when LCU is unavailable, disconnected, or declined by the user. The sole pre-authorized automatic fallback exception is an upstream OpenAI site-safety block (`site_status_blocked` / `The site-safety policy blocks this action`), which SHALL complete `completion_summary` on LCU and invoke the local OBU CLI helper (`~/.claude/scripts/obu-site-blocked-fallback.py` or `~/.local/bin/open-browser-use` with an isolated `--session-id` and `finalize-tabs --keep '[]'`) without re-registering a persistent OBU MCP server or claiming existing user tabs.
 
 #### Scenario: Main session performs general browser work
 - **WHEN** a main session needs to open, read, search, or interact with a webpage
 - **THEN** it uses `mcp__lcu__js` on a tab the task names or creates
 - **AND** it does not select claude-in-chrome, Open Browser Use, or general-purpose chrome-devtools
 
-#### Scenario: LCU is unavailable
-- **WHEN** the LCU MCP is not loaded, not connected, or lacks the required capability
+#### Scenario: LCU hits upstream site-safety block
+- **WHEN** `mcp__lcu__js` rejects a URL with `site_status_blocked` (`The site-safety policy blocks this action` / `Site safety policy blocked this URL`)
+- **THEN** the agent sends the LCU `completion_summary` and falls back to the local OBU CLI (`~/.claude/scripts/obu-site-blocked-fallback.py`) on daily Chrome using a temporary tab cleaned up via `finalize-tabs --keep '[]'`
+- **AND** it does not claim the user's existing tabs or register a persistent `open_browser_use` MCP server
+
+#### Scenario: LCU is unavailable or user declines
+- **WHEN** the LCU MCP is not loaded, not connected, times out, is declined by the user, or lacks the required capability (other than `site_status_blocked`)
 - **THEN** the browser task stops and reports the concrete blocker
 - **AND** it does not fall back to Open Browser Use, Agent Chrome, or Cua
 
 ### Requirement: Retired browser routes stay disabled
 
-Active runtime guidance MUST NOT direct any browser task to `claude-in-chrome`, Open Browser Use, or Agent Chrome. User settings SHALL deny every `mcp__claude-in-chrome__*` tool and SHALL NOT allow any `mcp__open_browser_use__*` tool. No launch agent SHALL start the Agent Chrome profile at login, and no MCP server SHALL attach to it over a remote debugging port.
+Active runtime guidance MUST NOT direct general browser tasks to `claude-in-chrome`, Agent Chrome, or a persistent Open Browser Use MCP server. User settings SHALL deny every `mcp__claude-in-chrome__*` tool and SHALL NOT allow any `mcp__open_browser_use__*` tool. Positive OBU CLI instructions are permitted only when explicitly scoped to `site_status_blocked` / `site-safety policy`. No launch agent SHALL start the Agent Chrome profile at login, and no MCP server SHALL attach to it over a remote debugging port.
 
 #### Scenario: Legacy MCP tool is requested
 - **WHEN** a fresh Claude Code session attempts any `mcp__claude-in-chrome__*` call

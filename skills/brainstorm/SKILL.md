@@ -1,6 +1,6 @@
 ---
 name: brainstorm
-description: "Use at the opening of a session when the user brings a topic that has not taken shape yet — 我有個還沒定形的題目 / 想討論一件事但還不確定要做什麼 / 幫我想想這個要怎麼弄 / 還沒想清楚先聊聊 / brainstorm / 一起想個方向 / 這個值不值得做. Pipeline-neutral — pure discussion that implements nothing afterwards is a fully legitimate use. Do not use for: answers that live in the user's own head and need extracting one question at a time (訪談模式), answers held by a third party (to-questionnaire), a proposal already formed that needs adversarial pressure (grill-me), or a feature already decided on that needs a spec (`to-spec`)."
+description: "Use at the opening of a session when the user brings an unformed topic — 我有個還沒定形的題目 / 想討論一件事但還不確定要做什麼 / 幫我想想這個要怎麼弄 / 還沒想清楚先聊聊 / brainstorm / 一起想個方向 / 這個值不值得做. Pipeline-neutral (pure discussion is valid). Do not use for: extracting user-held answers (訪談模式), third-party answers (to-questionnaire), fixed-stage multi-AI ideation (multi-ai-ideate), stress-testing a formed proposal (grill-me), or writing a spec for a decided feature (`to-spec`)."
 ---
 
 <!-- 本檔在契約測試底下：bash ~/.claude/commands/tests/memory-audit-contract.test.sh -->

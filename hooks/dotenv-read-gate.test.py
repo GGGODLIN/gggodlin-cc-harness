@@ -14,19 +14,20 @@ GATE = Path(__file__).resolve().parent / 'dotenv-read-gate.py'
 def run_gate(payload, env_extra=None):
   env = os.environ.copy()
   env.pop('DOTENV_READ_GATE_OFF', None)
-  env['DOTENV_READ_GATE_SENTINEL'] = '/tmp/nonexistent-dotenv-gate-sentinel-xyz'
-  env['DOTENV_READ_GATE_AUDIT'] = '/tmp/dotenv-read-gate-test-audit.jsonl'
-  if env_extra:
-    env.update(env_extra)
   raw_in = payload if isinstance(payload, str) else json.dumps(payload)
-  proc = subprocess.run(
-    ['/usr/bin/python3' if os.path.exists('/usr/bin/python3') else sys.executable, '-I', str(GATE)],
-    input=raw_in,
-    text=True,
-    capture_output=True,
-    env=env,
-    timeout=10,
-  )
+  with tempfile.TemporaryDirectory() as temp:
+    env['DOTENV_READ_GATE_SENTINEL'] = str(Path(temp) / 'sentinel')
+    env['DOTENV_READ_GATE_AUDIT'] = str(Path(temp) / 'audit.jsonl')
+    if env_extra:
+      env.update(env_extra)
+    proc = subprocess.run(
+      ['/usr/bin/python3' if os.path.exists('/usr/bin/python3') else sys.executable, '-I', str(GATE)],
+      input=raw_in,
+      text=True,
+      capture_output=True,
+      env=env,
+      timeout=10,
+    )
   assert proc.returncode == 0, f'exit {proc.returncode}: {proc.stderr}'
   out = proc.stdout.strip()
   return json.loads(out) if out else None
@@ -49,19 +50,97 @@ class DotenvReadGateTest(unittest.TestCase):
     self.assertAllowed({'tool_name': 'Read', 'tool_input': {'file_path': '/Users/test/app/.env.example'}})
     self.assertAllowed({'tool_name': 'Read', 'tool_input': {'file_path': '/Users/test/app/.dev.env.template'}})
     self.assertAllowed({'tool_name': 'Read', 'tool_input': {'file_path': '/Users/test/app/src/config.ts'}})
-    # Bash 只印欄位名（cut -d= -f1）放行
+    # Bash 只印欄位名（cut -d= -f1）及後續安全格式化管線放行
     self.assertAllowed({
       'tool_name': 'Bash',
       'tool_input': {'command': 'command grep -E "^[A-Za-z_][A-Za-z0-9_]*=" /app/.dev.env | cut -d= -f1'},
+    })
+    self.assertAllowed({
+      'tool_name': 'Bash',
+      'tool_input': {'command': 'command grep -E "^[A-Za-z_][A-Za-z0-9_]*=" /app/.env.local | cut -d= -f1 | tr \'\\n\' \' \''},
+    })
+    self.assertAllowed({
+      'tool_name': 'Bash',
+      'tool_input': {'command': 'command grep -E "^[A-Za-z_][A-Za-z0-9_]*=" /app/.dev.env | cut -d= -f1 | grep MONGO | wc -l'},
+    })
+    self.assertAllowed({
+      'tool_name': 'Bash',
+      'tool_input': {'command': "command grep -oE '^[A-Z_]+=' /app/.env.local | tr '\\n' ' '"},
+    })
+    # grep -c / grep -l 純計數或列檔名放行
+    self.assertAllowed({
+      'tool_name': 'Bash',
+      'tool_input': {'command': "grep -c '^MOCK_DATASET=tyson' /app/.env.local"},
+    })
+    self.assertAllowed({
+      'tool_name': 'Bash',
+      'tool_input': {'command': 'command grep -l "APIFY" /app/.env /app/.env.local 2>/dev/null'},
     })
     # Bash 純非敏感白名單 key 錨定查詢放行
     self.assertAllowed({
       'tool_name': 'Bash',
       'tool_input': {'command': 'command grep -E "^(PORT|NODE_ENV|API_URL|HOST)=" /app/.dev.env'},
     })
-    # Bash 檔案存在檢查與 git status 放行
+    # Bash 檔案存在／權限元資料管線、cmp -s 與 git status 放行
     self.assertAllowed({'tool_name': 'Bash', 'tool_input': {'command': 'test -f /app/.dev.env'}})
+    self.assertAllowed({'tool_name': 'Bash', 'tool_input': {'command': "ls -la /app/.dev.env 2>&1 | awk '{print $1, $NF}'"}})
+    self.assertAllowed({'tool_name': 'Bash', 'tool_input': {'command': 'ls -la /app/.env.local | head -n 5'}})
+    self.assertAllowed({'tool_name': 'Bash', 'tool_input': {'command': 'cmp -s /app/.dev.env /app/wt/.dev.env'}})
     self.assertAllowed({'tool_name': 'Bash', 'tool_input': {'command': 'git -C /app status .env'}})
+    # jq 查詢 .json 設定檔內 .env 屬性、全形標點黏連 .env.example 與純文字單引號 heredoc 放行
+    self.assertAllowed({
+      'tool_name': 'Bash',
+      'tool_input': {'command': "jq -r '.env // {} | keys[]' /Users/test/.claude/settings.json | head -5"},
+    })
+    self.assertAllowed({
+      'tool_name': 'Bash',
+      'tool_input': {'command': 'echo "請參考 .env.example（絕不硬編碼秘密）"'},
+    })
+    self.assertAllowed({
+      'tool_name': 'Bash',
+      'tool_input': {'command': "git commit -F - <<'EOF'\nfix: document .dev.env workflow\nEOF"},
+    })
+    self.assertAllowed({
+      'tool_name': 'Bash',
+      'tool_input': {'command': "mkdir -p /tmp/r && cat > /tmp/r/prompt.md <<'EOF'\ndo not read .dev.env\nEOF"},
+    })
+    # 2026-11-21 第二輪誤攔放寬（echo 標題、安全 $(grep -c)、ls/find 接 stdin-only 篩選、前綴 grep -o、含角括號的 jq、搜尋安全原始碼檔、cat <<'EOF' >> .md）
+    self.assertAllowed({
+      'tool_name': 'Bash',
+      'tool_input': {'command': 'echo "== saas .test.env keys"; command grep -E "^[A-Za-z_][A-Za-z0-9_]*=" "app/.test.env" | cut -d= -f1 | tr \'\\n\' \' \''},
+    })
+    self.assertAllowed({
+      'tool_name': 'Bash',
+      'tool_input': {'command': 'echo "dev-pl-0: $(command grep -c -E \'^MONGO_CONNECTION_STRING=.*acme-dev-pl-0\' .dev.env)"'},
+    })
+    self.assertAllowed({
+      'tool_name': 'Bash',
+      'tool_input': {'command': 'ls acme-saas-v2-service/ | command grep -c -x ".test.env" ; ls -a acme-saas-v2-service | command grep -E "^\\.(test|dev)\\.env$"'},
+    })
+    self.assertAllowed({
+      'tool_name': 'Bash',
+      'tool_input': {'command': "find /app/.claude/worktrees -maxdepth 2 -name '.test.env' -type f | sed 's|/\\.test\\.env$||'"},
+    })
+    self.assertAllowed({
+      'tool_name': 'Bash',
+      'tool_input': {'command': "ls .env.local >/dev/null 2>&1 && echo 'env.local present'"},
+    })
+    self.assertAllowed({
+      'tool_name': 'Bash',
+      'tool_input': {'command': "command grep -o -E '^MONGO[A-Z_]*=' .dev.env"},
+    })
+    self.assertAllowed({
+      'tool_name': 'Bash',
+      'tool_input': {'command': "jq '{m:([.hooks.PreToolUse[].matcher // \"<any>\"]|length),c:(.env|has(\"X\"))}' /Users/test/.claude/settings.json"},
+    })
+    self.assertAllowed({
+      'tool_name': 'Bash',
+      'tool_input': {'command': "command grep -nE 'env.local|dev.env' /Users/test/scripts/up.sh | head -40"},
+    })
+    self.assertAllowed({
+      'tool_name': 'Bash',
+      'tool_input': {'command': "cat <<'EOF' >> /Users/test/notes.md\nmention .env here\nEOF"},
+    })
 
   def test_2_known_bad(self):
     # 直接 Read .env / .dev.env / .env.local 攔截
@@ -107,6 +186,77 @@ class DotenvReadGateTest(unittest.TestCase):
     self.assertDenied({
       'tool_name': 'Bash',
       'tool_input': {'command': 'command grep -A 3 -E "^(PORT)=" .env'},
+    })
+    # 安全邊界防繞行：jq 讀受保護 .dev.env、無 -s 之 cmp、直譯器 heredoc、危險下游 sh/xargs 皆必須攔截
+    self.assertDenied({
+      'tool_name': 'Bash',
+      'tool_input': {'command': "jq -Rs '.' /app/.dev.env"},
+    })
+    self.assertDenied({
+      'tool_name': 'Bash',
+      'tool_input': {'command': 'cmp /app/.dev.env /app/wt/.dev.env'},
+    })
+    self.assertDenied({
+      'tool_name': 'Bash',
+      'tool_input': {'command': "python3 - <<'PY'\nprint(open('/app/.dev.env').read())\nPY"},
+    })
+    self.assertDenied({
+      'tool_name': 'Bash',
+      'tool_input': {'command': "cat > /tmp/probe.py <<'PY'\nprint(open('/app/.dev.env').read())\nPY\npython3 /tmp/probe.py"},
+    })
+    self.assertDenied({
+      'tool_name': 'Bash',
+      'tool_input': {'command': 'command grep -E "^[A-Za-z_][A-Za-z0-9_]*=" /app/.dev.env | cut -d= -f1 | xargs cat /app/.dev.env'},
+    })
+    self.assertDenied({
+      'tool_name': 'Bash',
+      'tool_input': {'command': "grep -E '^MONGO_CONNECTION_STRING' .test.env 2>/dev/null | sed -E 's#//[^@]*@#//***@#'"},
+    })
+    # 2026-11-21 第二輪防繞行反向斷言：下游偷傳 .env 檔、find -exec、echo 包不安全 $()、grep -o 跨 =、遞迴 grep、cat <<'EOF' >> .env
+    self.assertDenied({
+      'tool_name': 'Bash',
+      'tool_input': {'command': 'ls /tmp | grep foo .env'},
+    })
+    self.assertDenied({
+      'tool_name': 'Bash',
+      'tool_input': {'command': "ls /tmp | sed 's/a/b/' .dev.env"},
+    })
+    self.assertDenied({
+      'tool_name': 'Bash',
+      'tool_input': {'command': "find /app -name '.dev.env' -exec cat {} +"},
+    })
+    self.assertDenied({
+      'tool_name': 'Bash',
+      'tool_input': {'command': 'echo "secret: $(command grep -E \'^MONGO_CONNECTION_STRING\' .dev.env | sed -E \'s#://[^@]*@#://***@#\')"'},
+    })
+    self.assertDenied({
+      'tool_name': 'Bash',
+      'tool_input': {'command': "command grep -o -E '^MONGO.*' .dev.env"},
+    })
+    self.assertDenied({
+      'tool_name': 'Bash',
+      'tool_input': {'command': "command grep -rn 'MONGO' .dev.env src/"},
+    })
+    self.assertDenied({
+      'tool_name': 'Bash',
+      'tool_input': {'command': "command grep -nE 'dev.env' .dev.env"},
+    })
+    self.assertDenied({
+      'tool_name': 'Bash',
+      'tool_input': {'command': "cat <<'EOF' >> /app/.env\nFOO=bar\nEOF"},
+    })
+    # 反向斷言（2026-11-21 回放 L55 抓到）：先存進變數再讀（f=.dev.env; grep "$f" | sed ...）必須攔截
+    self.assertDenied({
+      'tool_name': 'Bash',
+      'tool_input': {'command': 'f=/app/.dev.env; [ -f "$f" ] && command grep -E \'^MONGO_CONNECTION_STRING\' "$f" | sed -E \'s#://[^@]*@#://***@#\' || echo "no .dev.env"'},
+    })
+    self.assertDenied({
+      'tool_name': 'Bash',
+      'tool_input': {'command': 'f=/app/.dev.env; cat "$f"'},
+    })
+    self.assertDenied({
+      'tool_name': 'Bash',
+      'tool_input': {'command': 'echo "$(ls /tmp; cat .env)"'},
     })
     # 控制字元與 bidi 注入淨化斷言
     reason = self.assertDenied({
@@ -194,16 +344,8 @@ class DotenvReadGateTest(unittest.TestCase):
 
 
 if __name__ == '__main__':
-  try:
-    os.unlink('/tmp/dotenv-read-gate-test-audit.jsonl')
-  except OSError:
-    pass
   suite = unittest.defaultTestLoader.loadTestsFromTestCase(DotenvReadGateTest)
   result = unittest.TextTestRunner(verbosity=2).run(suite)
-  try:
-    os.unlink('/tmp/dotenv-read-gate-test-audit.jsonl')
-  except OSError:
-    pass
   if not result.wasSuccessful():
     sys.exit(1)
   print('DOTENV_READ_GATE_ALL_TESTS_PASSED')

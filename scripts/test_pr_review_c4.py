@@ -1970,6 +1970,23 @@ class MultiTargetBindingTest(unittest.TestCase):
     self.assertEqual("C4_VALIDATED", result["reason_code"])
     self.assertEqual(["SPEC-001"], [item["id"] for item in result["admitted_findings"]])
 
+  def test_same_path_in_two_targets_keeps_authored_provenance_separate(self):
+    data = self.multi_packet()
+    data["changed_files"] = [
+      {"path": "package.json", "provenance": "inherited", "target_identity": TARGET_A},
+      {"path": "package.json", "provenance": "authored", "target_identity": TARGET_B},
+    ]
+    binding = data["evidence_bindings"][0]
+    binding["path"] = "package.json"
+    self.assertTrue(MODULE.packet_valid(data))
+
+    binding["target_identity"] = TARGET_A
+    self.assertFalse(MODULE.packet_valid(data))
+
+    binding["target_identity"] = TARGET_B
+    data["changed_files"][0]["target_identity"] = TARGET_B
+    self.assertFalse(MODULE.packet_valid(data))
+
   def test_validated_cross_target_finding_routes_to_the_code_target(self):
     data = self.multi_packet()
     result = self.validate_multi(data, self.targets_context())
@@ -1989,6 +2006,7 @@ class MultiTargetBindingTest(unittest.TestCase):
       "binding_id": "C4-BIND-002",
       "target_identity": TARGET_A,
     }
+    data["changed_files"].append({**data["changed_files"][0], "target_identity": TARGET_A})
     data["evidence_bindings"].append(second)
     data["trace_context"]["authored_diff_binding_ids"].append("C4-BIND-002")
     data["trace_context"]["clause_traces"][0]["authored_binding_ids"].append("C4-BIND-002")
@@ -2010,7 +2028,9 @@ class MultiTargetBindingTest(unittest.TestCase):
 
   def test_rejects_binding_target_not_among_declared_targets(self):
     data = self.multi_packet()
-    data["evidence_bindings"][0]["target_identity"] = "github:github.com/acme/other#1"
+    unknown_target = "github:github.com/acme/other#1"
+    data["evidence_bindings"][0]["target_identity"] = unknown_target
+    data["changed_files"][0]["target_identity"] = unknown_target
     result = self.validate_multi(data, self.targets_context())
     self.assertEqual("FAILED", result["status"])
     self.assertEqual("C4_BINDING_TARGET_INVALID", result["reason_code"])
@@ -2053,6 +2073,7 @@ class MultiTargetBindingTest(unittest.TestCase):
       "binding_id": "C4-BIND-002",
       "target_identity": TARGET_A,
     }
+    data["changed_files"].append({**data["changed_files"][0], "target_identity": TARGET_A})
     data["evidence_bindings"].append(second)
     data["trace_context"]["authored_diff_binding_ids"].append("C4-BIND-002")
     data["trace_context"]["clause_traces"][0]["authored_binding_ids"].append("C4-BIND-002")
@@ -2428,6 +2449,142 @@ class SourcePreflightTest(unittest.TestCase):
     code, accepted = self.run_preflight(qualified, context)
     self.assertEqual(0, code)
     self.assertEqual("C4_SOURCE_PREFLIGHT_OK", accepted["reason_code"])
+
+
+class C4BoundaryHardeningTest(unittest.TestCase):
+  def test_resolve_authority_returns_spec_content_invalid_on_non_utf8_openspec(self):
+    with tempfile.TemporaryDirectory() as root:
+      spec_path = Path(root, "openspec/specs/orders/spec.md")
+      spec_path.parent.mkdir(parents=True)
+      spec_path.write_bytes(b"\xff\xfe invalid utf8")
+      result = MODULE.resolve_authority(root, clause())
+    self.assertEqual("SKIPPED", result["status"])
+    self.assertEqual("C4_SPEC_CONTENT_INVALID", result["reason_code"])
+
+  def test_requirement_blocks_ignores_hash_headings_inside_fenced_code_blocks(self):
+    quote = "cancelOrder MUST return 409 when state is PENDING"
+    spec_text = (
+      "# Orders\n\n"
+      "### Requirement: Cancel pending order\n\n"
+      "```bash\n"
+      "# comment inside fence should not end requirement\n"
+      "## fake heading inside fence\n"
+      "curl -X POST /cancel\n"
+      "```\n\n"
+      f"{quote}\n"
+    )
+    with tempfile.TemporaryDirectory() as root:
+      archive_path = Path(root, "openspec/changes/archive/old/specs/orders/spec.md")
+      live_path = Path(root, "openspec/specs/orders/spec.md")
+      archive_path.parent.mkdir(parents=True)
+      live_path.parent.mkdir(parents=True)
+      archive_path.write_text(spec_text)
+      live_path.write_text(spec_text)
+      candidate = {
+        **clause(str(archive_path.relative_to(root))),
+        "line_start": line_number(spec_text, quote),
+        "line_end": line_number(spec_text, quote),
+      }
+      result = MODULE.resolve_authority(root, candidate)
+    self.assertEqual("RESOLVED", result["status"], result)
+    self.assertEqual("C4_LIVE_CANONICAL_RESOLVED", result["reason_code"])
+    self.assertIn("### Requirement: Cancel pending order", result["clause"]["source_excerpt"])
+
+  def test_target_context_rejects_cross_target_spec_file_mismatch(self):
+    pkt = packet()
+    pkt["clauses"][0]["target_identity"] = "target-a"
+    pkt["spec_files"][0]["target_identity"] = "target-b"
+    pkt["changed_files"][0]["target_identity"] = "target-a"
+    pkt["evidence_bindings"][0]["target_identity"] = "target-a"
+    ctx = {
+      "review_root": "/tmp/a",
+      "authored_diff_base": "a" * 40,
+      "review_head": "b" * 40,
+      "targets": {
+        "target-a": {"review_root": "/tmp/a", "authored_diff_base": "a" * 40, "review_head": "b" * 40},
+        "target-b": {"review_root": "/tmp/b", "authored_diff_base": "c" * 40, "review_head": "d" * 40},
+      },
+    }
+    self.assertIsNone(MODULE.target_context(ctx, pkt))
+
+  def test_authoritative_hunk_ranges_verifies_each_target_head_even_on_shared_root(self):
+    with tempfile.TemporaryDirectory() as root:
+      repo = Path(root)
+      subprocess.run(["git", "-C", str(repo), "init", "-q"], check=True)
+      subprocess.run(["git", "-C", str(repo), "config", "user.email", "t@example.com"], check=True)
+      subprocess.run(["git", "-C", str(repo), "config", "user.name", "T"], check=True)
+      src = repo / "src/orders/cancel.ts"
+      src.parent.mkdir(parents=True)
+      src.write_text("line1\n")
+      subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
+      subprocess.run(["git", "-C", str(repo), "commit", "-qm", "base"], check=True)
+      base_sha = subprocess.check_output(["git", "-C", str(repo), "rev-parse", "HEAD"], text=True).strip()
+      src.write_text("line1\nline2\n")
+      subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
+      subprocess.run(["git", "-C", str(repo), "commit", "-qm", "head"], check=True)
+      head_sha = subprocess.check_output(["git", "-C", str(repo), "rev-parse", "HEAD"], text=True).strip()
+
+      pkt = packet()
+      pkt["clauses"][0]["target_identity"] = "t1"
+      pkt["spec_files"][0]["target_identity"] = "t1"
+      pkt["changed_files"] = [
+        {"path": "src/orders/cancel.ts", "provenance": "authored", "target_identity": "t1"},
+        {"path": "src/orders/cancel.ts", "provenance": "authored", "target_identity": "t2"},
+      ]
+      pkt["evidence_bindings"] = [
+        {"binding_id": "C4-BIND-001", "side": "head", "path": "src/orders/cancel.ts",
+         "line_start": 1, "line_end": 2, "quote": "line1\nline2", "target_identity": "t1"},
+        {"binding_id": "C4-BIND-002", "side": "head", "path": "src/orders/cancel.ts",
+         "line_start": 1, "line_end": 2, "quote": "line1\nline2", "target_identity": "t2"},
+      ]
+      pkt["trace_context"]["authored_diff_binding_ids"] = ["C4-BIND-001", "C4-BIND-002"]
+      pkt["trace_context"]["clause_traces"][0]["authored_binding_ids"] = ["C4-BIND-001", "C4-BIND-002"]
+      ctx = {
+        "review_root": str(repo),
+        "authored_diff_base": base_sha,
+        "review_head": head_sha,
+        "targets": {
+          "t1": {"review_root": str(repo), "authored_diff_base": base_sha, "review_head": head_sha},
+          "t2": {"review_root": str(repo), "authored_diff_base": base_sha, "review_head": base_sha},
+        },
+      }
+      self.assertIsNone(MODULE.authoritative_hunk_ranges(ctx, pkt))
+
+  def test_permit_session_id_symlink_and_empty_runtime_metadata_hardening(self):
+    self.assertFalse(MODULE.safe_session_id("."))
+    self.assertFalse(MODULE.safe_session_id(".."))
+    self.assertFalse(MODULE.safe_session_id(".hidden"))
+    self.assertTrue(MODULE.safe_session_id("sess-123_ok"))
+
+    with tempfile.TemporaryDirectory() as tmp:
+      runtime_dir = Path(tmp) / "permits"
+      runtime_dir.mkdir(mode=0o700)
+      outside = Path(tmp) / "outside.json"
+      outside.write_text('{"expires_at": "2000-01-01T00:00:00Z"}')
+      (runtime_dir / "sess-sym.json").symlink_to(outside)
+      env = {"PR_REVIEW_C4_RUNTIME_DIR": str(runtime_dir)}
+      with mock.patch.dict(os.environ, env):
+        with self.assertRaisesRegex(OSError, "untrusted existing permit"):
+          MODULE.issue_dispatch_permit("sess-sym", {"agent": {"subagent_type": "spec-compliance-reviewer"}})
+
+      transcript = Path(tmp) / "t.jsonl"
+      transcript.write_text(json.dumps({
+        "attributionAgent": "spec-compliance-reviewer",
+        "agentId": "agent-1",
+        "effort": "high",
+        "message": {"role": "assistant", "model": "", "content": []},
+      }) + "\n")
+      receipt, _ = MODULE.inspect_runtime(str(transcript), "c4-dispatch-001", "agent-1", packet(), "opus", "high")
+      self.assertEqual(receipt["reason_code"], "C4_RUNTIME_MODEL_UNAVAILABLE")
+
+      transcript.write_text(json.dumps({
+        "attributionAgent": "spec-compliance-reviewer",
+        "agentId": "",
+        "effort": "high",
+        "message": {"role": "assistant", "model": "claude-opus-5-5", "content": []},
+      }) + "\n")
+      receipt2, _ = MODULE.inspect_runtime(str(transcript), "c4-dispatch-001", "agent-1", packet(), "opus", "high")
+      self.assertEqual(receipt2["reason_code"], "C4_RUNTIME_AGENT_ID_MISMATCH")
 
 
 if __name__ == "__main__":

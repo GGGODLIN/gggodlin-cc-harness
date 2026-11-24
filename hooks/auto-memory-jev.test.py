@@ -23,7 +23,12 @@ import memory_reminder_common as common
 spec = importlib.util.spec_from_file_location('auto_memory_jev', HERE / 'auto-memory-jev.py')
 hook = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(hook)
-REAL_RULE = common.rule_file().read_text()
+_SYNTHETIC_RULE = (
+  '# Memory maintenance fixture\n\n'
+  '## Tier 1: write checklist\n- check existing memory before writing\n\n'
+  '## Tier 3: details\n- archive details\n'
+)
+REAL_RULE = common.rule_file().read_text() if common.rule_file().is_file() else _SYNTHETIC_RULE
 
 
 def user(text, uid='human-1', **extra):
@@ -60,17 +65,38 @@ class ReminderTests(unittest.TestCase):
     self.calls = []
     self.metadata_calls = 0
     self.price = '0'
-    # Drex 第二腿：nace 回件沒有 cost 欄（計費靠 input_tokens），fixture 照真實形狀
+    # Drex 第五腿：nace 回件沒有 cost 欄（計費靠 input_tokens），fixture 照真實形狀
     self.drex_calls = []
     self.drex_response = {'model': 'drex-v2.0', 'answers': {'direct_nudge': {'noul': 0.7}},
                           'usage': {'input_tokens': 600, 'output_tokens': 20}}
+    self.pplx_calls = []
+    self.pplx_response = {'model': 'perplexity/pplx-decider-v1.3-20261112', 'answers': {'direct_nudge': {'noul': 0.7}},
+                          'usage': {'input_tokens': 600, 'output_tokens': 1, 'cost': 0}}
+    self.vercel_calls = []
+    self.vercel_credits_calls = 0
+    self.vercel_credits_response = {'balance': '4.50', 'total_used': '0.50', 'token_pass': None}
+    self.vercel_response = {'model': 'perplexity/pplx-decider-v1.3', 'answers': {'direct_nudge': {'noul': 0.7}},
+                            'usage': {'input_tokens': 600, 'output_tokens': 1},
+                            'provider_metadata': {'gateway': {'cost': '0.000012'}}}
+    self.amd_calls = []
+    self.amd_response = {'model': 'd3', 'answers': {'direct_nudge': {'type': 'noul', 'noul': 0.7}},
+                         'usage': {'input_tokens': 1000, 'output_tokens': 0}}
     self.http_patch = patch.object(hook, 'http', side_effect=self.fake_http)
+    self.pplx_endpoint_patch = patch.object(hook, 'pplx_endpoint', side_effect=ValueError('missing_pplx_key'))
+    self.vercel_credits_endpoint_patch = patch.object(hook, 'vercel_credits_endpoint', side_effect=ValueError('missing_vercel_key'))
+    self.amd_endpoint_patch = patch.object(hook, 'amd_endpoint', side_effect=ValueError('missing_amd_key'))
     self.endpoint_patch = patch.object(hook, 'endpoint', return_value=(hook.BASE, 'test-only'))
     self.drex_endpoint_patch = patch.object(hook, 'drex_endpoint', return_value=(hook.DREX_BASE, 'test-only-drex'))
     self.http_patch.start()
+    self.pplx_endpoint_patch.start()
+    self.vercel_credits_endpoint_patch.start()
+    self.amd_endpoint_patch.start()
     self.endpoint_patch.start()
     self.drex_endpoint_patch.start()
     self.addCleanup(self.http_patch.stop)
+    self.addCleanup(self.pplx_endpoint_patch.stop)
+    self.addCleanup(self.vercel_credits_endpoint_patch.stop)
+    self.addCleanup(self.amd_endpoint_patch.stop)
     self.addCleanup(self.endpoint_patch.stop)
     self.addCleanup(self.drex_endpoint_patch.stop)
 
@@ -78,6 +104,24 @@ class ReminderTests(unittest.TestCase):
     self.transcript.write_text(''.join(json.dumps(e, ensure_ascii=False) + '\n' for e in self.entries))
 
   def fake_http(self, _base, path, _key, body=None, **_kwargs):
+    if _base == hook.VERCEL_CREDITS_BASE:
+      self.assertEqual(path, '/v1/credits')
+      self.assertEqual(_key, 'test-only-vercel-credits')
+      self.vercel_credits_calls += 1
+      return self.vercel_credits_response
+    if _base == hook.PPLX_BASE:
+      self.assertEqual(path, '/v1/systemone')
+      if body['model'] == hook.AMD_MODEL:
+        self.assertEqual(_key, 'test-only-amd')
+        self.amd_calls.append(body)
+        return self.amd_response
+      self.assertEqual(_key, 'test-only-pplx')
+      if body['model'] == hook.VERCEL_MODEL:
+        self.vercel_calls.append(body)
+        return self.vercel_response
+      self.assertEqual(body['model'], hook.PPLX_MODEL)
+      self.pplx_calls.append(body)
+      return self.pplx_response
     if _base == hook.DREX_BASE:
       self.assertEqual(path, '/v1/systemone')
       self.assertEqual(body['model'], hook.DREX_MODEL)
@@ -306,7 +350,8 @@ class ReminderTests(unittest.TestCase):
 
   def test_secret_and_private_rejected_before_clipping(self):
     for message in ('do not save this preference',
-                    'sk-' + 'a' * 32, 'safe beginning' + 'x'*10000 + ' gsk_' + 'b'*32 + 'x'*10000,
+                    'sk-' + 'a' * 32, 'vck_' + 'c' * 32,
+                    'safe beginning' + 'x'*10000 + ' gsk_' + 'b'*32 + 'x'*10000,
                     '{"password":"abcdefghijklmnopqrstuvwx"}'):
       context = hook.snapshot(str(self.transcript))
       context['records'][-1]['user'] = message
@@ -644,6 +689,370 @@ class ReminderTests(unittest.TestCase):
     os.mkfifo(fifo)
     with self.assertRaisesRegex(ValueError, 'unsafe_transcript'):
       hook.snapshot(str(fifo))
+
+  def test_pplx_primary_leg_answers_without_touching_jev_or_drex(self):
+    self.pplx_endpoint_patch.stop()
+    with patch.object(hook, 'pplx_endpoint', return_value=(hook.PPLX_BASE, 'test-only-pplx')):
+      self.assertEqual(self.invoke(), '')
+      self.assertEqual(len(self.pplx_calls), 1)
+      self.assertEqual(self.calls, [])
+      self.assertEqual(self.drex_calls, [])
+      self.assertEqual(self.audit_rows()[-1]['model'], hook.PPLX_MODEL)
+      self.assertIn('[auto-memory:jev:short]', self.deliver())
+
+  def test_pplx_404_or_429_cools_pplx_only_and_falls_to_jev(self):
+    def pplx_404(_base, path, _key, body=None, **kwargs):
+      if _base == hook.PPLX_BASE:
+        self.pplx_calls.append(body)
+        raise urllib.error.HTTPError(hook.PPLX_BASE, 404, 'promo ended', {}, None)
+      return self.fake_http(_base, path, _key, body, **kwargs)
+    self.pplx_endpoint_patch.stop()
+    self.http_patch.stop()
+    with patch.object(hook, 'pplx_endpoint', return_value=(hook.PPLX_BASE, 'test-only-pplx')), \
+         patch.object(hook, 'http', side_effect=pplx_404):
+      self.invoke()
+      budget = json.loads((hook.automatic_dir() / 'budget.json').read_text())
+      self.assertGreater(budget['pplx_cooldown_until'], time.time())
+      self.assertNotIn('cooldown_until', budget)
+      self.assertEqual((len(self.pplx_calls), len(self.calls), len(self.drex_calls)), (1, 1, 0))
+      self.assertEqual(self.audit_rows()[-1]['model'], hook.MODEL)
+      # Next turn skips cooled pplx leg directly to Jev
+      self.deliver()
+      self.next_turn()
+      self.invoke()
+      self.assertEqual((len(self.pplx_calls), len(self.calls), len(self.drex_calls)), (1, 2, 0))
+
+  def test_pplx_and_jev_both_fail_fall_to_drex(self):
+    def cascade(_base, path, _key, body=None, **kwargs):
+      if _base == hook.PPLX_BASE:
+        self.pplx_calls.append(body)
+        raise TimeoutError('magpie timeout')
+      if _base == hook.BASE and path == '/v1/systemone':
+        self.calls.append(body)
+        raise urllib.error.HTTPError(hook.BASE, 429, 'quota', {}, None)
+      return self.fake_http(_base, path, _key, body, **kwargs)
+    self.pplx_endpoint_patch.stop()
+    self.http_patch.stop()
+    with patch.object(hook, 'pplx_endpoint', return_value=(hook.PPLX_BASE, 'test-only-pplx')), \
+         patch.object(hook, 'http', side_effect=cascade):
+      self.invoke()
+      self.assertEqual((len(self.pplx_calls), len(self.calls), len(self.drex_calls)), (1, 1, 1))
+      self.assertEqual(self.audit_rows()[-1]['model'], hook.DREX_MODEL)
+
+  def test_pplx_nonzero_cost_disables_all_legs(self):
+    self.pplx_response['usage']['cost'] = 0.02
+    self.pplx_endpoint_patch.stop()
+    with patch.object(hook, 'pplx_endpoint', return_value=(hook.PPLX_BASE, 'test-only-pplx')), \
+         self.assertRaisesRegex(ValueError, 'nonzero_cost'):
+      self.invoke()
+    self.assertTrue(hook.disabled())
+    self.assertEqual((self.calls, self.drex_calls), ([], []))
+
+  def test_pplx_unexpected_model_falls_to_jev(self):
+    self.pplx_response['model'] = 'some-other-model'
+    self.pplx_endpoint_patch.stop()
+    with patch.object(hook, 'pplx_endpoint', return_value=(hook.PPLX_BASE, 'test-only-pplx')):
+      self.invoke()
+      self.assertEqual((len(self.pplx_calls), len(self.calls), len(self.drex_calls)), (1, 1, 0))
+      self.assertEqual(self.audit_rows()[-1]['model'], hook.MODEL)
+
+  def test_pplx_fail_falls_to_vercel_and_caches_credits_check(self):
+    def pplx_404_vercel_ok(_base, path, _key, body=None, **kwargs):
+      if _base == hook.PPLX_BASE and body['model'] == hook.PPLX_MODEL:
+        self.pplx_calls.append(body)
+        raise urllib.error.HTTPError(hook.PPLX_BASE, 404, 'promo ended', {}, None)
+      return self.fake_http(_base, path, _key, body, **kwargs)
+    self.pplx_endpoint_patch.stop()
+    self.vercel_credits_endpoint_patch.stop()
+    self.http_patch.stop()
+    with patch.object(hook, 'pplx_endpoint', return_value=(hook.PPLX_BASE, 'test-only-pplx')), \
+         patch.object(hook, 'vercel_credits_endpoint', return_value=(hook.VERCEL_CREDITS_BASE, 'test-only-vercel-credits')), \
+         patch.object(hook, 'http', side_effect=pplx_404_vercel_ok):
+      self.assertEqual(self.invoke(), '')
+      self.assertFalse(hook.disabled())
+      self.assertEqual((len(self.pplx_calls), len(self.vercel_calls), len(self.calls), len(self.drex_calls)), (1, 1, 0, 0))
+      self.assertEqual(self.vercel_credits_calls, 1)
+      row = self.audit_rows()[-1]
+      self.assertEqual(row['model'], hook.VERCEL_MODEL)
+      self.assertEqual(row['usage']['vercel_credit_cost'], 0.000012)
+      self.assertIn('[auto-memory:jev:short]', self.deliver())
+      # Next turn skips cooled pplx AND reuses hourly cached /v1/credits without re-querying
+      self.next_turn()
+      self.invoke()
+      self.assertEqual((len(self.pplx_calls), len(self.vercel_calls), self.vercel_credits_calls), (1, 2, 1))
+      log_text = (self.home / '.claude/logs/auto-memory-jev.jsonl').read_text()
+      self.assertFalse('test-only-vercel-credits' in log_text, 'vercel credits token leaked to audit log')
+      self.assertFalse('test-only-pplx' in log_text, 'magpie key leaked to audit log')
+
+  def test_vercel_credits_guard_rejects_paid_or_depleted_and_falls_to_jev(self):
+    def pplx_down(_base, path, _key, body=None, **kwargs):
+      if _base == hook.PPLX_BASE and body['model'] == hook.PPLX_MODEL:
+        raise TimeoutError('openrouter down')
+      return self.fake_http(_base, path, _key, body, **kwargs)
+    self.pplx_endpoint_patch.stop()
+    self.vercel_credits_endpoint_patch.stop()
+    self.http_patch.stop()
+    bad_states = (
+      {'balance': '0', 'token_pass': None},
+      {'balance': '-0.01', 'token_pass': None},
+      {'balance': '10.00', 'token_pass': None},
+      {'balance': '4.50', 'token_pass': {'active': True}},
+      {'balance': '4.50'},  # missing token_pass key fails closed
+      {'balance': 'invalid', 'token_pass': None},
+      {'balance': True, 'token_pass': None},
+    )
+    with patch.object(hook, 'pplx_endpoint', return_value=(hook.PPLX_BASE, 'test-only-pplx')), \
+         patch.object(hook, 'vercel_credits_endpoint', return_value=(hook.VERCEL_CREDITS_BASE, 'test-only-vercel-credits')), \
+         patch.object(hook, 'http', side_effect=pplx_down):
+      for idx, state in enumerate(bad_states):
+        self.vercel_credits_response = state
+        cache_file = hook.automatic_dir() / 'vercel-free-credits.json'
+        if cache_file.exists():
+          cache_file.unlink()
+        if idx > 0:
+          self.deliver()
+          self.next_turn(f'Standing rule case {idx}')
+        self.invoke()
+        self.assertFalse(hook.disabled())
+        self.assertEqual(self.vercel_calls, [])
+        self.assertEqual(len(self.calls), idx + 1)
+        self.assertEqual(self.audit_rows()[-1]['model'], hook.MODEL)
+      # Negative /v1/credits result stays cached for 1h so next turn does not re-hit /v1/credits
+      calls_before = self.vercel_credits_calls
+      self.deliver()
+      self.next_turn('Cached negative check turn')
+      self.invoke()
+      self.assertEqual(self.vercel_credits_calls, calls_before)
+
+  def test_vercel_402_or_429_cools_vercel_only_and_falls_to_jev(self):
+    status_to_raise = [429]
+    def pplx_404_vercel_err(_base, path, _key, body=None, **kwargs):
+      if _base == hook.PPLX_BASE and body['model'] == hook.PPLX_MODEL:
+        self.pplx_calls.append(body)
+        raise urllib.error.HTTPError(hook.PPLX_BASE, 404, 'promo ended', {}, None)
+      if _base == hook.PPLX_BASE and body['model'] == hook.VERCEL_MODEL:
+        self.vercel_calls.append(body)
+        raise urllib.error.HTTPError(hook.PPLX_BASE, status_to_raise[0], 'limit', {}, None)
+      return self.fake_http(_base, path, _key, body, **kwargs)
+    self.pplx_endpoint_patch.stop()
+    self.vercel_credits_endpoint_patch.stop()
+    self.http_patch.stop()
+    with patch.object(hook, 'pplx_endpoint', return_value=(hook.PPLX_BASE, 'test-only-pplx')), \
+         patch.object(hook, 'vercel_credits_endpoint', return_value=(hook.VERCEL_CREDITS_BASE, 'test-only-vercel-credits')), \
+         patch.object(hook, 'http', side_effect=pplx_404_vercel_err):
+      self.invoke()
+      budget = json.loads((hook.automatic_dir() / 'budget.json').read_text())
+      self.assertGreater(budget['vercel_cooldown_until'], time.time())
+      self.assertNotIn('cooldown_until', budget)
+      self.assertEqual((len(self.vercel_calls), len(self.calls)), (1, 1))
+      # Next turn skips cooled vercel leg directly to Jev
+      self.deliver()
+      self.next_turn()
+      self.invoke()
+      self.assertEqual((len(self.vercel_calls), len(self.calls)), (1, 2))
+      # Expire vercel cooldown and verify 402 writes free_ok=False cache + sets cooldown
+      budget['vercel_cooldown_until'] = 0
+      (hook.automatic_dir() / 'budget.json').write_text(hook.dump(budget))
+      status_to_raise[0] = 402
+      self.deliver()
+      self.next_turn('After cooldown expiry.')
+      self.invoke()
+      cached = json.loads((hook.automatic_dir() / 'vercel-free-credits.json').read_text())
+      self.assertIs(cached['free_ok'], False)
+      self.assertEqual((len(self.vercel_calls), len(self.calls)), (2, 3))
+
+  def test_vercel_malformed_cache_or_payload_falls_through_cleanly(self):
+    hook.automatic_dir().mkdir(parents=True, exist_ok=True)
+    (hook.automatic_dir() / 'vercel-free-credits.json').write_text('{corrupt-json')
+    self.vercel_response = {'model': 'perplexity/pplx-decider-v1.3', 'answers': {'direct_nudge': {'noul': 0.7}},
+                            'usage': ['not-a-dict'], 'provider_metadata': ['not-a-dict']}
+    def pplx_down_then_bad_vercel(_base, path, _key, body=None, **kwargs):
+      if _base == hook.PPLX_BASE and body['model'] == hook.PPLX_MODEL:
+        raise TimeoutError('openrouter down')
+      return self.fake_http(_base, path, _key, body, **kwargs)
+    self.pplx_endpoint_patch.stop()
+    self.vercel_credits_endpoint_patch.stop()
+    self.http_patch.stop()
+    with patch.object(hook, 'pplx_endpoint', return_value=(hook.PPLX_BASE, 'test-only-pplx')), \
+         patch.object(hook, 'vercel_credits_endpoint', return_value=(hook.VERCEL_CREDITS_BASE, 'test-only-vercel-credits')), \
+         patch.object(hook, 'http', side_effect=pplx_down_then_bad_vercel):
+      # Corrupt cache self-heals, and non-dict usage / provider_metadata still logs pending safely
+      self.invoke()
+      self.assertEqual(self.audit_rows()[-1]['model'], hook.VERCEL_MODEL)
+      self.assertEqual(self.audit_rows()[-1]['status'], 'pending')
+      # Non-JSON / malformed / unexpected model on Vercel falls through to Leg 4 Jev (with AMD Leg 3 bypassed/down in this test)
+      self.deliver()
+      self.next_turn('Malformed systemone response')
+      self.vercel_response = {'model': 'unexpected-other-model', 'answers': {'direct_nudge': {'noul': 0.7}}}
+      self.invoke()
+      self.assertEqual(self.audit_rows()[-1]['model'], hook.MODEL)
+      self.deliver()
+      self.next_turn('Truncated JSON on credits')
+      (hook.automatic_dir() / 'vercel-free-credits.json').unlink()
+      def bad_credits_json(_base, path, _key, body=None, **kwargs):
+        if _base == hook.PPLX_BASE and body['model'] == hook.PPLX_MODEL:
+          raise TimeoutError('openrouter down')
+        if _base == hook.VERCEL_CREDITS_BASE:
+          raise json.JSONDecodeError('Expecting value', '<html>', 0)
+        return self.fake_http(_base, path, _key, body, **kwargs)
+      with patch.object(hook, 'http', side_effect=bad_credits_json):
+        self.invoke()
+      self.assertEqual(self.audit_rows()[-1]['model'], hook.MODEL)
+
+  def test_all_four_legs_cascade_to_drex(self):
+    def cascade_four(_base, path, _key, body=None, **kwargs):
+      if _base == hook.PPLX_BASE and body['model'] == hook.PPLX_MODEL:
+        self.pplx_calls.append(body)
+        raise urllib.error.HTTPError(hook.PPLX_BASE, 404, 'promo ended', {}, None)
+      if _base == hook.PPLX_BASE and body['model'] == hook.VERCEL_MODEL:
+        self.vercel_calls.append(body)
+        raise urllib.error.HTTPError(hook.PPLX_BASE, 429, 'vercel 5 rpm', {}, None)
+      if _base == hook.BASE and path == '/v1/systemone':
+        self.calls.append(body)
+        raise urllib.error.HTTPError(hook.BASE, 429, 'jev quota', {}, None)
+      return self.fake_http(_base, path, _key, body, **kwargs)
+    self.pplx_endpoint_patch.stop()
+    self.vercel_credits_endpoint_patch.stop()
+    self.http_patch.stop()
+    with patch.object(hook, 'pplx_endpoint', return_value=(hook.PPLX_BASE, 'test-only-pplx')), \
+         patch.object(hook, 'vercel_credits_endpoint', return_value=(hook.VERCEL_CREDITS_BASE, 'test-only-vercel-credits')), \
+         patch.object(hook, 'http', side_effect=cascade_four):
+      self.invoke()
+      self.assertEqual((len(self.pplx_calls), len(self.vercel_calls), len(self.calls), len(self.drex_calls)), (1, 1, 1, 1))
+      self.assertEqual(self.audit_rows()[-1]['model'], hook.DREX_MODEL)
+      self.assertEqual(json.loads((hook.automatic_dir() / 'budget.json').read_text())['daily_calls'], 1)
+
+  def test_pplx_400_cools_pplx_and_amd_leg_answers_without_cost_field(self):
+    seen_timeouts = []
+    def pplx_400_vercel_429_amd_ok(_base, path, _key, body=None, **kwargs):
+      if _base == hook.PPLX_BASE and body['model'] == hook.PPLX_MODEL:
+        self.pplx_calls.append(body)
+        raise urllib.error.HTTPError(hook.PPLX_BASE, 400, 'No endpoints found', {}, None)
+      if _base == hook.PPLX_BASE and body['model'] == hook.VERCEL_MODEL:
+        self.vercel_calls.append(body)
+        raise urllib.error.HTTPError(hook.PPLX_BASE, 429, 'vercel 5 rpm', {}, None)
+      if _base == hook.PPLX_BASE and body['model'] == hook.AMD_MODEL:
+        seen_timeouts.append(kwargs.get('timeout'))
+      return self.fake_http(_base, path, _key, body, **kwargs)
+    self.pplx_endpoint_patch.stop()
+    self.vercel_credits_endpoint_patch.stop()
+    self.amd_endpoint_patch.stop()
+    self.http_patch.stop()
+    with patch.object(hook, 'pplx_endpoint', return_value=(hook.PPLX_BASE, 'test-only-pplx')), \
+         patch.object(hook, 'vercel_credits_endpoint', return_value=(hook.VERCEL_CREDITS_BASE, 'test-only-vercel-credits')), \
+         patch.object(hook, 'amd_endpoint', return_value=(hook.PPLX_BASE, 'test-only-amd')), \
+         patch.object(hook, 'http', side_effect=pplx_400_vercel_429_amd_ok):
+      self.assertEqual(self.invoke(), '')
+      self.assertFalse(hook.disabled())
+      budget = json.loads((hook.automatic_dir() / 'budget.json').read_text())
+      self.assertGreater(budget['pplx_cooldown_until'], time.time())
+      self.assertGreater(budget['vercel_cooldown_until'], time.time())
+      self.assertNotIn('amd_cooldown_until', budget)
+      self.assertEqual((len(self.pplx_calls), len(self.vercel_calls), len(self.amd_calls), len(self.calls), len(self.drex_calls)),
+                       (1, 1, 1, 0, 0))
+      self.assertEqual(seen_timeouts, [hook.AMD_TIMEOUT])
+      row = self.audit_rows()[-1]
+      self.assertEqual(row['model'], hook.AMD_MODEL)
+      self.assertEqual(row['usage']['amd_points_est'], 0.000035)
+      self.assertIn('[auto-memory:jev:short]', self.deliver())
+      # Next turn skips cooled pplx (from HTTP 400!) and cooled vercel directly to AMD leg
+      self.next_turn()
+      self.invoke()
+      self.assertEqual((len(self.pplx_calls), len(self.vercel_calls), len(self.amd_calls)), (1, 1, 2))
+      log_text = (self.home / '.claude/logs/auto-memory-jev.jsonl').read_text()
+      self.assertFalse('test-only-amd' in log_text, 'amd relay token leaked to audit log')
+
+  def test_amd_cooldown_bad_payload_budget_clamp_and_five_leg_cascade(self):
+    seen_amd_timeouts = []
+    mode = {'kind': 'err_429'}
+    def amd_error_cascade(_base, path, _key, body=None, **kwargs):
+      if _base == hook.PPLX_BASE and body['model'] == hook.PPLX_MODEL:
+        self.pplx_calls.append(body)
+        raise urllib.error.HTTPError(hook.PPLX_BASE, 400, 'No endpoints found', {}, None)
+      if _base == hook.PPLX_BASE and body['model'] == hook.VERCEL_MODEL:
+        self.vercel_calls.append(body)
+        raise urllib.error.HTTPError(hook.PPLX_BASE, 429, 'vercel 5 rpm', {}, None)
+      if _base == hook.PPLX_BASE and body['model'] == hook.AMD_MODEL:
+        self.amd_calls.append(body)
+        seen_amd_timeouts.append(kwargs.get('timeout'))
+        if mode['kind'] == 'err_429':
+          raise urllib.error.HTTPError(hook.PPLX_BASE, 429, 'amd 20 rpm', {}, None)
+        if mode['kind'] == 'bad_noul':
+          return {'model': 'd3', 'answers': {'direct_nudge': {'noul': None}}}
+        if mode['kind'] == 'bad_model':
+          return {'model': 'unexpected-other', 'answers': {'direct_nudge': {'noul': 0.8}}}
+        return {'model': 'vllm-sr/d3', 'answers': {'direct_nudge': {'type': 'noul', 'noul': 0.75}},
+                'usage': {'input_tokens': 500, 'output_tokens': 0}}
+      if _base == hook.BASE and path == '/v1/systemone' and mode['kind'] == 'err_429':
+        self.calls.append(body)
+        raise urllib.error.HTTPError(hook.BASE, 429, 'jev quota', {}, None)
+      return self.fake_http(_base, path, _key, body, **kwargs)
+    self.pplx_endpoint_patch.stop()
+    self.vercel_credits_endpoint_patch.stop()
+    self.amd_endpoint_patch.stop()
+    self.http_patch.stop()
+    # Direct unit check of amd_endpoint() test-mode validation and non-test delegation
+    with patch.dict(os.environ, {'JEV_MEMORY_TEST_MODE': '1', 'JEV_MEMORY_AMD_TEST_URL': ''}):
+      with self.assertRaisesRegex(ValueError, 'missing_amd_key'):
+        hook.amd_endpoint()
+    with patch.dict(os.environ, {'JEV_MEMORY_TEST_MODE': '1', 'JEV_MEMORY_AMD_TEST_URL': 'https://evil.example'}):
+      with self.assertRaisesRegex(ValueError, 'invalid_test_endpoint'):
+        hook.amd_endpoint()
+    with patch.dict(os.environ, {'JEV_MEMORY_TEST_MODE': '1', 'JEV_MEMORY_AMD_TEST_URL': 'http://127.0.0.1:18317'}):
+      self.assertEqual(hook.amd_endpoint(), ('http://127.0.0.1:18317', 'test-only-amd'))
+    with patch.dict(os.environ, {'JEV_MEMORY_TEST_MODE': ''}), \
+         patch.object(hook, 'pplx_endpoint', return_value=(hook.PPLX_BASE, 'test-only-pplx')):
+      self.assertEqual(hook.amd_endpoint(), (hook.PPLX_BASE, 'test-only-pplx'))
+
+    session_file = 'session-' + hook.sha('session-1')[:24] + '.json'
+    with patch.object(hook, 'pplx_endpoint', return_value=(hook.PPLX_BASE, 'test-only-pplx')), \
+         patch.object(hook, 'vercel_credits_endpoint', return_value=(hook.VERCEL_CREDITS_BASE, 'test-only-vercel-credits')), \
+         patch.object(hook, 'amd_endpoint', return_value=(hook.PPLX_BASE, 'test-only-amd')), \
+         patch.object(hook, 'http', side_effect=amd_error_cascade):
+      self.invoke()
+      budget = json.loads((hook.automatic_dir() / 'budget.json').read_text())
+      self.assertGreater(budget['amd_cooldown_until'], time.time())
+      self.assertEqual((len(self.pplx_calls), len(self.vercel_calls), len(self.amd_calls), len(self.calls), len(self.drex_calls)),
+                       (1, 1, 1, 1, 1))
+      self.assertEqual(self.audit_rows()[-1]['model'], hook.DREX_MODEL)
+      # Active amd_cooldown_until skips AMD leg on the very next turn
+      self.deliver()
+      self.next_turn('While AMD is cooling down.')
+      self.invoke()
+      self.assertEqual(len(self.amd_calls), 1)
+      self.assertEqual(len(self.drex_calls), 2)
+      # Malformed noul (None) and unexpected model fall through to Leg 4 Jev without disabling
+      budget = json.loads((hook.automatic_dir() / 'budget.json').read_text())
+      budget['amd_cooldown_until'] = 0
+      budget['cooldown_until'] = 0
+      (hook.automatic_dir() / 'budget.json').write_text(hook.dump(budget))
+      for kind in ('bad_noul', 'bad_model'):
+        mode['kind'] = kind
+        self.deliver()
+        self.next_turn(f'Payload check {kind}.')
+        self.invoke()
+        self.assertFalse(hook.disabled())
+        self.assertEqual(self.audit_rows()[-1]['model'], hook.MODEL)
+      self.assertEqual(len(self.amd_calls), 3)
+      # Mid-range remaining budget (0.8 <= avail < 4.5) clamps timeout and accepts vllm-sr/d3
+      mode['kind'] = 'ok_vllm'
+      self.deliver()
+      self.next_turn('Mid budget clamp turn.')
+      with hook.SafeDirectory(hook.automatic_dir()) as d, d.lock(session_file + '.lock'):
+        st = json.loads(d.read(session_file) or '{}')
+        hook.run_stop(self.payload, d, st, session_file, hook_started=time.monotonic() - 4.7)
+      self.assertEqual(len(self.amd_calls), 4)
+      self.assertGreaterEqual(seen_amd_timeouts[-1], hook.AMD_MIN_BUDGET_S)
+      self.assertLess(seen_amd_timeouts[-1], hook.AMD_TIMEOUT)
+      self.assertEqual(self.audit_rows()[-1]['model'], hook.AMD_MODEL)
+      # Tight budget (< 0.8s) skips slow AMD leg cleanly without calling it
+      self.deliver()
+      self.next_turn('Budget tight turn.')
+      with hook.SafeDirectory(hook.automatic_dir()) as d, d.lock(session_file + '.lock'):
+        st = json.loads(d.read(session_file) or '{}')
+        hook.run_stop(self.payload, d, st, session_file, hook_started=time.monotonic() - 6.5)
+      self.assertEqual(len(self.amd_calls), 4)
+      self.assertEqual(self.audit_rows()[-1]['model'], hook.MODEL)
 
 
 if __name__ == '__main__':

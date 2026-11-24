@@ -65,7 +65,7 @@ Session 檔寫完後，**必須**派一個 verify subagent 檢查檔案是否遵
 
 Dispatch 規格：
 
-- `Agent` tool、`subagent_type: skill-verify-auditor`（sonnet+low、tools 僅 Read，定義檔釘死）
+- `Agent` tool、`subagent_type: skill-verify-auditor`（sonnet+medium、tools 僅 Read，定義檔釘死）
 - description 固定含 marker 字串 `skill-verify:save-session`（採用率統計 grep 用，不要改字）
 - 用 auditor 的讀檔模式：派工前跑 `wc -l < {path}` 取總行數，prompt 只放下方 template 全文（三個快照欄位填實際值）。只給路徑而沒有這三行，auditor 依它的輸入契約會把每條都判 FAIL
 - auditor 回來前不改 session 檔；它讀的是磁碟上的檔，中途改動會讓稽核對象跟著變

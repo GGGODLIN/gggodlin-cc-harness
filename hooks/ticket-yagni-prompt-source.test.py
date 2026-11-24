@@ -200,10 +200,41 @@ class PromptTicketFileTests(unittest.TestCase):
     self.assertNotIn('--ticket-file', self.stub_args())
 
   def test_reviewer_dispatch_with_ticket_file_is_not_registered(self):
-    result = self.register('review the diff for scope', self.prompt_with_path(self.ticket_file))
+    # review-implement seats dispatch with routed-judge (not WORKER_AGENT_TYPES), so prompt ticket paths never register them.
+    result = self.register('review the diff for scope', self.prompt_with_path(self.ticket_file),
+                           agent_type='routed-judge')
     self.assertEqual(result.returncode, 0, result.stderr)
     self.assertEqual(self.read_registry(), [])
     self.assertEqual(self.stub_args(), [])
+
+  def test_worker_without_description_ticket_falls_back_to_unique_prompt_ticket_file(self):
+    result = self.register('implement watcher wiring', self.prompt_with_path(self.ticket_file),
+                           agent_type='routed-impl')
+    self.assertEqual(result.returncode, 0, result.stderr)
+    entries = self.read_registry()
+    self.assertEqual(len(entries), 1)
+    self.assertEqual(entries[0]['ticket'], '09')
+    self.assertEqual(entries[0].get('ticket_file'), str(self.ticket_file))
+
+  def test_worker_without_description_ticket_ambiguous_prompt_paths_not_registered(self):
+    (self.root / 'matt' / self.session / 'pt_run' / 'decision.json').write_text(json.dumps(
+      {'contract': 'MATT_TDD_DECISION v1', 'status': 'started', 'session_id': self.session, 'run_id': 'pt_run',
+       'tickets': [{'id': '09', 'decision': 'required'}, {'id': '05', 'decision': 'required'}]}))
+    other = self.gov / '.scratch' / 'feat' / 'issues' / '05-other.md'
+    other.write_text('# 05 — Other\n')
+    result = self.register('implement watcher wiring', self.prompt_with_path(self.ticket_file, other),
+                           agent_type='routed-impl')
+    self.assertEqual(result.returncode, 0, result.stderr)
+    self.assertEqual(self.read_registry(), [])
+
+  def test_unicode_cjk_adjacent_ticket_descriptions_register(self):
+    for idx, desc in enumerate(('票 09實作', '票09實作', 'Ticket 09完成', '實作Ticket 09收尾')):
+      result = self.register(desc, 'work in service',
+                             response=f'Async agent launched successfully. agentId: cjkworker0{idx}',
+                             agent_type='routed-impl')
+      self.assertEqual(result.returncode, 0, result.stderr)
+    entries = self.read_registry()
+    self.assertEqual([e['ticket'] for e in entries], ['09', '09', '09', '09'])
 
   def test_auditor_mentioning_ticket_is_not_registered_as_worker(self):
     result = self.register('skill-verify:mutation-testing ticket 09 fix round', self.prompt_with_path(self.ticket_file),

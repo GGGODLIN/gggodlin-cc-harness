@@ -410,5 +410,161 @@ class CcGroupRangeTargetTest(unittest.TestCase):
     print(f"cc-reduce missing-status failed_seats={reduced['failed_seats']}")
 
 
+class CcGroupFlowChaosTest(unittest.TestCase):
+  def setUp(self):
+    self.tmp = tempfile.TemporaryDirectory()
+    self.addCleanup(self.tmp.cleanup)
+    self.module = load_module()
+    self.fx, self.prepared, self.finalized, self.whole = range_state(self.tmp.name)
+    self.range_target = self.prepared["targets"][0]
+
+  def reduce_with(self, responses, repair_seat=None):
+    return run_flow("reduce", {
+      "preparation_path": self.finalized["preparation_path"], "confirmation": True,
+      "selection": selection(), "responses": responses, "repair_seat": repair_seat,
+    })
+
+  def test_unknown_disposition_in_initial_and_repair_keeps_status_partial_and_coverage_unverified(self):
+    # BUG-12: unknown disposition in initial or repair accounted_files must not yield COMPLETE status/coverage
+    identity = self.range_target["target_identity"]
+    files = self.range_target["changed_files"]
+    initial_ok_with_unknown = {"status": "ok", "findings": [], "accounted_files": [
+      {"target_identity": identity, "file": files[0], "disposition": "SKIPPED"},
+      *({"target_identity": identity, "file": path} for path in files[1:]),
+    ]}
+    # Both seats succeed, but files[0] only has unknown disposition "SKIPPED"
+    reduced = self.reduce_with([initial_ok_with_unknown, initial_ok_with_unknown])
+    self.assertEqual(reduced["coverage"]["counts"], {"total": 4, "reviewed": 3, "skipped": 0, "unaccounted": 1})
+    self.assertEqual(reduced["coverage"]["state"], "UNVERIFIED")
+    self.assertEqual(reduced["status"], "PARTIAL")
+    self.assertEqual([(item["target_identity"], item["file"]) for item in reduced["coverage"]["unverified"]],
+                     [(identity, files[0])])
+
+    # Repair returning unknown disposition must also stay UNVERIFIED and PARTIAL
+    repair_bad = {"status": "ok", "findings": [], "accounted_files": [
+      {"target_identity": identity, "file": files[0], "disposition": "BOGUS"},
+    ]}
+    repaired_bad = self.reduce_with([initial_ok_with_unknown, initial_ok_with_unknown, repair_bad],
+                                    repair_seat="cc-primary")
+    self.assertEqual(repaired_bad["repair_rounds"], 1)
+    self.assertEqual(repaired_bad["coverage"]["counts"]["unaccounted"], 1)
+    self.assertEqual(repaired_bad["coverage"]["state"], "UNVERIFIED")
+    self.assertEqual(repaired_bad["status"], "PARTIAL")
+
+    # Repair returning valid disposition completes coverage cleanly
+    repair_good = {"status": "ok", "findings": [], "accounted_files": [
+      {"target_identity": identity, "file": files[0], "disposition": "skipped"},
+    ]}
+    repaired_good = self.reduce_with([initial_ok_with_unknown, initial_ok_with_unknown, repair_good],
+                                     repair_seat="cc-primary")
+    self.assertEqual(repaired_good["coverage"]["counts"], {"total": 4, "reviewed": 3, "skipped": 1, "unaccounted": 0})
+    self.assertEqual(repaired_good["coverage"]["state"], "COMPLETE")
+    self.assertEqual(repaired_good["status"], "COMPLETE")
+
+  def test_malformed_stdin_and_preparation_and_response_structures_fail_cleanly(self):
+    # BUG-13: non-dict stdin JSON, non-dict preparation_path, non-list responses, unhashable disposition, non-dict items
+    for raw in ("[]", "null", "123", '"hello"'):
+      proc = subprocess.run([sys.executable, str(SCRIPT), "plan"], input=raw, capture_output=True, text=True)
+      self.assertEqual(proc.returncode, 1, f"expected exit 1 for stdin={raw}, stderr={proc.stderr}")
+      body = json.loads(proc.stdout)
+      self.assertEqual(body["status"], "ERROR")
+      self.assertIn("INVALID_INPUT_JSON", body["reason_codes"])
+
+    # Non-dict preparation_path JSON must not crash with AttributeError
+    bad_prep = Path(self.tmp.name) / "bad-prep.json"
+    bad_prep.write_text("[]")
+    proc = subprocess.run([sys.executable, str(SCRIPT), "plan"],
+                          input=json.dumps({"preparation_path": str(bad_prep), "confirmation": True}),
+                          capture_output=True, text=True)
+    self.assertEqual(proc.returncode, 0, proc.stderr)
+    self.assertEqual(json.loads(proc.stdout)["status"], "BLOCKED")
+
+    # Non-list responses in reduce must fail cleanly with JSON error
+    proc = subprocess.run([sys.executable, str(SCRIPT), "reduce"],
+                          input=json.dumps({"preparation_path": self.finalized["preparation_path"],
+                                            "confirmation": True, "selection": selection(), "responses": 123}),
+                          capture_output=True, text=True)
+    self.assertEqual(proc.returncode, 1, proc.stderr)
+    self.assertEqual(json.loads(proc.stdout)["status"], "ERROR")
+
+    # Unhashable disposition (list) and non-dict accounted_files entry must not crash
+    identity = self.range_target["target_identity"]
+    files = self.range_target["changed_files"]
+    unhashable = {"status": "ok", "findings": [], "accounted_files": [
+      {"target_identity": identity, "file": files[0], "disposition": ["reviewed"]},
+      *({"target_identity": identity, "file": path} for path in files[1:]),
+    ]}
+    reduced = self.reduce_with([unhashable, unhashable])
+    self.assertEqual(reduced["coverage"]["counts"]["unaccounted"], 1)
+    self.assertEqual(reduced["coverage"]["state"], "UNVERIFIED")
+    self.assertEqual(reduced["status"], "PARTIAL")
+
+    malformed_reply = {"status": "ok", "findings": [], "accounted_files": ["not-a-dict"]}
+    reduced_bad = self.reduce_with([malformed_reply, {"status": "ok", "findings": []}])
+    self.assertEqual(len(reduced_bad["failed_seats"]), 1)
+    self.assertEqual(reduced_bad["status"], "PARTIAL")
+
+  def test_duplicate_missed_files_and_new_interfaces_are_deduplicated(self):
+    # BUG-14: both seats reporting identical missed_file and new_interface must not duplicate entries
+    current = state(self.tmp.name)
+    dup_missed = {"target_identity": SAAS, "file": "src/a.ts"}
+    dup_iface = {"interface_id": "bridge", "target_identity": DASH, "description": "dup bridge"}
+    recorder = Recorder([
+      {"status": "ok", "findings": [], "missed_files": [dup_missed, dup_missed], "new_interfaces": [dup_iface]},
+      {"status": "ok", "findings": [], "missed_files": [dup_missed], "new_interfaces": [dup_iface]},
+      {"status": "ok", "findings": [], "accounted_files": [], "checks": []},
+    ])
+    result = self.module.run_group_review({
+      "state": current, "selection": selection(), "confirmation": True, "repair_seat": "cc-primary",
+    }, recorder)
+    repair_call = [c for c in recorder.calls if c["phase"] == "repair"][0]
+    self.assertEqual(len(repair_call["missed_files"]), 1)
+    self.assertEqual(len(repair_call["new_interfaces"]), 1)
+    self.assertEqual(len(result["coverage"]["unverified"]), 1)
+    self.assertEqual(len(result["new_interface_checks"]), 1)
+
+  def test_empty_targets_is_blocked_and_never_dispatches(self):
+    # BUG-15: READY state with targets=[] must not dispatch reviewers
+    empty_state = state(self.tmp.name, targets=[])
+    empty_state["targets"] = []
+    recorder = Recorder([])
+    result = self.module.run_group_review({
+      "state": empty_state, "selection": selection(), "confirmation": True,
+    }, recorder)
+    self.assertEqual(result["status"], "BLOCKED")
+    self.assertEqual(len(recorder.calls), 0)
+
+  def test_cross_target_same_filename_accounting_does_not_collide(self):
+    # Two range targets sharing the exact same changed filename "shared.ts" stay isolated by target_identity
+    t1 = {**self.range_target, "target_identity": SAAS, "changed_files": ["shared.ts"]}
+    t2 = {**self.range_target, "target_identity": DASH, "changed_files": ["shared.ts"]}
+    st = state(self.tmp.name, targets=[t1, t2])
+    recorder = Recorder([
+      {"status": "ok", "findings": [], "accounted_files": [
+        {"target_identity": SAAS, "file": "shared.ts", "disposition": "reviewed"},
+      ]},
+      {"status": "ok", "findings": []},
+    ])
+    result = self.module.run_group_review({
+      "state": st, "selection": selection(), "confirmation": True,
+    }, recorder)
+    self.assertEqual(result["coverage"]["counts"], {"total": 2, "reviewed": 1, "skipped": 0, "unaccounted": 1})
+    self.assertEqual([(i["target_identity"], i["file"]) for i in result["coverage"]["unverified"]], [(DASH, "shared.ts")])
+    self.assertEqual(result["status"], "PARTIAL")
+
+  def test_interface_check_requires_evidence_and_ledger_rejects_path_traversal(self):
+    # Completed interface check without evidence must remain unverified
+    checks = self.module.interface_checks(
+      [{"interface_id": "bridge", "target_identity": DASH}],
+      {"checks": [{"interface_id": "bridge", "status": "completed", "evidence": ""}]},
+    )
+    self.assertEqual(checks[0]["status"], "unverified")
+
+    # ledger_path must reject traversal or unsafe run_id values
+    prep = Path(self.tmp.name) / "prep.json"
+    for bad_run_id in ("../escape", "a/b", "..", ".hidden", ""):
+      self.assertIsNone(self.module.ledger_path({"run_id": bad_run_id, "preparation_path": str(prep)}))
+
+
 if __name__ == "__main__":
   unittest.main()

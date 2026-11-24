@@ -1,8 +1,9 @@
 #!/bin/bash
 set -u
 
-SKILL="$HOME/.claude/skills/check-my-stack/SKILL.md"
-TEMPLATE="$HOME/.claude/skills/check-my-stack/references/output-template.md"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SKILL="${SCRIPT_DIR}/../../SKILL.md"
+TEMPLATE="${SCRIPT_DIR}/../../references/output-template.md"
 PASS=0
 FAIL=0
 
@@ -51,6 +52,8 @@ check_contains "$SKILL" 'git log --format="%ae"' 'Step 5 and R5(c) require verif
 check_contains "$SKILL" 'Mechanism-level catchability' 'Step 5 requires verifying the graft point can catch the incident'
 check_contains "$SKILL" 'R5(c) 明顯 FAIL anchor' 'Step 7 R5(c) includes explicit FAIL anchor'
 check_contains "$SKILL" 'R5(c) 明顯 PASS anchor' 'Step 7 R5(c) includes explicit PASS anchor'
+check_contains "$SKILL" 'an `unreconciled` row, or an unverified capability, adoption, or maturity claim, cannot support `≈0`' 'Step 3 forbids unreconciled or unverified claims supporting near-zero quotient'
+check_contains "$SKILL" '不豁免 Block 2 或 Verdict 對分母的證據要求' 'Step 7 R3 prevents honest unverified label from exempting Block 2 near-zero divisor'
 check_contains "$TEMPLATE" '規則沒寫這條，但過去實戰 0 次發生' 'template opening item 4 requires explicit 0-incident disclosure'
 
 printf '%s\n' '----'

@@ -24,7 +24,7 @@ class PrReviewSpecTransportContractTest(unittest.TestCase):
     cls.cc = cls.command[cc_start:cc_end]
     gemini_axis = cls.command.index("### Gemini Pro / Flash Review", cc_end)
     gemini_start = cls.command.index("**Prompt template**", gemini_axis)
-    gemini_end = cls.command.index("**並行 dispatch", gemini_start)
+    gemini_end = cls.command.index("**開席與收席**", gemini_start)
     cls.gemini = cls.command[gemini_start:gemini_end]
     verifier_start = cls.command.index("#### Verification Prompt to CC", gemini_end)
     verifier_end = cls.command.index("#### Output per finding", verifier_start)
@@ -107,13 +107,17 @@ class PrReviewSpecTransportContractTest(unittest.TestCase):
     self.assertEqual(1, self.command.count("### Gemini Pro / Flash Review"))
     self.assertEqual(1, self.gemini.count("**Prompt template**"))
 
-  def test_gemini_flash_model_uses_shared_routing(self):
-    self.assertIn('bash "$HOME/.claude/scripts/model-routing.sh" GEMINI_FLASH_MODEL', self.command)
+  def test_gemini_flash_model_comes_from_the_seat_catalog(self):
+    # 備援拿掉後，Flash 的模型只由席位目錄決定；pr-review 不再自己查型號。
+    self.assertIn('pr-review-gemini-flash', self.command)
+    self.assertNotIn('GEMINI_FLASH_MODEL', self.command)
     self.assertNotIn('source "$HOME/.claude/model-routing.env"', self.command)
-    self.assertIn('--model="$GEMINI_FLASH_MODEL"', self.command)
     self.assertNotRegex(self.command, r'--model="Gemini [^"]*Flash[^"]*"')
     self.assertNotRegex(self.command, r'--model="gemini-[^"]*flash[^"]*"')
-    self.assertEqual("GEMINI_FLASH_MODEL=gemini-3.8-flash-high", self.model_routing)
+    self.assertEqual(
+      ["GEMINI_FLASH_MODEL=gemini-4-hydrogen-high", "GEMINI_FLASH_MAGPIE_MODEL=group/gemini-flash:high"],
+      self.model_routing.splitlines(),
+    )
 
 
 if __name__ == "__main__":

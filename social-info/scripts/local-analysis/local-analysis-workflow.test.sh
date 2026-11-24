@@ -1,15 +1,12 @@
 #!/bin/bash
 set -euo pipefail
 
-WORKFLOW="$HOME/.claude/workflows/local-analysis.js"
+WORKFLOW="${LOCAL_ANALYSIS_WORKFLOW:-${CLAUDE_CONFIG_DIR:-~/.claude}/workflows/local-analysis.js}"
 
-grep -F '用 Write 工具把完整 markdown report 寫到' "$WORKFLOW" >/dev/null
-grep -F '若檔案已存在，先用 Read 工具讀取後再覆寫' "$WORKFLOW" >/dev/null
-grep -F '不要用 Bash redirect 寫報告' "$WORKFLOW" >/dev/null
-grep -F '其他寫回也優先用專用 mutation 工具' "$WORKFLOW" >/dev/null
-grep -F '只有 touch 這類無專用工具的操作才用 Bash' "$WORKFLOW" >/dev/null
-grep -F '不得與動態 redirect 合併成同一條指令' "$WORKFLOW" >/dev/null
-grep -F '最後一個動作必須呼叫 StructuredOutput 回傳 summary' "$WORKFLOW" >/dev/null
+grep -F '不要寫報告檔，也不要啟動寫報告的 agent' "$WORKFLOW" >/dev/null
+grep -F '用 StructuredOutput 回傳 summary（3-5 行繁中）、report_markdown（完整正文，不是摘要' "$WORKFLOW" >/dev/null
+grep -F 'deferred_writeback' "$WORKFLOW" >/dev/null
+grep -F '報告將由 main 寫到' "$WORKFLOW" >/dev/null
 node --input-type=module - "$WORKFLOW" <<'NODE'
 import fs from 'node:fs'
 
@@ -22,14 +19,16 @@ const llmPrompt = Function('OUT_DIR', 'DATE', `return ${expression}`)('/tmp/repo
 const recap = llmPrompt({ key: 'recap', src: '/tmp/recap-daily.sh' })
 const ordinary = llmPrompt({ key: 'wiki-lint', src: '/tmp/wiki-lint-daily.sh' })
 for (const phrase of [
-  '舊 claude -p wrapper',
-  '不要把報告寫到 stdout',
-  '先完成 source 指示要求的兩個 ledger append',
-  '最後只用 StructuredOutput 回傳 summary',
+  'recap source 是 claude -p wrapper',
+  'stdout 報告規則在本子任務改為 report_markdown',
+  '兩份 ledger 都不得寫入',
+  '最後只用 StructuredOutput 回傳資料',
 ]) {
   if (!recap.includes(phrase)) throw new Error(`recap completion contract missing: ${phrase}`)
 }
-if (ordinary.includes('舊 claude -p wrapper')) throw new Error('recap-specific contract leaked into ordinary channel')
+if (ordinary.includes('recap source 是 claude -p wrapper')) {
+  throw new Error('recap-specific contract leaked into ordinary channel')
+}
 NODE
 if grep -F '用 Bash 把完整 markdown report 寫到' "$WORKFLOW" >/dev/null; then
   exit 1

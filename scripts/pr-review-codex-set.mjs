@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process'
-import { existsSync, readFileSync } from 'node:fs'
-import { isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { existsSync, readFileSync, realpathSync } from 'node:fs'
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 const NATIVE_TASK = 'review'
@@ -21,10 +21,43 @@ const located = (target, file, side, line = null) => ({
   line,
 })
 
-const isUnder = (root, candidate) => {
+const lexicalStrictlyUnder = (root, candidate) => {
   const resolvedRoot = resolve(String(root))
   const resolvedCandidate = resolve(String(candidate))
-  return resolvedCandidate === resolvedRoot || resolvedCandidate.startsWith(resolvedRoot + sep)
+  const rel = relative(resolvedRoot, resolvedCandidate)
+  return Boolean(rel) && rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel)
+}
+
+const isUnder = (root, candidate) => {
+  if (!lexicalStrictlyUnder(root, candidate)) {
+    return false
+  }
+  const resolvedRoot = resolve(String(root))
+  const resolvedCandidate = resolve(String(candidate))
+  if (!existsSync(resolvedRoot)) {
+    return true
+  }
+  let realRoot
+  try {
+    realRoot = realpathSync(resolvedRoot)
+  } catch {
+    return false
+  }
+  let probe = resolvedCandidate
+  while (probe !== resolvedRoot && !existsSync(probe)) {
+    const parent = dirname(probe)
+    if (parent === probe) break
+    probe = parent
+  }
+  if (!existsSync(probe)) {
+    return true
+  }
+  try {
+    const realProbe = realpathSync(probe)
+    return realProbe === realRoot || realProbe.startsWith(realRoot + sep)
+  } catch {
+    return false
+  }
 }
 
 const relativeTo = (root, candidate) => relative(resolve(String(root)), resolve(String(candidate)))
@@ -52,8 +85,12 @@ const labelLines = (target) => isRange(target) ? [
 
 const gitDiffForTarget = (target) => {
   if (isRange(target)) {
+    const diffFile = target?.review_diff?.file
+    if (typeof diffFile !== 'string' || !diffFile.trim()) {
+      return ''
+    }
     try {
-      return readFileSync(String(target.review_diff?.file), 'utf8')
+      return readFileSync(diffFile, 'utf8')
     } catch {
       return ''
     }
@@ -172,6 +209,9 @@ const targetContractFailure = (targets) => {
         return `target-incomplete:${field}`
       }
     }
+    if (isRange(target) && (typeof target.review_diff?.file !== 'string' || !target.review_diff.file.trim())) {
+      return 'target-incomplete:review_diff.file'
+    }
     if (!Array.isArray(target.changed_files) || target.changed_files.length === 0) {
       return 'target-incomplete:changed_files'
     }
@@ -212,9 +252,18 @@ const capacityGate = (capacity) => {
 
 const NESTED_MESSAGE_KEYS = ['payload', 'msg', 'last_agent_message', 'item', 'text', 'message']
 const FINDINGS_RECURSION_LIMIT = 6
+const NON_AGENT_EVENT_TYPES = new Set(['error', 'command_execution', 'reasoning', 'session.created', 'token_count'])
+
+const isNonAgentEvent = (value) => {
+  if (!value || typeof value !== 'object') return false
+  if (typeof value.type === 'string' && NON_AGENT_EVENT_TYPES.has(value.type)) return true
+  if (value.item && typeof value.item === 'object' && typeof value.item.type === 'string' && value.item.type !== 'agent_message') return true
+  if (value.payload && typeof value.payload === 'object' && typeof value.payload.type === 'string' && value.payload.type !== 'agent_message') return true
+  return false
+}
 
 const findingsOf = (value, parse, depth = 0) => {
-  if (!value || typeof value !== 'object' || depth > FINDINGS_RECURSION_LIMIT) {
+  if (!value || typeof value !== 'object' || depth > FINDINGS_RECURSION_LIMIT || isNonAgentEvent(value)) {
     return null
   }
   if (Array.isArray(value.findings)) {
@@ -258,20 +307,25 @@ const lastAgentMessageText = (lines, parse) => {
 const parseTextFindings = (text) => {
   const findings = []
   let current = null
-  for (const line of text.split('\n')) {
+  for (const line of text.split(/\r?\n/)) {
     if (TEXT_FINDING_START.test(line)) {
       const match = TEXT_FINDING_HEADER.exec(line)
       if (!match) {
         return null
       }
       const [, priority, title, path, start, end] = match
+      const startNum = Number(start)
+      const endNum = Number(end)
+      if (!Number.isInteger(startNum) || !Number.isInteger(endNum) || startNum < 1 || endNum < startNum) {
+        return null
+      }
       current = {
         title: `[${priority}] ${title}`,
         body: '',
         priority,
         code_location: {
           absolute_file_path: path,
-          line_range: { start: Number(start), end: Number(end) },
+          line_range: { start: startNum, end: endNum },
         },
         bodyLines: [],
       }
@@ -377,7 +431,25 @@ export async function runNeutralAxis({ targets, runRoot, model, effort, executor
     effort,
   }
   const run = executor ?? defaultNeutralExecutor
-  const outcome = await run(call)
+  let outcome
+  try {
+    outcome = await run(call)
+  } catch {
+    return {
+      status: 'FAILED',
+      reason: 'native-run-failed',
+      argv,
+      stdin: instructions,
+      prompt: null,
+      findings: [],
+      raw_output: '',
+      requested_model: model,
+      reported_model: '',
+      verified: false,
+      unverified: true,
+      dispatch_call_count: 1,
+    }
+  }
   const { findings, parsed } = parseNativeFindings(outcome?.finalOutput)
   const completed = outcome?.status === 'completed'
   if (completed && !parsed) {
@@ -470,7 +542,21 @@ export async function precheckAdversarialAxis({ targets, pluginDir, diffLoader }
   if (!seam) {
     return { status: 'BLOCKED', reason: 'plugin-seam-missing', prompt_chars: null }
   }
-  const promptChars = buildAdversarialPrompt(seam, materializeTargetDiffs(targets, diffLoader)).length
+  const list = Array.isArray(targets) ? targets : []
+  if (list.length === 0) {
+    return { status: 'BLOCKED', reason: 'targets-missing', prompt_chars: null }
+  }
+  for (const target of list) {
+    if (isRange(target) && (typeof target?.review_diff?.file !== 'string' || !target.review_diff.file.trim())) {
+      return { status: 'BLOCKED', reason: 'target-incomplete:review_diff.file', prompt_chars: null }
+    }
+  }
+  let promptChars
+  try {
+    promptChars = buildAdversarialPrompt(seam, materializeTargetDiffs(list, diffLoader)).length
+  } catch {
+    return { status: 'BLOCKED', reason: 'plugin-seam-invalid', prompt_chars: null }
+  }
   if (promptChars > APP_SERVER_INPUT_CAP) {
     return { status: 'NOT_DISPATCHABLE', reason: 'input-over-cap', prompt_chars: promptChars }
   }
@@ -509,14 +595,20 @@ export async function runAdversarialAxis({
     return gateResult('BLOCKED', 'plugin-seam-missing')
   }
 
-  const prompt = buildAdversarialPrompt(seam, preparedTargets)
-  if (prompt.length > APP_SERVER_INPUT_CAP) {
-    return {
-      ...gateResult('NOT_DISPATCHABLE', 'input-over-cap'),
-      prompt_chars: prompt.length,
+  let prompt
+  let schema
+  try {
+    prompt = buildAdversarialPrompt(seam, preparedTargets)
+    if (prompt.length > APP_SERVER_INPUT_CAP) {
+      return {
+        ...gateResult('NOT_DISPATCHABLE', 'input-over-cap'),
+        prompt_chars: prompt.length,
+      }
     }
+    schema = seam.readOutputSchema(seam.schemaPath)
+  } catch {
+    return gateResult('BLOCKED', 'plugin-seam-invalid')
   }
-  const schema = seam.readOutputSchema(seam.schemaPath)
   const workdir = String(cwd ?? preparedTargets[0].review_root)
   const options = {
     prompt,
@@ -526,17 +618,48 @@ export async function runAdversarialAxis({
     outputSchema: schema,
   }
   const run = executor ?? ((dir, turnOptions) => seam.runAppServerTurn(dir, turnOptions))
-  const outcome = await run(workdir, options)
+  let outcome
+  try {
+    outcome = await run(workdir, options)
+  } catch {
+    return {
+      status: 'FAILED',
+      reason: 'adversarial-run-failed',
+      argv: null,
+      stdin: null,
+      prompt,
+      findings: [],
+      raw_output: '',
+      command_executions: [],
+      requested_model: model,
+      reported_model: '',
+      verified: false,
+      unverified: true,
+      dispatch_call_count: 1,
+    }
+  }
   const parse = parser ?? seam.parseStructuredOutput
-  const parsed = parse(outcome?.finalMessage ?? '', {
-    status: outcome?.status,
-    failureMessage: outcome?.error?.message ?? outcome?.stderr,
-  })
-  const findings = Array.isArray(parsed?.parsed?.findings) ? parsed.parsed.findings : []
-  const failed = Boolean(parsed?.parseError) || !turnCompleted(outcome)
+  let parsed
+  try {
+    parsed = parse(outcome?.finalMessage ?? '', {
+      status: outcome?.status,
+      failureMessage: outcome?.error?.message ?? outcome?.stderr,
+    })
+  } catch (error) {
+    parsed = {
+      parsed: null,
+      parseError: error?.message ?? String(error),
+      rawOutput: String(outcome?.finalMessage ?? ''),
+    }
+  }
+  const completed = turnCompleted(outcome)
+  const hasValidFindings = Boolean(parsed?.parsed && typeof parsed.parsed === 'object' && Array.isArray(parsed.parsed.findings))
+  const parseFailed = Boolean(parsed?.parseError) || (completed && !hasValidFindings)
+  const findings = hasValidFindings ? parsed.parsed.findings : []
+  const failed = parseFailed || !completed
   return {
     status: failed ? 'FAILED' : 'OK',
-    reason: parsed?.parseError ? 'parse-failure' : (!turnCompleted(outcome) ? 'adversarial-run-failed' : null),
+    reason: parseFailed ? 'parse-failure' : (!completed ? 'adversarial-run-failed' : null),
     argv: null,
     stdin: null,
     prompt,
@@ -553,6 +676,15 @@ export async function runAdversarialAxis({
   }
 }
 
+const firstNonEmpty = (...values) => {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim()) {
+      return value
+    }
+  }
+  return ''
+}
+
 export function mapLocationToTarget({ location, targets }) {
   const list = Array.isArray(targets) ? targets : []
   const source = location ?? {}
@@ -567,24 +699,25 @@ export function mapLocationToTarget({ location, targets }) {
       return unlocated('unknown-target-label')
     }
     if (oldPath) {
+      if (isAbsolute(oldPath) || !lexicalStrictlyUnder(target.review_root, resolve(String(target.review_root), oldPath))) {
+        return unlocated('outside-target-root')
+      }
       if (Array.isArray(target.old_paths)) {
         if (!target.old_paths.includes(oldPath)) {
           return unlocated('old-path-not-owned-by-target')
         }
         return located(target, oldPath, 'old', line)
       }
-      return located(target, oldPath, 'old', line)
+      return located(target, relativeTo(target.review_root, resolve(String(target.review_root), oldPath)), 'old', line)
     }
     if (!newPath) {
       return unlocated('no-path')
     }
-    if (!isAbsolute(newPath)) {
-      return located(target, newPath, 'new', line)
-    }
-    if (!isUnder(target.review_root, newPath)) {
+    const resolvedCandidate = isAbsolute(newPath) ? newPath : resolve(String(target.review_root), newPath)
+    if (!isUnder(target.review_root, resolvedCandidate)) {
       return unlocated('outside-target-root')
     }
-    return located(target, relativeTo(target.review_root, newPath), 'new', line)
+    return located(target, relativeTo(target.review_root, resolvedCandidate), 'new', line)
   }
 
   if (oldPath) {
@@ -617,34 +750,41 @@ export function mapLocationToTarget({ location, targets }) {
 export function toGroupFindings({ findings, targets, source, reportedModel }) {
   const mapped = []
   const unmapped = []
+  const seen = new Set()
   for (const finding of Array.isArray(findings) ? findings : []) {
+    if (!finding || typeof finding !== 'object' || Array.isArray(finding)) {
+      unmapped.push({ invalid_finding: finding })
+      continue
+    }
     const { line, line_end } = nativeLine(finding)
     const placed = mapLocationToTarget({
       location: {
-        targetLabel: finding?.targetLabel ?? finding?.target_identity,
-        path: finding?.file ?? finding?.code_location?.absolute_file_path,
-        oldPath: finding?.oldPath,
+        targetLabel: firstNonEmpty(finding.targetLabel, finding.target_identity),
+        path: firstNonEmpty(finding.file, finding.code_location?.absolute_file_path),
+        oldPath: firstNonEmpty(finding.oldPath),
         line,
       },
       targets,
     })
     if (!placed.located) {
-      const { target_identity, target, targetLabel, ...rest } = finding ?? {}
+      const { target_identity, target, targetLabel, ...rest } = finding
       unmapped.push(rest)
       continue
     }
     const severity = severityOf(finding)
-    const rootCause = String(finding?.title ?? finding?.body ?? '').trim()
+    const rootCause = firstNonEmpty(finding.title, finding.body).trim()
+    const title = firstNonEmpty(finding.title, rootCause)
+    const comment = firstNonEmpty(finding.body, rootCause)
     const channel = source === 'codex-adversarial' ? 'codex-adversarial' : 'codex'
-    mapped.push({
+    const entry = {
       target_identity: placed.target_identity,
       file: placed.file,
       line: placed.line ?? line ?? null,
       line_end,
-      anchor: String(finding?.anchor ?? ''),
-      title: String(finding?.title ?? rootCause),
+      anchor: String(finding.anchor ?? ''),
+      title,
       root_cause: rootCause,
-      comment: String(finding?.body ?? rootCause),
+      comment,
       tag: channel === 'codex-adversarial' ? '[Codex-adversarial]' : null,
       source: 'codex',
       channel,
@@ -652,11 +792,25 @@ export function toGroupFindings({ findings, targets, source, reportedModel }) {
       suggestion: SEVERITY_TO_SUGGESTION[severity] ?? '參考用',
       action: 'ask-user',
       action_reason: '需人工判斷',
-      confidence: finding?.confidence ?? null,
+      confidence: finding.confidence ?? null,
       reported_model: String(reportedModel ?? ''),
       verified: false,
       unverified: true,
-    })
+    }
+    const dedupeKey = JSON.stringify([
+      entry.target_identity,
+      entry.file,
+      entry.line,
+      entry.line_end,
+      entry.title,
+      entry.comment,
+      entry.channel,
+    ])
+    if (seen.has(dedupeKey)) {
+      continue
+    }
+    seen.add(dedupeKey)
+    mapped.push(entry)
   }
   return { findings: mapped, unmapped_findings: unmapped, verified: false, unverified: true }
 }

@@ -71,6 +71,7 @@ DESC=$(echo "$INPUT" | jq -r '.tool_input.description // empty' 2>/dev/null)
 TRANSCRIPT=$(echo "$INPUT" | jq -r '.transcript_path // empty' 2>/dev/null)
 SESSION=$(echo "$INPUT" | jq -r '.session_id // empty' 2>/dev/null)
 TUSE=$(echo "$INPUT" | jq -r '.tool_use_id // empty' 2>/dev/null)
+HOOK_CWD=$(echo "$INPUT" | jq -r '.cwd // empty' 2>/dev/null)
 
 log_trace() {
   echo "$TS $1 tool=$TOOL subagent_type=$SUBAGENT_TYPE session=${SESSION:0:8} reason=$2" >> "$LOG"
@@ -852,6 +853,11 @@ if [ "$ENFORCE" = "1" ]; then
     *)
       if [ -f "$AGENT_DIR/${SUBAGENT_TYPE}.md" ]; then
         ALLOWED=1
+      # 專案層定義檔同樣釘死 model/effort（專案層唯讀查核 agent）；
+      # 名字含 / 或 .. 不認，否則可跳到 cwd 以外任意的 .md 冒充定義檔。
+      elif [ -n "$HOOK_CWD" ] && [[ "$SUBAGENT_TYPE" != */* ]] && [[ "$SUBAGENT_TYPE" != *..* ]] &&
+           [ -f "$HOOK_CWD/.claude/agents/${SUBAGENT_TYPE}.md" ]; then
+        ALLOWED=1
       else
         case " $EXTRA_ALLOW " in
           *" $SUBAGENT_TYPE "*) ALLOWED=1 ;;
@@ -873,7 +879,7 @@ if [ "$ENFORCE" = "1" ]; then
   "hookSpecificOutput": {
     "hookEventName": "PreToolUse",
     "permissionDecision": "deny",
-    "permissionDecisionReason": "[T2-routing-gate] routed-agent-enforce trial 生效中：general-purpose 與無定義檔的 agent 已停用（model / effort 無法釘死）。\n\n改派下列四個之一（model + effort 已釘死，不需 <routed:> token）：\n  routed-impl    實作類（production code / 多檔整合 / 重構）— opus + medium\n  routed-mech    機械類（翻譯 / 摘要 / 格式轉換 / 大量 chunk）— sonnet + low；description 另需 <mech-ok>\n  routed-judge   判斷類（架構決策 / synthesis / verify / 主軸抽取）— opus + xhigh\n  routed-secure  安全敏感（authz / crypto / secret 處理 / 漏洞修補）— opus + high\n\n有定義檔的 specialized agent（deep-explore / code-reviewer 等）與 workflow agent() 不受影響。判類別看 ~/.claude/references/subagent-routing.md。\n\n回退：把 ~/.claude/hooks/routed-enforce.on 改名只會停用白名單強制；routed-mech 的 opt-in 仍保留。完整回退需同時還原 mech gate、agent 契約與 routing 文件。"
+    "permissionDecisionReason": "[T2-routing-gate] routed-agent-enforce 已常態啟用：general-purpose 與無定義檔的 agent 已停用（model / effort 無法釘死）。\n\n改派下列四個之一（model + effort 由定義檔釘死、以 ~/.claude/references/subagent-routing.md 為準，不需 <routed:> token）：\n  routed-impl    實作類（production code / 多檔整合 / 重構）\n  routed-mech    機械類（翻譯 / 摘要 / 格式轉換 / 大量 chunk）；description 另需 <mech-ok>\n  routed-judge   判斷類（架構決策 / synthesis / verify / 主軸抽取）\n  routed-secure  安全敏感（authz / crypto / secret 處理 / 漏洞修補）\n\n有定義檔的 specialized agent（deep-explore / code-reviewer 等）與 workflow agent() 不受影響。判類別與各角色 model／effort 見 ~/.claude/references/subagent-routing.md。\n\n回退：把 ~/.claude/hooks/routed-enforce.on 改名只會停用白名單強制；routed-mech 的 opt-in 仍保留。完整回退需同時還原 mech gate、agent 契約與 routing 文件。"
   }
 }
 JSON

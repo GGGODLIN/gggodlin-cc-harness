@@ -288,6 +288,35 @@ hot_latest=$(gh api "repos/shanraisshan/claude-code-best-practice/commits?path=R
   fi
 } >> "$LOG_FILE"
 
+# --- Herdr 外掛上游對賬（2026-11-24 加）---
+# 使用中的版面 owner、側欄 owner-agents、窗格標題 owner-pane 是從官方 main／agents／pane 複製後改的，
+# 複製品不會跟著 Herdr 更新；Herdr 更新只覆蓋官方那幾份。這段拿「上次對過的官方底稿」比對現行官方檔。
+# 底稿只在看過 diff、把要的改動合進 owner 複製品之後才推進，不得為了讓報告閉嘴而推進。
+HERDR_HOME="${HERDR_APP_HOME:-$HOME/.config/herdr-app}"
+HERDR_BASE="${HERDR_MOD_BASE:-$HOME/.local/share/herdr-mod-sync/base}"
+{
+  echo ""
+  echo "## Herdr 外掛上游對賬（owner 複製版的官方來源）"
+  herdr_ver=$(herdr-app --version 2>/dev/null | awk '{print $2}')
+  echo "- 底稿對到 Herdr $(cat "$HERDR_BASE/VERSION" 2>/dev/null || echo '?')；目前 Herdr App ${herdr_ver:-?}"
+  for pair in "mods/agents/main.js:owner-agents" "mods/pane/main.js:owner-pane" "layouts/main.json:owner 版面"; do
+    rel="${pair%%:*}"; fork="${pair#*:}"
+    shipped="$HERDR_HOME/$rel"; base="$HERDR_BASE/$rel"
+    if [ ! -f "$shipped" ]; then
+      echo "- ⚠️ **${rel}** — 找不到官方檔（${shipped}），Herdr 可能搬了位置"
+    elif [ ! -f "$base" ]; then
+      echo "- ⚠️ **${rel}** — 找不到底稿（${base}），無法比對"
+    elif cmp -s "$base" "$shipped"; then
+      echo "- ✅ ${rel} — 與底稿相同"
+    else
+      herdr_stat=$(diff "$base" "$shipped" | awk '/^>/{a++} /^</{d++} END{printf "+%d −%d 行", a, d}')
+      echo "- 🔔 **${rel} — 官方版有變動（${herdr_stat}）**，看要不要合進 ${fork}"
+      echo "  - 看差異：\`diff -u $base $shipped\`"
+      echo "  - 合完再推進底稿：\`cp $shipped $base\`，並把 \`$HERDR_BASE/VERSION\` 改成當時的 Herdr 版本"
+    fi
+  done
+} >> "$LOG_FILE"
+
 # --- ⚠️ 升級段（2026-07-10 加）---
 # 巡邏失敗曾連續 5 週每週有印 ⚠️ 但被 digest 濃縮掉沒進注意力；
 # ⚠️ = 巡邏機制本身失效（非「本週沒新東西」），首次出現即升級、digest 端有對應保留規則。

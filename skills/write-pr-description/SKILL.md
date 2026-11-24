@@ -1,6 +1,6 @@
 ---
 name: write-pr-description
-description: Use when a pull request title or description needs drafting or revising — before running `gh pr create`, `gh pr edit --body`, or any other command that opens a PR or replaces its description on any provider, and when the user asks to "write the PR description", "draft PR text", or "revise the PR body for the latest commits". Returns prose only; the caller or provider adapter (such as bitbucket-pr-mutation) performs the write. Do not use for PR comments, reviews, approvals, merges, state changes, or read-only PR queries.
+description: Use when a pull request title or description needs drafting or revising — before running `gh pr create`, `gh pr edit --body`, or any other command that opens a PR or replaces its description on any provider, and when the user asks to "write the PR description", "draft PR text", or "revise the PR body for the latest commits". Returns prose only; the caller or provider adapter performs the write. Do not use for PR comments, reviews, approvals, merges, state changes, or read-only PR queries.
 ---
 
 <!-- 本檔在契約測試底下：bash ~/.claude/skills/write-pr-description/scripts/tests/write-pr-description-contract.test.sh -->

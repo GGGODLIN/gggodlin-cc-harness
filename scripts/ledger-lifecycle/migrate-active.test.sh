@@ -2,7 +2,7 @@
 set -u
 
 SCRIPT="${ACTIVE_MIGRATION_SCRIPT:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/migrate-active.py}"
-TMP=$(mktemp -d /tmp/migrate-active-test.XXXXXX)
+TMP=$(mktemp -d "${TMPDIR:-/tmp}/migrate-active-test.XXXXXX") || exit 1
 trap 'rm -rf "$TMP"' EXIT
 PASS=0
 FAIL=0

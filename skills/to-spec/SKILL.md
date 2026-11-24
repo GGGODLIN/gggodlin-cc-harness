@@ -5,7 +5,7 @@ upstream: mattpocock/skills
 upstream-path: skills/engineering/to-spec/SKILL.md
 upstream-pinned: 6654f6b
 ---
-<!-- 本檔在契約測試底下：bash skills/to-spec/scripts/tests/adr-authoring-contract.test.sh -->
+<!-- 本檔在契約測試底下：bash skills/to-spec/scripts/tests/adr-authoring-contract.test.sh && python3 ~/.claude/commands/tests/test_independent_verification_and_consensus_gates.py -->
 
 # To Spec
 
@@ -13,7 +13,9 @@ This skill takes the current conversation context and codebase understanding and
 
 ## Process
 
-0. **Requirements gate — to-spec synthesizes, it never discovers.** Scan the conversation for confirmation evidence: decisions the user actually made, scope/behavior questions they answered, alternatives weighed. If that evidence is missing (a fuzzy idea jumped straight to 「寫 spec」), stop — do not synthesize. Run the missing confirmation instead: plain interviewing per the questioning discipline already in context, or propose /grill-me when the decision tree is deep or the user's answers hedge. Fog check while confirming: when unresolved items exceed what one conversation can close AND several are undecidable until work happens first (facts to research, a prototype to react to, access to provision), tell the user this is wayfinder-scale fog and propose /wayfinder — a decision-ticket map worked across sessions — with a one-line cost warning (charting is a full session of interviewing). On explicit yes, invoke the wayfinder skill and stop this flow. Done when: the open decisions are closed (then continue to step 1), or the user chose the wayfinder path.
+0. **Requirements gate — to-spec synthesizes, it never discovers.** Scan the conversation for confirmation evidence: decisions the user actually made, scope/behavior questions they answered, alternatives weighed. If that evidence is missing (a fuzzy idea jumped straight to 「寫 spec」), stop — do not synthesize. Run the missing confirmation instead: plain interviewing per the questioning discipline already in context, or propose /grill-me when the decision tree is deep or the user's answers hedge. Fog check while confirming: when unresolved items exceed what one conversation can close AND several are undecidable until work happens first (facts to research, a prototype to react to, access to provision), tell the user this is wayfinder-scale fog and propose /wayfinder — a decision-ticket map worked across sessions — with a one-line cost warning (charting is a full session of interviewing). On explicit yes, invoke the wayfinder skill and stop this flow. Done when: the open decisions are closed (then continue to step 0a), or the user chose the wayfinder path.
+
+0a. **Sharpen offer — before Step 1, only when first-hand material has not been inspected yet.** Check whether this session has already inspected the target codebase modules or external API/doc contracts first-hand (`Read` / `Grep` / primary doc fetch on the touched area), or whether `/sharpen` already ran or the user already answered this question. If any of those holds, skip asking and go straight to Step 1 (briefly state which skip condition applied). Otherwise — the discussion settled conceptually without inspecting first-hand code or API contracts yet — ask the user exactly one question, defaulting the recommendation to 跑: 「要不要先跑 /sharpen（唯讀查到底，再帶發現回來對齊）？我推薦跑，因為〈一句指出尚未實查的第一手程式碼或 API 材料〉。」 On yes, invoke `Skill(sharpen)`; its findings are confirmation material, so re-run Step 0's check on them and route any new open decision through Step 0's questioning. On no, continue. Done when: a skip condition applied and was stated, or the user answered → Step 1.
 
 1. Explore the repo to understand the current state of the codebase, if you haven't already. Use the project's domain glossary vocabulary throughout the spec, and respect any ADRs in the area you're touching. Done when: the modules the feature touches and their existing seams are identified.
 
@@ -25,7 +27,9 @@ Check with the user that these seams match their expectations. Done when: the us
 
 3. Draft the spec using the template below. Provenance tags (defined in the template) are mandatory on every user story and implementation decision — they are audited by the yagni review axis: `[inferred]` items carry the burden of proof there, and fabricated quotes are treated as findings. 如果受測模組屬於四種純函式屬性形狀（多步狀態機／聯鎖轉換、守恆與算帳不變量、編解碼 round-trip、冪等／順序無關合併），就在撰寫 `## Testing Decisions` 前讀 [tests.md](/skills/tdd/tests.md) 的「Conditional Property-Based Testing (PBT)」，將對應已確認行為的 `P1..Pn` 不變量、適用輸入域與獨立 Oracle 邊界寫入 `## Testing Decisions`（若衍生出新的產品承諾則退回 Step 3a 補齊來源標記；一般 CRUD／UI 則省略，不寫投機性屬性測試）。 Before landing, continue to step 3a. Done when: every drafted story/decision has a tag and `## Testing Decisions` records the conditional PBT contract whenever one of the 4 shapes applies.
 
-3a. **Behavior completeness pass — scan only what applies.** Review the draft for states and transitions; inputs; empty, error, loading, and cancel behavior; permissions, offline behavior, and timeouts; races, concurrency, and stale state; focus and accessibility. Add concrete behavior only where the feature can encounter it, fold it into User Stories or Implementation Decisions, and retain the required source tag on each addition. Do not add a behavior matrix, category headings, or empty optional headings; omit inapplicable cases. Then land the spec per the Landing convention section. Done when: every applicable behavior is explicit and source-tagged, inapplicable cases created no empty headings, and the spec is landed.
+3a. **Behavior completeness pass — scan only what applies.** Review the draft for states and transitions; inputs; empty, error, loading, and cancel behavior; permissions, offline behavior, and timeouts; races, concurrency, and stale state; focus and accessibility. Add concrete behavior only where the feature can encounter it, fold it into User Stories or Implementation Decisions, and retain the required source tag on each addition. Do not add a behavior matrix, category headings, or empty optional headings; omit inapplicable cases. Then continue to step 3b. Done when: every applicable behavior is explicit and source-tagged, inapplicable cases created no empty headings, and the draft is ready for step 3b.
+
+3b. **規格矛盾獵手（落檔前快篩）**：在正式落檔前（同時覆蓋 OpenSpec 與 `.scratch` 兩條落檔路徑），自動派發一席獨立判斷角色（`routed-judge`），**只讀待審規格草稿**正文、**禁止讀取本機其他檔案**、禁止修改檔案，且**不夾帶主 session 的結論傾向**，專門構造**最多 3 組**「具體輸入、數字或事件時序」直接證明兩條條文無法同時成立（或同一操作有兩種互斥的字面解讀）；理由是開工前攔掉數學或時序自相矛盾，比寫完程式返工便宜得多。回傳 0 組矛盾時**靜默**依 Landing convention 落檔；抓到 ≥1 組矛盾時暫停落檔，呈現反例（輸入／時序、互撞條文與對決策的影響）供使用者**拍板**，依使用者決定修完草稿後直接落檔，**不自動進入第二輪**重掃。若獵手逾時、撞 429 或輸出格式異常，於補充紀錄與回報明記「**規格矛盾獵手未完成**（原因）」，不冒充已驗證零矛盾，並繼續落檔不卡死。Done when: 0 組矛盾直接落檔、或 ≥1 組矛盾經使用者拍板修正後落檔、或已記錄「規格矛盾獵手未完成（原因）」並完成 OpenSpec／`.scratch` 落檔。
 
 4. Hand off with one question before ticketing: 「要不要先跑 /review-spec？spec 是模型代寫時建議至少跑 yagni 軸（審值不值得，可單獨跑）。」 If the user declines, the natural next step is /to-tickets. Done when: the user has answered the review question.
 
@@ -45,7 +49,7 @@ A numbered list of user stories. Each in the format:
 
 1. As an {{actor}}, I want a {{feature}}, so that {{benefit}} {{source-tag}}
 
-`{{source-tag}}` is REQUIRED, exactly one of: `[user: "<verbatim quote>"]` (the user actually said it — quote them verbatim), `[evidence: <data source>]` (a measured fact), or `[inferred]` (the model's own extrapolation).
+`{{source-tag}}` is REQUIRED, exactly one of: `[user: "<verbatim quote>"]` (the user actually said it — quote them verbatim; when the user's reply was a referential short answer such as `a`, `照推薦`, or `可以`, re-check the exact scope of the referred option before applying `[user: ...]`, and tag any extension beyond that option's scope as `[inferred]`), `[evidence: <data source>]` (a measured fact), or `[inferred]` (the model's own extrapolation).
 
 Cover every behavior the feature actually needs; a story the conversation does not support is an `[inferred]` item and carries the burden of proof at review.
 
@@ -88,7 +92,7 @@ Any further notes about the feature.
 
 ## Landing convention (check once per feature — the whole feature lands on one path, no mixing)
 
-**Repo has an `openspec/` directory** → land as an openspec change, mapping the template onto the repo's artifacts (its openspec/AGENTS.md is the SSOT for structure and tiering):
+**Repo has an OpenSpec scaffold** (`openspec/AGENTS.md`, `openspec/changes/`, or `openspec/specs/` exists) → land as an openspec change, mapping the template onto the repo's artifacts (its openspec/AGENTS.md is the SSOT for structure and tiering):
 
 - `openspec/changes/<change-name>/proposal.md` ← Problem Statement + Solution + User Stories (as Why / What Changes), plus Out of Scope
 - `design.md` ← Implementation Decisions + Testing Decisions (small change: fold into proposal.md)
@@ -96,7 +100,7 @@ Any further notes about the feature.
 
 Done when: `openspec validate <change-name>` passes green — do not hand off on a red validate.
 
-**No `openspec/` directory** → write the spec verbatim from the template to `.scratch/{feature-slug}/spec.md`. Done when: the file exists and the user has seen the path.
+**No OpenSpec scaffold** (no `openspec/` directory, or `openspec/` contains only `decisions/` / `glossary*` from `domain-modeling` without `AGENTS.md`, `changes/`, or `specs/`) → write the spec verbatim from the template to `.scratch/{feature-slug}/spec.md`. Done when: the file exists and the user has seen the path.
 
 ## 踩過的坑
 

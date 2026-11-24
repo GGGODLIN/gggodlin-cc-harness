@@ -87,6 +87,7 @@ if (process.env.FAKE_REPO_HEAD !== undefined) {
   execFileSync('/usr/bin/git', ['commit', '-q', '-m', 'head drift'], { cwd: process.env.FAKE_REPO_HEAD })
 }
 if (process.env.FAKE_EXTRA_FILE === '1') writeFileSync(resultPath.replace(/result\\.json$/, 'extra.txt'), 'extra')
+if (process.env.FAKE_PLANT_RECEIPT === '1') writeFileSync(resultPath.replace(/result\\.json$/, 'receipt.json'), '{"hijacked":true}')
 process.exitCode = process.env.FAKE_EXIT === undefined ? result.decision === 'approved' ? 0 : result.decision === 'annotated' || result.decision === 'dismissed' ? 1 : 2 : Number(process.env.FAKE_EXIT)
 `
   await writeFile(binaryPath, binary, { mode: 0o700, flag: 'wx' })
@@ -982,3 +983,288 @@ test('adapter receipt of each mode carries exactly the bound fields', async () =
     await Promise.all(fixtures.map(fixture => rm(fixture.home, { recursive: true, force: true })))
   }
 })
+
+const toSeecodeIntentReceipt = async fixture => {
+  const receipt = JSON.parse(await readFile(fixture.receiptPath, 'utf8'))
+  const page = await readFile(fixture.artifactPath)
+  delete receipt.archify
+  delete receipt.pinnedSha
+  receipt.producer = 'seecode-intent'
+  receipt.type = 'plan'
+  receipt.artifacts = { page: { path: fixture.artifactPath, bytes: page.length } }
+  return receipt
+}
+
+test('seecode-intent receipts release intent without an Archify child receipt', async () => {
+  const fixture = await createFixture('intent')
+  try {
+    await writeFile(fixture.receiptPath, JSON.stringify(await toSeecodeIntentReceipt(fixture)) + '\n')
+    const result = runAdapter(fixture.home, ['intent', fixture.receiptPath], { FAKE_INVOCATION_LOG: fixture.invocationLog })
+    assert.equal(result.status, 0, result.stderr)
+    const normalized = JSON.parse(result.stdout)
+    assert.equal(normalized.decision, 'approved')
+    assert.equal(normalized.transition, 'intent-accepted')
+    const invocation = JSON.parse((await readFile(fixture.invocationLog, 'utf8')).trim())
+    assert.equal(invocation.args[1], fixture.artifactPath)
+  } finally {
+    await rm(fixture.home, { recursive: true, force: true })
+  }
+})
+
+test('seecode-intent receipts still block on annotated feedback', async () => {
+  const fixture = await createFixture('intent')
+  try {
+    await writeFile(fixture.receiptPath, JSON.stringify(await toSeecodeIntentReceipt(fixture)) + '\n')
+    const result = runAdapter(fixture.home, ['intent', fixture.receiptPath], {
+      FAKE_INVOCATION_LOG: fixture.invocationLog,
+      FAKE_DECISION: 'annotated',
+      FAKE_FEEDBACK: '入口放錯地方',
+    })
+    assert.equal(result.status, 1, result.stderr)
+    const normalized = JSON.parse(result.stdout)
+    assert.equal(normalized.transition, 'classification-required')
+    assert.equal(normalized.feedback, '入口放錯地方')
+  } finally {
+    await rm(fixture.home, { recursive: true, force: true })
+  }
+})
+
+test('seecode-intent receipts cannot authorize actual-delta', async () => {
+  const fixture = await createFixture('actual-delta')
+  try {
+    const receipt = await toSeecodeIntentReceipt(fixture)
+    await writeFile(fixture.receiptPath, JSON.stringify(receipt) + '\n')
+    const result = runAdapter(fixture.home, ['actual-delta', fixture.receiptPath, fixture.headSha], { FAKE_INVOCATION_LOG: fixture.invocationLog })
+    assert.equal(result.status, 2)
+    assert.match(result.stderr, /only be reviewed as intent/)
+    assert.equal(await readFile(fixture.invocationLog, 'utf8').catch(() => ''), '')
+  } finally {
+    await rm(fixture.home, { recursive: true, force: true })
+  }
+})
+
+test('seecode-intent receipts must bind the page artifact before launch', async () => {
+  const fixture = await createFixture('intent')
+  try {
+    const receipt = await toSeecodeIntentReceipt(fixture)
+    receipt.artifacts.page.bytes += 1
+    await writeFile(fixture.receiptPath, JSON.stringify(receipt) + '\n')
+    const stale = runAdapter(fixture.home, ['intent', fixture.receiptPath], { FAKE_INVOCATION_LOG: fixture.invocationLog })
+    assert.equal(stale.status, 2)
+    assert.match(stale.stderr, /does not bind its page artifact/)
+    delete receipt.artifacts
+    await writeFile(fixture.receiptPath, JSON.stringify(receipt) + '\n')
+    const missing = runAdapter(fixture.home, ['intent', fixture.receiptPath], { FAKE_INVOCATION_LOG: fixture.invocationLog })
+    assert.equal(missing.status, 2)
+    assert.match(missing.stderr, /does not bind its page artifact/)
+    assert.equal(await readFile(fixture.invocationLog, 'utf8').catch(() => ''), '')
+  } finally {
+    await rm(fixture.home, { recursive: true, force: true })
+  }
+})
+
+test('seecode-intent receipts still require proposed authored proof', async () => {
+  const fixture = await createFixture('intent')
+  try {
+    const receipt = await toSeecodeIntentReceipt(fixture)
+    receipt.status = 'accepted'
+    await writeFile(fixture.receiptPath, JSON.stringify(receipt) + '\n')
+    const result = runAdapter(fixture.home, ['intent', fixture.receiptPath], { FAKE_INVOCATION_LOG: fixture.invocationLog })
+    assert.equal(result.status, 2)
+    assert.match(result.stderr, /proposed and authored/)
+    assert.equal(await readFile(fixture.invocationLog, 'utf8').catch(() => ''), '')
+  } finally {
+    await rm(fixture.home, { recursive: true, force: true })
+  }
+})
+
+test('omitted archify artifact bytes or missing archify.artifact fail before launch', async () => {
+  // BUG-28: deleting archify.artifact.bytes previously bypassed size binding; missing archify.artifact threw TypeError
+  for (const mutate of [
+    receipt => { delete receipt.archify.artifact.bytes },
+    receipt => { delete receipt.archify.artifact },
+  ]) {
+    const fixture = await createFixture('intent')
+    try {
+      const receipt = JSON.parse(await readFile(fixture.receiptPath, 'utf8'))
+      mutate(receipt)
+      await writeFile(fixture.receiptPath, JSON.stringify(receipt) + '\n')
+      const result = runAdapter(fixture.home, ['intent', fixture.receiptPath], { FAKE_INVOCATION_LOG: fixture.invocationLog })
+      assert.equal(result.status, 2)
+      assert.match(result.stderr, /Archify child receipt artifact size does not match/)
+      assert.equal(await readFile(fixture.invocationLog, 'utf8').catch(() => ''), '')
+    } finally {
+      await rm(fixture.home, { recursive: true, force: true })
+    }
+  }
+})
+
+test('actual-delta omitting artifacts.delta.bytes fails before launch', async () => {
+  // BUG-29: deleting artifacts.delta.bytes previously bypassed delta size binding
+  const fixture = await createFixture('actual-delta')
+  try {
+    const receipt = JSON.parse(await readFile(fixture.receiptPath, 'utf8'))
+    delete receipt.artifacts.delta.bytes
+    await writeFile(fixture.receiptPath, JSON.stringify(receipt) + '\n')
+    const result = runAdapter(fixture.home, ['actual-delta', fixture.receiptPath, fixture.headSha], { FAKE_INVOCATION_LOG: fixture.invocationLog })
+    assert.equal(result.status, 2)
+    assert.match(result.stderr, /does not bind its delta artifact/)
+    assert.equal(await readFile(fixture.invocationLog, 'utf8').catch(() => ''), '')
+  } finally {
+    await rm(fixture.home, { recursive: true, force: true })
+  }
+})
+
+test('null identity.json fails with pinned identity mismatch instead of TypeError', async () => {
+  // BUG-30: JSON null in identity.json previously crashed with raw TypeError
+  const fixture = await createFixture('intent')
+  try {
+    const identityPath = join(fixture.home, 'Desktop/projects/.claude/trials/plannotator-visual-gate/identity.json')
+    await writeFile(identityPath, 'null\n')
+    const result = runAdapter(fixture.home, ['intent', fixture.receiptPath], { FAKE_INVOCATION_LOG: fixture.invocationLog })
+    assert.equal(result.status, 2)
+    assert.match(result.stderr, /does not match the pinned identity/)
+    assert.doesNotMatch(result.stderr, /Cannot read properties of null/)
+  } finally {
+    await rm(fixture.home, { recursive: true, force: true })
+  }
+})
+
+test('pre-created receipt.json or read-only reviewRoot still emits JSON gate-error on stdout', async () => {
+  // BUG-31a: child planting receipt.json or chmod 0500 reviewRoot previously threw uncaught EEXIST/EACCES with empty stdout
+  for (const extraEnv of [
+    { FAKE_REVIEW_MODE: '0500' },
+    { FAKE_PLANT_RECEIPT: '1' },
+  ]) {
+    const fixture = await createFixture('intent')
+    try {
+      const result = runAdapter(fixture.home, ['intent', fixture.receiptPath], {
+        FAKE_INVOCATION_LOG: fixture.invocationLog,
+        ...extraEnv,
+      })
+      assert.equal(result.status, 2)
+      const normalized = JSON.parse(result.stdout)
+      assert.equal(normalized.decision, 'gate-error')
+      assert.equal(normalized.ok, false)
+      assert.equal(normalized.transition, 'BLOCKED')
+      assert.match(normalized.error, /review directory|permission|receipt/i)
+    } finally {
+      // Restore permissions so rm -rf succeeds cleanly
+      const reviewsRoot = join(fixture.home, 'Desktop/projects/.claude/trials/plannotator-visual-gate/reviews')
+      for (const entry of await readdir(reviewsRoot).catch(() => [])) {
+        await chmod(join(reviewsRoot, entry), 0o700).catch(() => {})
+      }
+      await rm(fixture.home, { recursive: true, force: true })
+    }
+  }
+})
+
+test('audit failure preserves prior gate-error message instead of overwriting it', async () => {
+  // BUG-31b: when both result validation and appendAudit fail, prior errorMessage must not be lost
+  const fixture = await createFixture('intent')
+  try {
+    const auditPath = join(fixture.home, 'Desktop/projects/.claude/trials/plannotator-visual-gate/audit.jsonl')
+    const outsidePath = join(fixture.home, 'outside-audit.jsonl')
+    await writeFile(outsidePath, 'keep\n')
+    await symlink(outsidePath, auditPath)
+    const result = runAdapter(fixture.home, ['intent', fixture.receiptPath], {
+      FAKE_INVOCATION_LOG: fixture.invocationLog,
+      FAKE_INVALID_RESULT: '1',
+    })
+    assert.equal(result.status, 2)
+    const normalized = JSON.parse(result.stdout)
+    assert.equal(normalized.decision, 'gate-error')
+    assert.match(normalized.error, /invalid JSON/i)
+    assert.match(normalized.error, /symlink/i)
+  } finally {
+    await rm(fixture.home, { recursive: true, force: true })
+  }
+})
+
+test('annotated decision rejects whitespace-only feedback as gate-error', async () => {
+  // BUG-32: whitespace-only feedback previously passed annotated validation
+  const fixture = await createFixture('intent')
+  try {
+    const result = runAdapter(fixture.home, ['intent', fixture.receiptPath], {
+      FAKE_INVOCATION_LOG: fixture.invocationLog,
+      FAKE_DECISION: 'annotated',
+      FAKE_FEEDBACK: '   \n\t  ',
+    })
+    assert.equal(result.status, 2)
+    const normalized = JSON.parse(result.stdout)
+    assert.equal(normalized.decision, 'gate-error')
+    assert.match(normalized.error, /feedback/i)
+  } finally {
+    await rm(fixture.home, { recursive: true, force: true })
+  }
+})
+
+test('hard-linked binary, root-equal outputRoot, and non-owner-only audit file fail closed', async () => {
+  // 1) Hard-linked pinned binary must fail closed before launch
+  const binFixture = await createFixture('intent')
+  try {
+    const binaryPath = join(binFixture.home, 'Desktop/projects/.claude/trials/plannotator-visual-gate/tool/plannotator-darwin-arm64')
+    await link(binaryPath, join(binFixture.home, 'binary-hardlink'))
+    const res = runAdapter(binFixture.home, ['intent', binFixture.receiptPath], { FAKE_INVOCATION_LOG: binFixture.invocationLog })
+    assert.equal(res.status, 2)
+    assert.match(res.stderr, /must have one link/)
+    assert.equal(await readFile(binFixture.invocationLog, 'utf8').catch(() => ''), '')
+  } finally {
+    await rm(binFixture.home, { recursive: true, force: true })
+  }
+
+  // 2) outputRoot equal to pinned archifyTrialRoot itself must fail closed
+  const rootFixture = await createFixture('intent')
+  try {
+    const archifyRoot = join(rootFixture.home, 'Desktop/projects/.claude/trials/archify-visual-gate')
+    const receipt = JSON.parse(await readFile(rootFixture.receiptPath, 'utf8'))
+    receipt.outputRoot = archifyRoot
+    await writeFile(rootFixture.receiptPath, JSON.stringify(receipt) + '\n')
+    const res = runAdapter(rootFixture.home, ['intent', rootFixture.receiptPath], { FAKE_INVOCATION_LOG: rootFixture.invocationLog })
+    assert.equal(res.status, 2)
+    assert.match(res.stderr, /outside the pinned root/)
+    assert.equal(await readFile(rootFixture.invocationLog, 'utf8').catch(() => ''), '')
+  } finally {
+    await rm(rootFixture.home, { recursive: true, force: true })
+  }
+
+  // 3) Pre-existing audit.jsonl with broad permissions (0644) must fail closed without appending
+  const auditFixture = await createFixture('intent')
+  try {
+    const auditPath = join(auditFixture.home, 'Desktop/projects/.claude/trials/plannotator-visual-gate/audit.jsonl')
+    await writeFile(auditPath, '{"existing":true}\n', { mode: 0o644 })
+    await chmod(auditPath, 0o644)
+    const res = runAdapter(auditFixture.home, ['intent', auditFixture.receiptPath], { FAKE_INVOCATION_LOG: auditFixture.invocationLog })
+    assert.equal(res.status, 2)
+    const normalized = JSON.parse(res.stdout)
+    assert.equal(normalized.decision, 'gate-error')
+    assert.match(normalized.error, /audit path must be owner-only/)
+    assert.equal(await readFile(auditPath, 'utf8'), '{"existing":true}\n')
+  } finally {
+    await rm(auditFixture.home, { recursive: true, force: true })
+  }
+})
+
+test('invalid UTF-8 result bytes are rejected instead of decoded with replacement chars', async () => {
+  const fixture = await createFixture('intent')
+  try {
+    const binaryPath = join(fixture.home, 'Desktop/projects/.claude/trials/plannotator-visual-gate/tool/plannotator-darwin-arm64')
+    const badBinary = `#!/usr/bin/env node
+import { writeFileSync } from 'node:fs'
+const idx = process.argv.indexOf('--result-file')
+const bad = Buffer.concat([Buffer.from('{"decision":"approved","feedback":"'), Buffer.from([0xff, 0xfe]), Buffer.from('"}')])
+writeFileSync(process.argv[idx + 1], bad, { mode: 0o600 })
+process.stdout.write(bad)
+`
+    await writeFile(binaryPath, badBinary, { mode: 0o700 })
+    await chmod(binaryPath, 0o700)
+    const res = runAdapter(fixture.home, ['intent', fixture.receiptPath], { FAKE_INVOCATION_LOG: fixture.invocationLog })
+    assert.equal(res.status, 2)
+    const normalized = JSON.parse(res.stdout)
+    assert.equal(normalized.decision, 'gate-error')
+    assert.match(normalized.error, /invalid UTF-8/)
+  } finally {
+    await rm(fixture.home, { recursive: true, force: true })
+  }
+})
+

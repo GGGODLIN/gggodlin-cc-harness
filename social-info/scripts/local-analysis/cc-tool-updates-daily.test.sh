@@ -232,6 +232,51 @@ assert len(packet['errors']) == 1 and 'ambiguous active installs' in packet['err
 print('✅ 測 4d npm ambiguous executable：多 install 各有 active bin 時明確報錯')
 PY
 
+NVM_VERS="$TMP/nvm-versions"
+NVM_MANAGED_BIN="$TMP/nvm-managed-bin"
+mkdir -p "$NVM_VERS/v24.22.1/lib/node_modules/@openai/codex" "$NVM_VERS/v24.22.1/bin" \
+         "$NVM_VERS/v22.10.0/lib/node_modules/@openai/codex" "$NVM_VERS/v22.10.0/bin" \
+         "$NVM_MANAGED_BIN"
+printf '{"name":"@openai/codex","version":"0.167.0","bin":{"codex":"bin/codex.js"}}' > "$NVM_VERS/v24.22.1/lib/node_modules/@openai/codex/package.json"
+printf '{"name":"@openai/codex","version":"0.164.0","bin":{"codex":"bin/codex.js"}}' > "$NVM_VERS/v22.10.0/lib/node_modules/@openai/codex/package.json"
+mkdir -p "$NVM_VERS/v24.22.1/lib/node_modules/@openai/codex/bin" "$NVM_VERS/v22.10.0/lib/node_modules/@openai/codex/bin"
+printf '#!/usr/bin/env node\n' > "$NVM_VERS/v24.22.1/lib/node_modules/@openai/codex/bin/codex.js"
+printf '#!/usr/bin/env node\n' > "$NVM_VERS/v22.10.0/lib/node_modules/@openai/codex/bin/codex.js"
+ln -s "../lib/node_modules/@openai/codex/bin/codex.js" "$NVM_VERS/v24.22.1/bin/codex"
+ln -s "../lib/node_modules/@openai/codex/bin/codex.js" "$NVM_VERS/v22.10.0/bin/codex"
+cat > "$NVM_MANAGED_BIN/codex" <<'EOF'
+#!/bin/sh
+# Managed-By: sync-nvm-global-bins
+exec "/usr/bin/python3" -I "~/.claude/scripts/sync-nvm-global-bins.py" --exec "codex" -- "$@"
+EOF
+cat > "$NVM_MANAGED_BIN/npm" <<'EOF'
+#!/bin/bash
+[ "$*" = "view @openai/codex version" ] && { printf '0.168.0\n'; exit 0; }
+[ "$*" = "view @openai/codex time --json" ] && { printf '{"0.167.0":"2026-11-01T00:00:00.000Z","0.168.0":"2026-11-01T00:00:00.000Z"}\n'; exit 0; }
+[ "$*" = "view @openai/codex versions --json" ] && { printf '["0.167.0","0.168.0"]\n'; exit 0; }
+exit 1
+EOF
+chmod +x "$NVM_MANAGED_BIN/codex" "$NVM_MANAGED_BIN/npm"
+printf '[{"name":"@openai/codex","manager":"npm-g","source":"@openai/codex"}]' > "$TMP/m-nvm-shim.json"
+out_nvm_shim=$(PATH="$NVM_MANAGED_BIN:/usr/bin:/bin" CCTOOL_NVM_VERSIONS_DIR="$NVM_VERS" CCTOOL_NPM_ROOTS="$NVM_VERS/v24.22.1/lib/node_modules:$NVM_VERS/v22.10.0/lib/node_modules" CCTOOL_MANIFEST="$TMP/m-nvm-shim.json" CCTOOL_IGNORE="$TMP/i.txt" LOCAL_ANALYSIS_DATE=2026-11-15 "$HELPER" --json 2>/dev/null)
+python3 - "$out_nvm_shim" "$NVM_VERS/v24.22.1/lib/node_modules" "$NVM_VERS/v22.10.0/lib/node_modules" <<'PY' || fail "sync-nvm-global-bins shim 斷言失敗"
+import json, sys
+packet = json.loads(sys.argv[1])
+active_root, other_root = sys.argv[2:]
+assert packet['errors'] == [], packet['errors']
+assert packet['updates'] == [{
+  'name': '@openai/codex',
+  'manager': 'npm-g',
+  'current': '0.167.0',
+  'latest': '0.168.0',
+  'source': '@openai/codex',
+  'notes': '',
+  'active_install': active_root,
+  'other_installs': [{'version': '0.164.0', 'root': other_root}],
+}], packet['updates']
+print('✅ 測 4e sync-nvm-global-bins shim：透過受管轉發層辨識最新可用 nvm 版本為 active')
+PY
+
 UV_HOME="$TMP/uv-home"
 UV_BIN="$TMP/uv-bin"
 UV_META="$UV_HOME/.local/share/uv/tools/skillevaluator/lib/python3.13/site-packages/skillevaluator-0.2.1.dist-info"
@@ -371,7 +416,7 @@ echo "\$*" >> "$GH_LOG"
 case "\$*" in
   *"issues/90299 --jq .state"*) printf '$1\n' ;;
   *"issues/90537 --jq .state"*) printf '$2\n' ;;
-  *"contents/CHANGELOG.md"*) base64 < "$CL_FIXTURE" ;;
+  *"-H Accept: application/vnd.github.raw"*"contents/CHANGELOG.md"*) cat "$CL_FIXTURE" ;;
   *"releases?per_page=100"*) printf 'v2.1.251\nv2.1.250\n' ;;
   *) exit 1 ;;
 esac
@@ -380,13 +425,27 @@ chmod +x "$GH_BIN/gh"
 }
 
 pin_run(){
-  CCTOOL_PIN_CHECK=1 PATH="$GH_BIN:/usr/bin:/bin" \
+  CCTOOL_PIN_CHECK=1 CCTOOL_PIN_VERSION="2.1.246" CCTOOL_PIN_ISSUES="90299,90537" \
+  PATH="$GH_BIN:/usr/bin:/bin" \
   CCTOOL_MANIFEST="$TMP/m-empty.json" CCTOOL_IGNORE="$TMP/i.txt" \
   "$HELPER" --json 2>/dev/null
 }
 
 printf "[]" > "$TMP/m-empty.json"
 printf '## 2.1.251\n- Fixed something unrelated\n- Tab to toggle thinking (sticky across sessions)\n\n## 2.1.245\n- Fullscreen sticky prompt header fixed\n\n## ' > "$CL_FIXTURE"
+pin_stub closed closed
+: > "$GH_LOG"
+out_pin_default=$(CCTOOL_PIN_CHECK=1 PATH="$GH_BIN:/usr/bin:/bin" CCTOOL_MANIFEST="$TMP/m-empty.json" CCTOOL_IGNORE="$TMP/i.txt" "$HELPER" --json 2>/dev/null)
+[ ! -s "$GH_LOG" ] || fail "預設無 active pin 時不該呼叫 gh（log: $(cat "$GH_LOG")）"
+echo "$out_pin_default" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+hits = [u for u in d['updates'] if u.get('manager') == 'claude-code-pin']
+errs = [e for e in d['errors'] if e.get('name') == 'claude-code-pin']
+assert not hits and not errs, '預設無 active pin 時不該產出 finding 或 error: ' + str((hits, errs))
+print('✅ 測 6b 預設無 active pin：不打 gh API、無 finding、無 error')
+" || fail "pin 測 6b 斷言失敗"
+
 pin_stub open open
 : > "$GH_LOG"
 out_pin1=$(pin_run)
@@ -450,7 +509,7 @@ cat > "$GH_BIN/gh" <<EOF
 #!/bin/bash
 case "\$*" in
   *"issues/90299 --jq .state"*|*"issues/90537 --jq .state"*) printf 'open\n' ;;
-  *"contents/CHANGELOG.md"*) base64 < "$CL_FIXTURE" ;;
+  *"-H Accept: application/vnd.github.raw"*"contents/CHANGELOG.md"*) cat "$CL_FIXTURE" ;;
   *"releases?per_page=5"*) printf 'v2.1.257\nv2.1.256\nv2.1.255\nv2.1.254\nv2.1.253\n' ;;
   *"releases?per_page=100"*) printf 'v2.1.257\nv2.1.256\nv2.1.255\nv2.1.254\nv2.1.253\nv2.1.252\n' ;;
   *) exit 1 ;;
@@ -466,6 +525,21 @@ assert hits, '較早候選 release 的修復訊號不該被查詢窗口擠出'
 assert hits[0]['latest'] == 'v2.1.257', 'finding 應仍列最新候選 release: ' + str(hits[0])
 print('✅ 測 11 release 窗口：第六筆候選版本含修復訊號仍會 finding')
 " || fail "pin 測 11 斷言失敗"
+
+python3 - "$CL_FIXTURE" <<'PY'
+import sys
+with open(sys.argv[1], "w") as fh:
+    fh.write("## 2.1.252\n- Restored fullscreen sticky prompt header\n\n## 2.0.0\n" + ("x" * 1_300_000) + "\n")
+PY
+out_pin_big=$(pin_run)
+echo "$out_pin_big" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+hits = [u for u in d['updates'] if u.get('manager') == 'claude-code-pin']
+errs = [e for e in d['errors'] if e.get('name') == 'claude-code-pin']
+assert hits and not errs, '>1MB CHANGELOG raw 路徑失敗: ' + str((hits, errs))
+print('✅ 測 11b >1MB CHANGELOG：走 raw Accept header 不受 1MB JSON .content 限制')
+" || fail "pin 測 11b >1MB 斷言失敗"
 
 cat > "$GH_BIN/gh" <<'EOF'
 #!/bin/bash

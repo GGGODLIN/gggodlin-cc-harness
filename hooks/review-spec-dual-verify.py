@@ -534,7 +534,7 @@ def main():
         path,
         packet_file_valid,
         expected_bytes,
-        bool(state.get("selection_event_uuid")) if isinstance(state, dict) else False,
+        bool(state and (state.get("selection_event_uuid") or state.get("recommendation_event_uuid"))),
       )
       errors.extend(agent_errors)
       if model == "opus":

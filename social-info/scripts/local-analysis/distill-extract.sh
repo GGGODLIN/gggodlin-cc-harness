@@ -32,10 +32,11 @@ scanned=0
 extracted=0
 
 while IFS= read -r f; do
+  [ -f "$f" ] || continue
   scanned=$((scanned+1))
   sid=$(basename "$f" .jsonl)
 
-  date_str=$(stat -f '%Sm' -t '%Y-%m-%d' "$f")
+  date_str=$(stat -f '%Sm' -t '%Y-%m-%d' "$f" 2>/dev/null) || continue
 
   intent=$(jq -r 'select(.type=="user" and (.message.content|type)=="string" and ((.isMeta // false)|not)) | .message.content' "$f" 2>/dev/null \
     | grep -avE '^(<|Caveat:|Shell cwd|Stop hook|AUTO-SAVE)' | head -1 | tr -d '\n' | cut -c1-120 || true)
@@ -54,7 +55,7 @@ while IFS= read -r f; do
   jq -cn --arg d "$date_str" --arg s "$sid" --arg i "$intent" --arg q "$seq" \
     '{date:$d,session:$s,intent:$i,seq:$q}' >> "$TMP_NEW"
   extracted=$((extracted+1))
-done < <(find "$HOME/.claude/projects" -name '*.jsonl' -not -path '*/subagents/*' -newermt "$WINDOW_START")
+done < <(find "$HOME/.claude/projects" -name '*.jsonl' -not -path '*/subagents/*' -newermt "$WINDOW_START" 2>/dev/null || true)
 
 # 批次內 dedup：同 session id 多個 jsonl 實體（跨 cwd resume / 複製）→ 留 seq 最長那份
 if [ -s "$TMP_NEW" ]; then

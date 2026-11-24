@@ -50,6 +50,11 @@ INLINE_TITLES = {
   "Inline Comments per Finding（複製貼到 PR）",
 }
 SET_LOCATIONS_TITLE = "跨目標位置"
+TOOL_COMPARISON_TITLES = (
+  "審查工具比較",
+  "審查工具比較 (qualitative)",
+  "審查工具比較（qualitative）",
+)
 ATTRIBUTION_TITLE = "歸因三欄"
 OPEN_QUESTIONS_TITLE = "待確認問題"
 GROUP_KEEP_TITLES = (
@@ -59,6 +64,7 @@ GROUP_KEEP_TITLES = (
   PRIOR_REVIEW_TITLE,
   ATTRIBUTION_TITLE,
   *INLINE_TITLES,
+  *TOOL_COMPARISON_TITLES,
   "這次審查範圍",
 )
 LOCATION_HEADERS = ("group_id", "finding_uid", "target_identity", "file", "line", "source")
@@ -70,6 +76,7 @@ KEEP_TITLES = (
   PRIOR_REVIEW_TITLE,
   "React-doctor 機械掃描",
   *INLINE_TITLES,
+  *TOOL_COMPARISON_TITLES,
   "本輪限制",
   "本輪限制（沒做的部分）",
   "本輪未做/限制（對帳）",
@@ -184,7 +191,6 @@ def table_cells(line):
   raw_cells = []
   current = []
   backslashes = 0
-  in_code = False
   for character in line.strip():
     if character == "\\":
       current.append(character)
@@ -192,11 +198,7 @@ def table_cells(line):
       continue
     escaped = backslashes % 2 == 1
     backslashes = 0
-    if character == "`" and not escaped:
-      in_code = not in_code
-      current.append(character)
-      continue
-    if character == "|" and not escaped and not in_code:
+    if character == "|" and not escaped:
       raw_cells.append("".join(current))
       current = []
     else:
@@ -604,49 +606,61 @@ def finding_summary_scope(text):
   return ""
 
 
-def finding_summary_structure_is_valid(text):
-  _, sections = split_h2_sections(text)
-  summaries = [section for title, section in sections if title == "發現總覽"]
+def finding_summary_structure_check(text):
+  headings = find_headings(text, 2)
+  summaries = [index for index, heading in enumerate(headings) if heading[2] == "發現總覽"]
   if len(summaries) != 1:
-    return False
-  section = summaries[0]
+    return False, None
+  summary_index = summaries[0]
+  start = headings[summary_index][0]
+  end = headings[summary_index + 1][0] if summary_index + 1 < len(headings) else len(text)
+  section = text[start:end]
   h3_headings = find_headings(section, 3)
   inline_indexes = [index for index, heading in enumerate(h3_headings) if heading[2] in INLINE_TITLES]
   if len(inline_indexes) != 1 or inline_indexes[0] != 0:
-    return False
+    return False, None
   inline_start = h3_headings[0][0]
   summary_prefix = section[:inline_start]
   records, unclosed_fence = scan_markdown_lines(summary_prefix)
   if unclosed_fence is not None or any(not record["structural"] for record in records):
-    return False
+    return False, None
   lines = [record["line"].rstrip("\r\n") for record in records]
   if not lines or lines[0] != "## 發現總覽":
-    return False
+    return False, None
   index = 1
   while index < len(lines) and not lines[index].strip():
     index += 1
   if index >= len(lines):
-    return False
+    return False, None
   header = table_cells(lines[index])
   normalized = [cell.lower() for cell in header]
   required_headers = {"#", "問題", "最終建議", "action", "action 理由"}
   if not required_headers.issubset(set(normalized)):
-    return False
+    return False, None
   width = len(header)
+
+  def width_mismatch(row_index, actual):
+    line_number = len(text[:start].splitlines()) + row_index + 1
+    return False, f"line {line_number}: got {actual} columns, expected {width}"
+
   index += 1
   if index >= len(lines):
-    return False
+    return False, None
   separator = table_cells(lines[index])
-  if len(separator) != width or not is_table_separator(separator):
-    return False
+  if separator and len(separator) != width:
+    return width_mismatch(index, len(separator))
+  if not is_table_separator(separator):
+    return False, None
   index += 1
   row_count = 0
   while index < len(lines):
     cells = table_cells(lines[index])
     if not cells:
       break
-    if len(cells) != width or is_table_separator(cells) or extract_ordinal(lines[index]) is None:
-      return False
+    if len(cells) != width:
+      return width_mismatch(index, len(cells))
+    if is_table_separator(cells) or extract_ordinal(lines[index]) is None:
+      return False, None
     row_count += 1
     index += 1
   while index < len(lines) and not lines[index].strip():
@@ -664,10 +678,10 @@ def finding_summary_structure_is_valid(text):
       r"F-(?:0[1-9]|[1-9]\d+) finding_uid: [0-9a-f]{20} action=(?:auto-fix|ask-user|no-op)(?: inline=none)?",
       lines[index],
     ):
-      return False
+      return False, None
     uid_count += 1
     index += 1
-  return uid_count == row_count
+  return uid_count == row_count, None
 
 
 def extract_comment_payload_records(text):
@@ -922,7 +936,10 @@ def continuity_table_matches(section, expected):
   if len(header_indexes) != 1:
     return False
   header_index = header_indexes[0]
-  if header_index + 1 >= len(lines) or not is_table_separator(table_cells(lines[header_index + 1])):
+  if header_index + 1 >= len(lines):
+    return False
+  separator_cells = table_cells(lines[header_index + 1])
+  if not is_table_separator(separator_cells) or len(separator_cells) != len(headers):
     return False
   rows = []
   for line in lines[header_index + 2:]:
@@ -932,6 +949,15 @@ def continuity_table_matches(section, expected):
     if len(cells) != len(headers) or is_table_separator(cells):
       return False
     rows.append(cells)
+  raw = [line.rstrip() for line in section.splitlines() if line.strip()]
+  if raw and raw[0].startswith("## "):
+    raw = raw[1:]
+  if len(raw) != len(rows) + 2:
+    return False
+  if table_cells(raw[0]) != headers or table_cells(raw[1]) != separator_cells:
+    return False
+  if any(table_cells(raw_line) != cells for raw_line, cells in zip(raw[2:], rows)):
+    return False
   uids = [cells[0] for cells in rows]
   statuses = [cells[2] for cells in rows]
   actual = {status: statuses.count(status) for status in expected}
@@ -943,6 +969,16 @@ def continuity_table_matches(section, expected):
     and set(statuses) <= set(expected)
     and actual == expected
   )
+
+
+def continuity_structural_body_lines(section):
+  records, unclosed_fence = scan_markdown_lines(section)
+  if unclosed_fence is not None or any(not record["structural"] for record in records):
+    return None
+  lines = [record["line"].strip() for record in records if record["line"].strip()]
+  if lines and lines[0].startswith("## "):
+    lines = lines[1:]
+  return lines
 
 
 def continuity_state_is_valid(text, title):
@@ -961,10 +997,10 @@ def continuity_state_is_valid(text, title):
   state = state_lines[0]
   section = sections[0]
   if state == "**Prior review continuity**: N-A (no prior audit)":
-    return "N-A — no prior audit" in section
+    return continuity_structural_body_lines(section) == ["N-A — no prior audit"]
   skipped = re.fullmatch(r"\*\*Prior review continuity\*\*: SKIPPED \((.+)\)", state)
   if skipped:
-    return f"SKIPPED — {skipped.group(1)}" in section
+    return continuity_structural_body_lines(section) == [f"SKIPPED — {skipped.group(1)}"]
   checked = re.fullmatch(
     r"\*\*Prior review continuity\*\*: CHECKED \(fixed (\d+) / still-open (\d+) / stale (\d+)\)",
     state,
@@ -977,8 +1013,20 @@ def continuity_state_is_valid(text, title):
     "STALE": int(checked.group(3)),
   }
   if sum(expected.values()) == 0:
-    return "CHECKED — 0 actionable findings" in section
+    return continuity_structural_body_lines(section) == ["CHECKED — 0 actionable findings"]
   return continuity_table_matches(section, expected)
+
+
+def group_title_stable_id(text):
+  preamble, _ = split_h2_sections(text)
+  records, unclosed_fence = scan_markdown_lines(preamble)
+  if unclosed_fence is not None or any(not record["structural"] for record in records):
+    return None
+  nonblank = [record["line"].rstrip("\r\n") for record in records if record["line"].strip()]
+  if not nonblank:
+    return None
+  match = re.fullmatch(r"# Review set ([0-9a-f]{12}) Code Review 比較報告", nonblank[0])
+  return match.group(1) if match else None
 
 
 def group_source_checks(text):
@@ -999,8 +1047,10 @@ def group_source_checks(text):
   if declared:
     joined = "\n".join(declared)
     canonical_identity = "sha256:" + hashlib.sha256(joined.encode("utf-8")).hexdigest()
+  title_stable = group_title_stable_id(text)
   return {
     "review-set-identity": identities is not None and bool(targets),
+    "title-stable-id": title_stable is not None and identities is not None and title_stable == identities[0][7:19],
     "target-version-coverage": bool(targets) and len(targets) == len(set(targets)),
     "targets-line-unique": len(targets_line) == 1,
     "targets-match-versions": bool(declared) and sorted(targets) == declared,
@@ -1039,7 +1089,7 @@ def group_identity_lines(text):
   identities = [
     match.group(1)
     for line in header_lines
-    for match in [SET_IDENTITY_PATTERN.fullmatch(line) or SET_IDENTITY_PATTERN.match(line)]
+    for match in [SET_IDENTITY_PATTERN.fullmatch(line)]
     if match
   ]
   versions = [
@@ -1070,6 +1120,7 @@ def validate_source_contract(text, require_schema=False, allow_generation=True):
   if schema_count == 0:
     return
   inventory, invalid_rows, canonical_tables = extract_finding_rows(text)
+  summary_valid, summary_detail = finding_summary_structure_check(text)
   order, actions, priorities = extract_finding_actions(text)
   uid_map, uid_actions, no_inline, uid_order, invalid_uid_records = extract_strict_uid_records(text)
   payload_map, invalid_comment_blocks = extract_comment_block_contract(text)
@@ -1093,7 +1144,7 @@ def validate_source_contract(text, require_schema=False, allow_generation=True):
     "html-hidden-heading": not unclosed_html_block_hides_heading(text),
     "preamble-structure": preamble_structure_is_valid(text),
     "finding-table": canonical_tables == 1,
-    "finding-summary-structure": finding_summary_structure_is_valid(text),
+    "finding-summary-structure": summary_valid,
     "finding-inventory": len(inventory) == len(unique_inventory),
     "finding-sequence": inventory == list(range(1, len(inventory) + 1)),
     "finding-rows": not invalid_rows,
@@ -1130,7 +1181,8 @@ def validate_source_contract(text, require_schema=False, allow_generation=True):
   }
   failed = [name for name, passed in checks.items() if not passed]
   if failed:
-    raise ValueError(f"source report contract mismatch: {', '.join(failed)}")
+    detail = f"; {summary_detail}" if summary_detail else ""
+    raise ValueError(f"source report contract mismatch: {', '.join(failed)}{detail}")
 
 
 def validate_group_source_contract(text, require_schema=False, allow_generation=True,
@@ -1147,13 +1199,14 @@ def validate_group_source_contract(text, require_schema=False, allow_generation=
   if schema_count == 0:
     return
   if expected_stable_id is not None:
-    title_match = re.match(r"(?m)^# Review set ([0-9a-f]{12}) Code Review 比較報告$", text)
-    if not title_match or title_match.group(1) != expected_stable_id:
+    title_stable = group_title_stable_id(text)
+    if title_stable != expected_stable_id:
       raise ValueError("source report contract mismatch: title-stable-id")
     identity = group_identity_lines(text)
     if identity is not None and identity[0][7:19] != expected_stable_id:
       raise ValueError("source report contract mismatch: identity-stable-id")
   inventory, invalid_rows, canonical_tables = extract_finding_rows(text)
+  summary_valid, summary_detail = finding_summary_structure_check(text)
   order, actions, priorities = extract_finding_actions(text)
   uid_map, uid_actions, no_inline, uid_order, invalid_uid_records = extract_strict_uid_records(text)
   payload_map, invalid_comment_blocks = extract_comment_block_contract(text)
@@ -1171,7 +1224,7 @@ def validate_group_source_contract(text, require_schema=False, allow_generation=
     "html-hidden-heading": not unclosed_html_block_hides_heading(text),
     "preamble-structure": preamble_structure_is_valid(text, group=True, expected_stable_id=expected_stable_id),
     "finding-table": canonical_tables == 1,
-    "finding-summary-structure": finding_summary_structure_is_valid(text),
+    "finding-summary-structure": summary_valid,
     "finding-inventory": len(inventory) == len(unique_inventory),
     "finding-sequence": inventory == list(range(1, len(inventory) + 1)),
     "finding-rows": not invalid_rows,
@@ -1208,7 +1261,8 @@ def validate_group_source_contract(text, require_schema=False, allow_generation=
   checks.update(group_source_checks(text))
   failed = [name for name, passed in checks.items() if not passed]
   if failed:
-    raise ValueError(f"source report contract mismatch: {', '.join(failed)}")
+    detail = f"; {summary_detail}" if summary_detail else ""
+    raise ValueError(f"source report contract mismatch: {', '.join(failed)}{detail}")
 
 
 def extract_state_lines(text):
@@ -1435,14 +1489,14 @@ def canonical_report_identity(path):
     raise ValueError("report paths must be under the canonical report root") from error
   if len(relative.parts) == 2 and relative.parts[0] == GROUP_ROOT_NAME:
     for kind, pattern in GROUP_PATTERNS:
-      match = pattern.fullmatch(path.name)
+      match = pattern.fullmatch(normalized.name)
       if match:
         return "group", kind, match.group(1)
     raise ValueError("report paths must use canonical set report names")
   if len(relative.parts) != 2:
     raise ValueError("report paths must use exactly one repository directory")
   for kind, pattern in REPORT_PATTERNS:
-    match = pattern.fullmatch(path.name)
+    match = pattern.fullmatch(normalized.name)
     if match:
       return "single", kind, int(match.group(1))
   raise ValueError("report paths must use canonical PR report names")

@@ -414,6 +414,19 @@ class GroupProjectionTest(unittest.TestCase):
     self.assertIn("## 這次審查範圍", main_text)
     self.assertIn("底線未完成：typescript-reviewer 停審（CI 紅燈）", main_text)
 
+  def test_group_main_report_keeps_tool_comparison_section(self):
+    rendered = run_group("render", group_payload())
+    comparison = (
+      "\n## 審查工具比較\n\n### 誰抓到\n\n"
+      "| 組 | Gemini Pro（group/gemini-pro:high） | 裁決 |\n|---|---|---|\n"
+      "| F-01 問題 | ✅ HIGH→MEDIUM | ✅ 採納（Must Fix） |\n"
+    )
+    _, main = self.published_pair(rendered.rstrip("\n") + "\n" + comparison)
+    main_text = main.read_text()
+    self.assertIn("## 審查工具比較", main_text)
+    self.assertIn("| F-01 問題 | ✅ HIGH→MEDIUM | ✅ 採納（Must Fix） |", main_text)
+    self.assertLess(main_text.index("## 發現總覽"), main_text.index("## 審查工具比較"))
+
   def test_group_main_report_keeps_open_questions_section(self):
     rendered = run_group("render", group_payload())
     first_h2 = rendered.index("\n## ")

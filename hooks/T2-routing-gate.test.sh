@@ -536,14 +536,18 @@ fail() {
 }
 
 # payload <subagent_type> <prompt> <desc> <model> <transcript> [omit_st]
+# PAYLOAD_CWD 有值時才帶 cwd 欄位，其餘案例維持原 payload 形狀
 payload_for() {
   local session=$1 st=$2 p=$3 d=$4 m=$5 t=$6 omit=${7:-no}
-  jq -nc --arg st "$st" --arg p "$p" --arg d "$d" --arg m "$m" --arg t "$t" --arg omit "$omit" --arg session "$session" '
+  jq -nc --arg st "$st" --arg p "$p" --arg d "$d" --arg m "$m" --arg t "$t" --arg omit "$omit" --arg session "$session" --arg cwd "${PAYLOAD_CWD:-}" '
     {
       tool_name: "Agent",
       session_id: $session,
       tool_use_id: "tu_test",
-      transcript_path: $t,
+      transcript_path: $t
+    }
+    + (if $cwd == "" then {} else {cwd: $cwd} end)
+    + {
       tool_input: (
         {prompt: $p, description: $d}
         + (if $omit == "yes" then {} else {subagent_type: $st} end)
@@ -717,6 +721,7 @@ echo "── review-implement model selection authorization ──"
 SAVED_TEST_SESSION=$TEST_SESSION
 SAVED_PLAIN_TRANSCRIPT=$PLAIN_TRANSCRIPT
 SAVED_TEST_VENDOR=${TEST_VENDOR:-}
+SAVED_TEST_OPUS_MODEL=$TEST_OPUS_MODEL
 SAVED_TEST_FABLE_MODEL=$TEST_FABLE_MODEL
 TEST_SESSION=$REVIEW_SESSION
 PLAIN_TRANSCRIPT=$REVIEW_TRANSCRIPT
@@ -940,6 +945,7 @@ check "review-implement unknown letter + exact menu → deny unbound alias" \
 TEST_SESSION=$SAVED_TEST_SESSION
 PLAIN_TRANSCRIPT=$SAVED_PLAIN_TRANSCRIPT
 TEST_VENDOR=$SAVED_TEST_VENDOR
+TEST_OPUS_MODEL=$SAVED_TEST_OPUS_MODEL
 TEST_FABLE_MODEL=$SAVED_TEST_FABLE_MODEL
 TEST_VENDOR=gpt
 TEST_FABLE_MODEL='gpt-5.6-sol(max)'
@@ -1267,6 +1273,42 @@ check "16 未知 agent 無定義檔 → deny（fail-closed）" \
   1 0 deny "enforce_routed_required:some-unknown-agent" \
   "some-unknown-agent" "做點事" "" "" "$PLAIN_TRANSCRIPT"
 
+# 16p：專案層定義檔（專案層唯讀查核 agent）。
+# 只認派工當下 cwd 的 .claude/agents/<name>.md；名字含 / 或 .. 一律不認。
+PROJ_WITH_AGENT="$TMP/proj-with-agent"
+PROJ_EMPTY="$TMP/proj-empty"
+mkdir -p "$PROJ_WITH_AGENT/.claude/agents" "$PROJ_EMPTY/.claude/agents"
+printf -- '---\nname: project-only-checker\ndescription: test\n---\n' > "$PROJ_WITH_AGENT/.claude/agents/project-only-checker.md"
+
+PAYLOAD_CWD="$PROJ_WITH_AGENT" \
+check "16p-a cwd 有專案層定義檔 → allow" \
+  1 0 pass-e1 "enforce_allowed:project-only-checker" \
+  "project-only-checker" "唯讀查核" "" "" "$PLAIN_TRANSCRIPT"
+
+PAYLOAD_CWD="$PROJ_EMPTY" \
+check "16p-b 同名但 cwd 沒有定義檔 → deny（正向對照為 16p-a）" \
+  1 0 deny "enforce_routed_required:project-only-checker" \
+  "project-only-checker" "唯讀查核" "" "" "$PLAIN_TRANSCRIPT"
+
+PAYLOAD_CWD="$PROJ_WITH_AGENT" \
+check "16p-c cwd 有別的定義檔、這個名字沒有 → deny" \
+  1 0 deny "enforce_routed_required:other-project-agent" \
+  "other-project-agent" "做點事" "" "" "$PLAIN_TRANSCRIPT"
+
+check "16p-d payload 沒帶 cwd → 專案層名字 deny" \
+  1 0 deny "enforce_routed_required:project-only-checker" \
+  "project-only-checker" "唯讀查核" "" "" "$PLAIN_TRANSCRIPT"
+
+PAYLOAD_CWD="$PROJ_EMPTY" \
+check "16p-e 名字用 ../ 跳到別的專案定義檔 → deny" \
+  1 0 deny "enforce_routed_required:../../../proj-with-agent/.claude/agents/project-only-checker" \
+  "../../../proj-with-agent/.claude/agents/project-only-checker" "唯讀查核" "" "" "$PLAIN_TRANSCRIPT"
+
+PAYLOAD_CWD="$PROJ_WITH_AGENT" \
+check "16p-f cwd 有專案層定義檔也不放行 general-purpose" \
+  1 0 deny "enforce_routed_required:general-purpose" \
+  "general-purpose" "做點事" "" "" "$PLAIN_TRANSCRIPT"
+
 check_mech "17 sentinel on + description marker → allow" \
   1 pass-e1 "mech_opt_in_ok" "<mech-ok>" \
   "routed-mech" "依固定格式轉換" "<mech-ok> mechanical transform" "" "$PLAIN_TRANSCRIPT"
@@ -1303,6 +1345,9 @@ check "25 sentinel off + workflow routed-mech 無 marker → pass-e2" \
   0 0 pass-e2 "workflow_context" \
   "routed-mech" "workflow 內機械派工" "" "" "$WF_TRANSCRIPT"
 
+TEST_VENDOR=""
+TEST_OPUS_MODEL=""
+TEST_FABLE_MODEL=""
 DUAL_ISSUE=$(CC_VENDOR="" ANTHROPIC_DEFAULT_OPUS_MODEL="" ANTHROPIC_DEFAULT_FABLE_MODEL="" \
   REVIEW_SPEC_DUAL_RUNTIME_DIR="$DUAL_RUNTIME" \
   "$DUAL_HELPER" issue \

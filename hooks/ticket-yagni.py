@@ -26,13 +26,14 @@ Threat model（動工前寫）：
   條件＝唯一、票號吻合、存在、非 symlink，任一不滿足就回到原 fallback（不猜）。路徑只是資料、不是授權——
   登記還要求實作類 agent、description 票號與 decision.tickets 吻合；reviewer 即使提到票號或票檔也不登記。
   runner 端仍用既有 --ticket-file 契約驗票號與 issues/ 層級，雙邊同一套判定。
-- 字串比對型：票號**只從 description 抓**（2026-09-10 收窄：原本 prompt 也算，導致 review-implement 的 reviewer
-  因 prompt 引用 `NN-xxx.md` 被誤登記成票 worker，對空 diff 報 RuntimeError；deny 訊息本來就寫「description 帶
-  Ticket NN 才會自動登記」，此改動是讓實作對齊已宣告的契約）、Status 用 regex 認、交件用 <task-id> 認。
-  不承諾完整語意，只認常見入口；認不出票號就不登記，而關票 gate 對「沒登記」是 deny（fail closed），不是放行。
+- 字串比對型：票號優先從 description 抓；若 subagent_type 屬 WORKER_AGENT_TYPES 且 description 未命中，
+  回退從 prompt 抓唯一明示絕對路徑 `/issues/NN-*.md`（非實作類 reviewer 已被 WORKER_AGENT_TYPES 排除，不會誤登）。
+  Status 用 regex 認、交件用 <task-id> 認。不承諾完整語意，只認常見入口；認不出票號就不登記，
+  而關票 gate 對「沒登記」是 deny（fail closed），不是放行。
 - 前景 worker 若先 commit，PostToolUse 才取交件後 HEAD 當 base，可能把差異判空並 skip；這條舊路徑不保證有效審查，本次不新增事前 hook。
 - 明文不保證：main 用 Bash 直接改票檔（只有 Edit|Write|MultiEdit 有 matcher，v1 不擋 Bash）；
-  main 拿到 verdict 後有沒有真的砍（gate 只擋一次，第二次放行）；worker 自寫測試護著膨脹（由 implement SKILL 規則處理）。
+  `delivered` 只驗相對首次攔截 baseline 有無推進（目標 repo HEAD、排除本票檔的 git status 狀態與 mtime/size、
+  或票檔 Verification Log 區段文字變更），不驗語意上是否真的照 verdict 刪減；worker 自寫測試護著膨脹（由 implement SKILL 規則處理）。
 - 降級明寫：runner／relay 失敗、pending 超過 TTL → gate 放行並記 audit。這是使用者拍板的 fail-open，
   把 gate 從純安全型降為「登記面安全、審查面提示」；要改回全 fail-closed 改 FAIL_OPEN_ON_ERROR。
 - 空 diff 走獨立 skip 路徑（2026-09-13 首輪 review：47 次 runner 失敗有 14 次是空 diff 被當失敗，
@@ -47,7 +48,7 @@ Surface 四分表：
   Locked：本檔、runner、settings 三段（改動走 git commit；bootstrap＝第一次 settings 登記；update＝改檔跑 .test.sh；
           recovery＝touch ~/.claude/hooks/ticket-yagni.off 三支全靜默）
   Editable：票檔（main 改 Status）、worker worktree
-  Append-only：logs/ticket-yagni/<session>/workers.jsonl、audit.jsonl（O_APPEND|O_NOFOLLOW，非 regular file 拒寫）
+  Append-only：logs/ticket-yagni/<session>/workers.jsonl、audit.jsonl（O_APPEND|O_NOFOLLOW，非 regular file 拒寫）；delivered 狀態檔亦限自有單連結 regular file（O_NOFOLLOW）
   Human-controlled：sentinel、settings 登記、FAIL_OPEN_ON_ERROR 政策
 
 測試：bash ~/.claude/hooks/ticket-yagni.test.sh
@@ -77,12 +78,13 @@ PI_START_STATUS = {'ready', 'running', 'completed'}
 PI_FILE_MAX = 2_000_000
 
 TICKET_RES = [
-  re.compile(r'(?:\bticket|\bissue|票)\s*#?\s*0?(\d{1,2})\b', re.I),
+  re.compile(r'(?:(?<![A-Za-z0-9_])(?:ticket|issue)|票)\s*#?\s*(?!0\d{2})0?(\d{1,2})(?![0-9])', re.I),
   re.compile(r'/issues/(\d{2})-[^/\s]*\.md'),
-  re.compile(r'(?<![\w/])(\d{2})-[a-z0-9][a-z0-9-]*\.md\b'),
+  re.compile(r'(?<![A-Za-z0-9_/-])(\d{2})-[a-z0-9][a-z0-9-]*\.md(?![A-Za-z0-9_-])'),
 ]
 STATUS_RE = re.compile(r'\*\*Status:?\*\*:?[^\n]*?\b(complete|completed|done|implemented|shipped)\b|\*\*Status:?\*\*:?[^\n]*?(完成|已完成)', re.I)
 TICKET_FILE_RE = re.compile(r'/issues/(\d{2})-[^/]*\.md$')
+VLOG_HEADING_RE = re.compile(r'^(#{1,6})\s+Verification Log\b[^\n]*$', re.I | re.M)
 AGENT_ID_RE = re.compile(r'agentId:\s*([0-9A-Za-z_-]{6,})')
 WORKER_AGENT_TYPES = {'routed-impl', 'routed-secure', 'codex:codex-rescue'}
 TASK_ID_RE = re.compile(r'<task-id>\s*([^<\s]+)\s*</task-id>')
@@ -185,14 +187,24 @@ def git_head(path):
   return r.stdout.strip() if r.returncode == 0 else None
 
 
-def pick_worktree(prompt, cwd):
+def pick_worktree(prompt, cwd, ticket_file=None):
   cwd_top = git_toplevel(cwd) if cwd else None
+  claude_home = os.path.realpath(os.path.expanduser('~/.claude'))
+  ticket_top = git_toplevel(os.path.dirname(ticket_file)) if ticket_file and os.path.isdir(os.path.dirname(ticket_file)) else None
+  if ticket_top:
+    return ticket_top
+  allow_claude_home = (cwd_top and os.path.realpath(cwd_top) == claude_home)
   for cand in re.findall(r'(/[^\s\'"`<>|,;:，。、；：（）「」『』]+)', prompt or ''):
     cand = cand.rstrip('.)')
     if not os.path.isdir(cand):
       continue
     top = git_toplevel(cand)
-    if top and top != cwd_top:
+    if not top:
+      continue
+    # 避免 prompt 引用 ~/.claude/skills/... 等全域規範路徑時，誤將使用者設定庫綁成待審 worktree
+    if not allow_claude_home and os.path.realpath(top) == claude_home:
+      continue
+    if top != cwd_top:
       return top
   return cwd_top or cwd
 
@@ -209,7 +221,30 @@ UNREVIEWED_LABELS = {
   'runner-spawn': 'runner 無法啟動',
   'no-result': 'runner 沒有產出結果（可能崩潰）',
 }
-PROMPT_TICKET_FILE_RE = re.compile(r'(/[^\s\'"`<>|,;:，。、；：（）「」『』]*?/issues/(\d{2})-[^/\s\'"`<>|,;:，。、；：（）「」『』]+\.md)')
+PROMPT_TICKET_FILE_RE = re.compile(
+  r'(?<![^\s\'"`<>|,;:，。、；：（）「」『』=(\[])(/[^\s\'"`<>|,;:，。、；：（）「」『』]*?/issues/(\d{2})-[^/\s\'"`<>|,;:，。、；：（）「」『』]*\.md)'
+)
+
+
+def find_prompt_ticket(prompt, valid, subagent_type):
+  if subagent_type not in WORKER_AGENT_TYPES or not prompt:
+    return None
+  existing = []
+  matched = []
+  for m in PROMPT_TICKET_FILE_RE.finditer(prompt):
+    path = re.sub(r'^/+', '/', m.group(1).rstrip('.)'))
+    tid = m.group(2)
+    if tid not in valid:
+      continue
+    if tid not in matched:
+      matched.append(tid)
+    if os.path.isfile(path) and not os.path.islink(path) and tid not in existing:
+      existing.append(tid)
+  if len(existing) == 1:
+    return existing[0]
+  if len(existing) > 1:
+    return None
+  return matched[0] if len(matched) == 1 else None
 
 
 def find_ticket_file_from_prompt(prompt, ticket):
@@ -217,7 +252,7 @@ def find_ticket_file_from_prompt(prompt, ticket):
     return None
   cands = []
   for m in PROMPT_TICKET_FILE_RE.finditer(prompt):
-    path = m.group(1).rstrip('.)')
+    path = re.sub(r'^/+', '/', m.group(1).rstrip('.)'))
     if m.group(2) != ticket:
       continue
     if not os.path.isfile(path) or os.path.islink(path):
@@ -586,12 +621,12 @@ def checked_pi_registration(ctx, decision, ticket, description, existing=None):
   except UnicodeError:
     raise PiJobError('prompt-file')
   base = manifest.get('base_sha')
-  worktree = pick_worktree(prompt, cwd)
+  extracted = find_ticket_file_from_prompt(prompt, ticket) or find_openspec_tasks_from_prompt(prompt, ticket)
+  worktree = pick_worktree(prompt, cwd, ticket_file=extracted)
   head = git_head(worktree) if worktree else None
   pinned = existing.get('base_sha') if existing else None
   if not isinstance(base, str) or SHA_RE.fullmatch(base) is None or (pinned is None and head != base) or (pinned is not None and base != pinned):
     raise PiJobError('base')
-  extracted = find_ticket_file_from_prompt(prompt, ticket) or find_openspec_tasks_from_prompt(prompt, ticket)
   if 'ticket_file' in manifest and manifest.get('ticket_file') != extracted:
     raise PiJobError('ticket-file')
   entry = {'ts': now(), 'agent_id': ctx['job_id'], 'ticket': ticket, 'run_id': decision['run_id'],
@@ -732,17 +767,20 @@ def cmd_pi_deliver(inp):
 
 
 def cmd_register(inp, sync=False):
-  session = inp.get('session_id') or ''
+  raw_session = inp.get('session_id')
+  session = raw_session if isinstance(raw_session, str) else ''
   decision = newest_decision(session)
   if not decision:
     return 0
-  ti = inp.get('tool_input') or {}
-  if ti.get('subagent_type') not in WORKER_AGENT_TYPES:
-    audit('register-non-worker', session=session, agent_type=ti.get('subagent_type'))
+  raw_ti = inp.get('tool_input')
+  ti = raw_ti if isinstance(raw_ti, dict) else {}
+  subagent_type = ti.get('subagent_type')
+  if subagent_type not in WORKER_AGENT_TYPES:
+    audit('register-non-worker', session=session, agent_type=subagent_type)
     return 0
   description = str(ti.get('description') or '')
   prompt = str(ti.get('prompt') or '')
-  ticket = find_ticket(description, decision['tickets'])
+  ticket = find_ticket(description, decision['tickets']) or find_prompt_ticket(prompt, decision['tickets'], subagent_type)
   if not ticket:
     audit('register-unmatched', session=session, description=description[:200])
     return 0
@@ -753,7 +791,8 @@ def cmd_register(inp, sync=False):
   foreground = state == 'foreground'
   agent = f'fg-{(inp.get("tool_use_id") or str(int(now())))[:24]}' if foreground else identity
   cwd = inp.get('cwd') or os.getcwd()
-  worktree = pick_worktree(prompt, cwd)
+  ticket_file = find_ticket_file_from_prompt(prompt, ticket) or find_openspec_tasks_from_prompt(prompt, ticket)
+  worktree = pick_worktree(prompt, cwd, ticket_file=ticket_file)
   base = git_head(worktree) if worktree else None
   if not base:
     audit('register-no-git', session=session, ticket=ticket, worktree=worktree)
@@ -761,7 +800,6 @@ def cmd_register(inp, sync=False):
       return emit_context(unreviewed_text(ticket, 'runner-error', f'worktree 不是 git repo，取不到 base：{worktree}',
                                           session, decision['run_id'], worktree, '<dispatch_base_sha>'))
     return 0
-  ticket_file = find_ticket_file_from_prompt(prompt, ticket) or find_openspec_tasks_from_prompt(prompt, ticket)
   entry = {'ts': now(), 'agent_id': agent, 'ticket': ticket, 'run_id': decision['run_id'], 'worktree': worktree,
            'base_sha': base, 'foreground': foreground, 'description': description[:200]}
   if ticket_file:
@@ -785,7 +823,8 @@ def cmd_deliver(inp):
   if not m:
     return 0
   task_id = m.group(1)
-  session = inp.get('session_id') or ''
+  raw_session = inp.get('session_id')
+  session = raw_session if isinstance(raw_session, str) else ''
   decision = newest_decision(session)
   if not decision:
     return 0
@@ -799,7 +838,7 @@ def cmd_deliver(inp):
     audit('deliver-not-completed', session=session, ticket=entry['ticket'], status=st.group(1))
     return 0
   sdir = state_dir(session, entry['run_id'], entry['ticket'], task_id)
-  if (sdir / 'verdict.json').exists() or (sdir / 'error.json').exists():
+  if (sdir / 'verdict.json').exists() or (sdir / 'error.json').exists() or (sdir / 'skip.json').exists():
     audit('deliver-already-reviewed', session=session, ticket=entry['ticket'], agent=task_id)
     return 0
   pending = sdir / 'pending.json'
@@ -833,22 +872,221 @@ def new_text(inp):
   return ''
 
 
-def cmd_gate(inp):
+def read_regular_text(path, max_bytes=PI_FILE_MAX, allow_hardlink=False):
+  try:
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+  except OSError:
+    return None
+  try:
+    st = os.fstat(fd)
+    if not stat.S_ISREG(st.st_mode) or st.st_uid != os.getuid() or st.st_size > max_bytes:
+      return None
+    if not allow_hardlink and st.st_nlink != 1:
+      return None
+    raw = os.read(fd, max_bytes + 1)
+  except OSError:
+    return None
+  finally:
+    os.close(fd)
+  if len(raw) > max_bytes:
+    return None
+  return raw.decode('utf-8', errors='replace')
+
+
+def write_regular_json(path, payload):
+  try:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+      st = path.lstat()
+      if stat.S_ISLNK(st.st_mode) or not stat.S_ISREG(st.st_mode) or st.st_nlink != 1 or st.st_uid != os.getuid():
+        return False
+    except FileNotFoundError:
+      pass
+  except OSError:
+    return False
+  tmp = path.parent / f'.{path.name}.tmp.{os.getpid()}.{time.time_ns()}'
+  try:
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600)
+  except OSError:
+    return False
+  ok = False
+  try:
+    if not stat.S_ISREG(os.fstat(fd).st_mode):
+      return False
+    os.write(fd, (json.dumps(payload, ensure_ascii=False) + '\n').encode('utf-8'))
+    ok = True
+  except OSError:
+    return False
+  finally:
+    os.close(fd)
+    if not ok:
+      try:
+        tmp.unlink()
+      except OSError:
+        pass
+  try:
+    os.replace(tmp, path)
+    return True
+  except OSError:
+    try:
+      tmp.unlink()
+    except OSError:
+      pass
+    return False
+
+
+def read_ticket_text(fpath):
+  if not fpath:
+    return '', True
+  p = Path(fpath)
+  try:
+    st = p.lstat()
+  except FileNotFoundError:
+    return '', False
+  except OSError:
+    return None, True
+  if stat.S_ISLNK(st.st_mode) or not stat.S_ISREG(st.st_mode):
+    return None, True
+  text = read_regular_text(p, allow_hardlink=True)
+  return (text, False) if text is not None else (None, True)
+
+
+def extract_verification_log(text):
+  if not text:
+    return ''
+  m = VLOG_HEADING_RE.search(text)
+  if not m:
+    return ''
+  level = len(m.group(1))
+  rest = text[m.end():]
+  nxt = re.search(rf'^#{{1,{level}}}\s+\S', rest, re.M)
+  body = rest[:nxt.start()] if nxt else rest
+  return '\n'.join(line.strip() for line in body.splitlines() if line.strip())
+
+
+def projected_ticket_text(disk_text, inp):
+  tool = inp.get('tool_name') or ''
   ti = inp.get('tool_input') or {}
+  if tool == 'Write':
+    return str(ti.get('content') or '')
+  base = disk_text or ''
+  if tool == 'Edit':
+    old = str(ti.get('old_string') or '')
+    new = str(ti.get('new_string') or '')
+    if old and old in base:
+      return base.replace(old, new) if ti.get('replace_all') else base.replace(old, new, 1)
+    return new if VLOG_HEADING_RE.search(new) else base
+  if tool == 'MultiEdit':
+    cur = base
+    saw_vlog_heading = False
+    for e in ti.get('edits') or []:
+      if not isinstance(e, dict):
+        continue
+      old = str(e.get('old_string') or '')
+      new = str(e.get('new_string') or '')
+      if old and old in cur:
+        cur = cur.replace(old, new) if e.get('replace_all') else cur.replace(old, new, 1)
+      elif VLOG_HEADING_RE.search(new):
+        cur = cur + '\n' + new
+        saw_vlog_heading = True
+    return cur if (cur != base or saw_vlog_heading) else base
+  return base
+
+
+def git_repo_snapshot(repo_root, exclude_real):
+  try:
+    repo_real = os.path.realpath(repo_root)
+    hr = subprocess.run(['git', '--no-optional-locks', '-C', repo_real, 'rev-parse', 'HEAD'],
+                        capture_output=True, text=True, timeout=20)
+    if hr.returncode != 0:
+      return None
+    head = hr.stdout.strip()
+    sr = subprocess.run(['git', '--no-optional-locks', '-C', repo_real, 'status', '--porcelain', '-z', '-uall'],
+                        capture_output=True, text=True, timeout=20)
+    if sr.returncode != 0:
+      return None
+  except (OSError, subprocess.TimeoutExpired):
+    return None
+  parts = sr.stdout.split('\0')
+  entries = []
+  i = 0
+  while i < len(parts):
+    tok = parts[i]
+    if not tok:
+      i += 1
+      continue
+    xy = tok[:2]
+    rel = tok[3:]
+    orig = None
+    if xy[:1] in ('R', 'C') and i + 1 < len(parts):
+      orig = parts[i + 1]
+      i += 2
+    else:
+      i += 1
+    full = os.path.realpath(os.path.join(repo_real, rel))
+    if exclude_real and full == exclude_real:
+      if orig is None or os.path.realpath(os.path.join(repo_real, orig)) == exclude_real:
+        continue
+    if len(entries) < 2000:
+      try:
+        st = os.lstat(os.path.join(repo_real, rel))
+        meta = [st.st_mtime_ns, st.st_size]
+      except OSError:
+        meta = [None, None]
+    else:
+      meta = [None, None]
+    entries.append([xy, rel, orig, meta[0], meta[1]])
+  entries.sort()
+  porcelain = '\n'.join(f'{e[0]} {e[1]}' + (f' <- {e[2]}' if e[2] else '') for e in entries)
+  return {'head': head, 'porcelain': porcelain, 'entries': entries}
+
+
+def collect_baseline_repos(entry, verdict_data, inp, fpath, exclude_real):
+  raw_cands = [
+    entry.get('worktree'),
+    verdict_data.get('worktree') if isinstance(verdict_data, dict) else None,
+    inp.get('cwd'),
+    str(Path(fpath).parent) if fpath else None,
+  ]
+  snaps = {}
+  incomplete = False
+  for cand in raw_cands:
+    if not isinstance(cand, str) or not cand.strip() or not os.path.isdir(cand):
+      continue
+    top = git_toplevel(cand)
+    if not top:
+      continue
+    real_top = os.path.realpath(top)
+    if real_top in snaps:
+      continue
+    snap = git_repo_snapshot(real_top, exclude_real)
+    if snap is None:
+      incomplete = True
+      continue
+    snaps[real_top] = snap
+  if not snaps:
+    incomplete = True
+  return snaps, incomplete
+
+
+def cmd_gate(inp):
+  raw_ti = inp.get('tool_input')
+  ti = raw_ti if isinstance(raw_ti, dict) else {}
   fpath = str(ti.get('file_path') or '')
   fm = TICKET_FILE_RE.search(fpath)
   if not fm:
     return 0
   if not STATUS_RE.search(new_text(inp)):
     return 0
-  session = inp.get('session_id') or ''
-  decision = newest_decision(session)
-  if not decision:
-    return 0
+  raw_session = inp.get('session_id')
+  session = raw_session if isinstance(raw_session, str) else ''
   ticket = fm.group(1)
-  if ticket not in decision['tickets']:
-    return 0
   try:
+    decision = newest_decision(session)
+    if not decision:
+      return 0
+    if ticket not in decision['tickets']:
+      return 0
     entries = [e for e in read_registry(session) if e.get('ticket') == ticket]
     remedy = (f'補救：python3 {RUNNER} --manual --session {session} --run {decision["run_id"]} --ticket {ticket} '
               f'--worktree <worker worktree> --base <dispatch_base_sha>，跑完再改 Status。停用開關：touch {OFF}')
@@ -860,8 +1098,8 @@ def cmd_gate(inp):
       # Inline（main 自己做、沒有 worker）沒有 worker worktree 與 dispatch base；給一條填好的指令，
       # 只留 base 要人填 —— runner 比 base 到目前工作樹，base 用整條 branch 會把別張票算進來
       top = git_toplevel(str(inp.get('cwd') or '')) or '<repo 根目錄>'
-      inline = (f'補救（Inline、沒有 worker）：python3 {RUNNER} --manual --session {session} --ticket {ticket} '
-                f'--ticket-file {fpath} --worktree {top} --base <這張票開工前的 HEAD>，跑完再改 Status。'
+      inline = (f'補救（Inline、沒有 worker）：python3 {RUNNER} --manual --session {session} --run {decision["run_id"]} '
+                f'--ticket {ticket} --ticket-file {fpath} --worktree {top} --base <這張票開工前的 HEAD>，跑完再改 Status。'
                 f'base 用開工前記下的 HEAD；沒記到就用這張票第一個 commit 的前一個。已經開始下一張票的話，'
                 f'--worktree 改成停在這張票最後一個 commit 的臨時 detached worktree，否則後面的票會被算進來。停用開關：touch {OFF}')
       return deny(f'票 {ticket} 沒有登記 worker，YAGNI 未審，不能標完成。派工 description 帶「Ticket {ticket}」才會自動登記。{inline}')
@@ -874,14 +1112,97 @@ def cmd_gate(inp):
     if verdict.exists():
       data = json.loads(verdict.read_text())
       flagged = [v for v in data.get('verdicts', []) if v.get('verdict') in ('kill', 'demote')]
-      if flagged and not delivered.exists():
-        delivered.write_text(str(now()))
+      if not flagged:
+        audit('gate-allow', session=session, ticket=ticket, flagged=0, delivered=delivered.exists())
+        return 0
+      items = '；'.join(f'{v["verdict"]} {v.get("item")}：{v.get("reason", "")}' for v in flagged[:30])
+      exclude_real = os.path.realpath(fpath) if fpath else None
+      try:
+        deliv_st = delivered.lstat()
+      except FileNotFoundError:
+        deliv_st = None
+      if deliv_st is None:
+        disk_text, ticket_err = read_ticket_text(fpath)
+        base_vlog = extract_verification_log(disk_text or '')
+        repo_snaps, repo_incomplete = collect_baseline_repos(entry, data, inp, fpath, exclude_real)
+        baseline = {
+          'schema': 1,
+          'ts': now(),
+          'denied_count': 1,
+          'ticket_file': fpath,
+          'verification_log': base_vlog,
+          'verification_log_len': len(base_vlog),
+          'repos': repo_snaps,
+          'inspect_incomplete': bool(ticket_err or repo_incomplete),
+        }
+        if not write_regular_json(delivered, baseline):
+          audit('gate-delivered-write-failed', session=session, ticket=ticket)
         audit('gate-deny-verdict', session=session, ticket=ticket, flagged=len(flagged))
-        items = '；'.join(f'{v["verdict"]} {v.get("item")}：{v.get("reason", "")}' for v in flagged[:30])
-        return deny(f'票 {ticket} 的 YAGNI verdict 有 {len(flagged)} 項要處理（kill／demote），先送回 worker 處理、跑派工前測試，再改 Status。'
-                    f'清單：{items}。verdict 檔：{verdict}。這個 deny 只出現一次，下一次改 Status 放行。')
-      audit('gate-allow', session=session, ticket=ticket, flagged=len(flagged), delivered=delivered.exists())
-      return 0
+        return deny(
+          f'票 {ticket} 的 YAGNI verdict 有 {len(flagged)} 項要處理（kill／demote）：請先套用刪減（並跑派工前既有測試與本票驗收測試），'
+          f'或在本票檔的 Verification Log 明確記錄處置結論，再改 Status。清單：{items}。verdict 檔：{verdict}。停用開關：touch {OFF}'
+        )
+      if stat.S_ISLNK(deliv_st.st_mode) or not stat.S_ISREG(deliv_st.st_mode) or deliv_st.st_nlink != 1 or deliv_st.st_uid != os.getuid():
+        audit('gate-deny-bad-delivered', session=session, ticket=ticket)
+        return deny(f'票 {ticket} 的 delivered 狀態檔異常（非一般單連結自有檔案），安全型預設擋下。停用開關：touch {OFF}')
+      raw_deliv = read_regular_text(delivered)
+      try:
+        base_state = json.loads(raw_deliv) if raw_deliv is not None else None
+      except ValueError:
+        base_state = None
+      if not isinstance(base_state, dict) or base_state.get('schema') != 1:
+        if FAIL_OPEN_ON_ERROR:
+          audit('gate-allow-fail-open-inspect', session=session, ticket=ticket, reason='invalid-delivered-baseline')
+          return 0
+        audit('gate-deny-inspect-error', session=session, ticket=ticket, reason='invalid-delivered-baseline')
+        return deny(f'票 {ticket} 的 YAGNI delivered 基準無法解析且政策為 fail-closed。{remedy}')
+      disk_text, ticket_err = read_ticket_text(fpath)
+      base_vlog = str(base_state.get('verification_log') or '')
+      if not ticket_err:
+        disk_vlog = extract_verification_log(disk_text)
+        proj_vlog = extract_verification_log(projected_ticket_text(disk_text, inp))
+        if disk_vlog != base_vlog or proj_vlog != base_vlog:
+          audit('gate-allow', session=session, ticket=ticket, flagged=len(flagged), delivered=True, progress='verification-log')
+          return 0
+      else:
+        inline_vlog = extract_verification_log(new_text(inp))
+        if inline_vlog and inline_vlog != base_vlog:
+          audit('gate-allow', session=session, ticket=ticket, flagged=len(flagged), delivered=True, progress='verification-log')
+          return 0
+      base_repos = base_state.get('repos') if isinstance(base_state.get('repos'), dict) else {}
+      inspect_err = bool(base_state.get('inspect_incomplete')) or ticket_err or not base_repos
+      for repo_path, old_snap in base_repos.items():
+        if not isinstance(old_snap, dict) or not os.path.isdir(repo_path):
+          inspect_err = True
+          continue
+        cur_snap = git_repo_snapshot(repo_path, exclude_real)
+        if cur_snap is None:
+          inspect_err = True
+          continue
+        if cur_snap.get('head') != old_snap.get('head'):
+          audit('gate-allow', session=session, ticket=ticket, flagged=len(flagged), delivered=True, progress='git-head')
+          return 0
+        if cur_snap.get('entries') != old_snap.get('entries'):
+          audit('gate-allow', session=session, ticket=ticket, flagged=len(flagged), delivered=True, progress='git-status')
+          return 0
+      if inspect_err:
+        if FAIL_OPEN_ON_ERROR:
+          audit('gate-allow-fail-open-inspect', session=session, ticket=ticket)
+          return 0
+        audit('gate-deny-inspect-error', session=session, ticket=ticket)
+        return deny(f'票 {ticket} 的 YAGNI 狀態檢查無法判定且政策為 fail-closed。{remedy}')
+      denied_count = int(base_state.get('denied_count') or 1) + 1
+      base_state['denied_count'] = denied_count
+      base_state['last_denied_ts'] = now()
+      write_regular_json(delivered, base_state)
+      audit('gate-deny-verdict-retry', session=session, ticket=ticket, flagged=len(flagged), denied_count=denied_count)
+      prefix = (f'已連擋 {denied_count} 次（目標 repo 與本票 Verification Log 均未推進）。'
+                if denied_count >= 3 else '上次攔截後目標 repo 與本票 Verification Log 均未變更。')
+      return deny(
+        f'票 {ticket} 的 YAGNI verdict 仍有 {len(flagged)} 項未處置：{prefix}'
+        f'請先套用刪減（並跑派工前既有測試與本票驗收測試），或在本票檔的 Verification Log 明確記錄處置結論，再改 Status。'
+        f'清單：{items}。verdict 檔：{verdict}。停用開關：touch {OFF}'
+      )
     if error.exists():
       if FAIL_OPEN_ON_ERROR:
         audit('gate-allow-fail-open-error', session=session, ticket=ticket)
@@ -920,6 +1241,10 @@ def main():
   try:
     inp = read_input()
   except ValueError:
+    if sys.argv[1] in ('pi-register', 'pi-deliver'):
+      return 1
+    return 0
+  if not isinstance(inp, dict):
     if sys.argv[1] in ('pi-register', 'pi-deliver'):
       return 1
     return 0

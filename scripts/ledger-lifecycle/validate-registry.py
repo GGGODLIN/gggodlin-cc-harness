@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import fnmatch
 import json
+import math
 import os
 import re
 import sys
@@ -32,6 +33,7 @@ METRIC_UNITS = {
     "legacy_dirs_present": {"boolean"},
     "exists": {"boolean"},
 }
+NUMERIC_UNITS = {"b", "byte", "bytes", "kb", "kib", "mb", "mib", "lines", "months", "days"}
 
 
 def diagnostic(entry: int | None, field: str, code: str, message: str) -> dict[str, Any]:
@@ -48,7 +50,7 @@ def validate_registry(registry: Any) -> list[dict[str, Any]]:
     elif schema_version != 1:
         errors.append(diagnostic(None, "schema_version", "unsupported", "schema_version must be 1"))
     scan_roots = registry.get("scan_roots")
-    if not isinstance(scan_roots, list) or not scan_roots or any(not isinstance(value, str) or not value for value in scan_roots):
+    if not isinstance(scan_roots, list) or not scan_roots or any(not isinstance(value, str) or not value.strip() for value in scan_roots):
         errors.append(diagnostic(None, "scan_roots", "required", "scan_roots must be a non-empty string list"))
     entries = registry.get("entries")
     if not isinstance(entries, list) or not entries:
@@ -59,7 +61,7 @@ def validate_registry(registry: Any) -> list[dict[str, Any]]:
             errors.append(diagnostic(index, "entry", "type", "entry must be an object"))
             continue
         path = entry.get("path")
-        if not isinstance(path, str) or not path:
+        if not isinstance(path, str) or not path.strip():
             errors.append(diagnostic(index, "path", "required", "path must be a non-empty string"))
         kind = entry.get("kind")
         if not isinstance(kind, str) or kind not in KINDS:
@@ -78,14 +80,14 @@ def validate_registry(registry: Any) -> list[dict[str, Any]]:
                         errors.append(diagnostic(index, field, "type", "threshold item must be an object"))
                         continue
                     metric = item.get("metric")
-                    if not isinstance(metric, str) or not metric:
+                    if not isinstance(metric, str) or not metric.strip():
                         errors.append(diagnostic(index, f"{field}.metric", "required", "metric must be a non-empty string"))
                     elif metric not in METRIC_UNITS:
                         errors.append(diagnostic(index, f"{field}.metric", "unsupported", "metric is not supported by the lifecycle channel"))
                     unit = item.get("unit")
-                    if not isinstance(unit, str) or not unit:
+                    if not isinstance(unit, str) or not unit.strip():
                         errors.append(diagnostic(index, f"{field}.unit", "required", "unit must be a non-empty string"))
-                    elif metric in METRIC_UNITS and unit.casefold() not in METRIC_UNITS[metric]:
+                    elif isinstance(metric, str) and metric in METRIC_UNITS and unit.casefold() not in METRIC_UNITS[metric]:
                         errors.append(diagnostic(index, f"{field}.unit", "unsupported", "unit is not supported for this metric"))
                     operator = item.get("operator")
                     if not isinstance(operator, str) or operator not in OPERATORS:
@@ -94,22 +96,34 @@ def validate_registry(registry: Any) -> list[dict[str, Any]]:
                         errors.append(diagnostic(index, f"{field}.value", "required", "value is required"))
                     elif isinstance(item["value"], (list, dict)):
                         errors.append(diagnostic(index, f"{field}.value", "type", "value must be a scalar"))
+                    else:
+                        value = item["value"]
+                        unit_key = unit.casefold() if isinstance(unit, str) and unit.strip() else ""
+                        if unit_key == "boolean":
+                            if not isinstance(value, bool):
+                                errors.append(diagnostic(index, f"{field}.value", "type", "value must be a boolean for boolean unit"))
+                        elif unit_key == "state":
+                            if not isinstance(value, str) or not value.strip():
+                                errors.append(diagnostic(index, f"{field}.value", "type", "value must be a non-empty string for state unit"))
+                        elif unit_key in NUMERIC_UNITS:
+                            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+                                errors.append(diagnostic(index, f"{field}.value", "type", "value must be a finite number for numeric unit"))
         action = entry.get("action")
         if pure_log:
-            if action is not None and (not isinstance(action, str) or not action):
+            if action is not None and (not isinstance(action, str) or not action.strip()):
                 errors.append(diagnostic(index, "action", "type", "action must be a non-empty string or null"))
-        elif not isinstance(action, str) or not action:
+        elif not isinstance(action, str) or not action.strip():
             errors.append(diagnostic(index, "action", "required", "action must be a non-empty string outside pure-log"))
         for optional in ("retirement", "owner"):
             if optional in entry and entry[optional] is not None and not isinstance(entry[optional], str):
                 errors.append(diagnostic(index, optional, "type", f"{optional} must be a string or null"))
         if "known_paths" in entry:
             known_paths = entry["known_paths"]
-            if not isinstance(known_paths, list) or any(not isinstance(value, str) or not value for value in known_paths):
+            if not isinstance(known_paths, list) or any(not isinstance(value, str) or not value.strip() for value in known_paths):
                 errors.append(diagnostic(index, "known_paths", "type", "known_paths must be a string list"))
         if "index_path" in entry:
             index_path = entry["index_path"]
-            if index_path is not None and (not isinstance(index_path, str) or not index_path):
+            if index_path is not None and (not isinstance(index_path, str) or not index_path.strip()):
                 errors.append(diagnostic(index, "index_path", "type", "index_path must be a non-empty string or null"))
         if "index_relation" in entry:
             relation = entry["index_relation"]
@@ -117,20 +131,24 @@ def validate_registry(registry: Any) -> list[dict[str, Any]]:
                 errors.append(diagnostic(index, "index_relation", "type", "index_relation must be an object"))
             else:
                 relation_path = relation.get("path")
-                if relation_path is not None and (not isinstance(relation_path, str) or not relation_path):
+                if relation_path is not None and (not isinstance(relation_path, str) or not relation_path.strip()):
                     errors.append(diagnostic(index, "index_relation.path", "type", "index_relation.path must be a non-empty string or null"))
                 for relation_field in ("entry_pattern", "format"):
-                    if relation_field in relation and (not isinstance(relation[relation_field], str) or not relation[relation_field]):
+                    if relation_field not in relation:
+                        errors.append(diagnostic(index, f"index_relation.{relation_field}", "required", f"index_relation.{relation_field} is required"))
+                    elif not isinstance(relation[relation_field], str) or not relation[relation_field].strip():
                         errors.append(diagnostic(index, f"index_relation.{relation_field}", "type", f"index_relation.{relation_field} must be a non-empty string"))
                 pattern = relation.get("entry_pattern")
-                if isinstance(pattern, str) and pattern:
+                if isinstance(pattern, str) and pattern.strip():
                     try:
                         re.compile(pattern)
                     except re.error as error:
                         errors.append(diagnostic(index, "index_relation.entry_pattern", "invalid", f"index_relation.entry_pattern is not a valid regex: {error}"))
-                if "anchor_field" in relation and (not isinstance(relation["anchor_field"], int) or isinstance(relation["anchor_field"], bool) or relation["anchor_field"] < 1):
+                if "anchor_field" not in relation:
+                    errors.append(diagnostic(index, "index_relation.anchor_field", "required", "index_relation.anchor_field is required"))
+                elif not isinstance(relation["anchor_field"], int) or isinstance(relation["anchor_field"], bool) or relation["anchor_field"] < 1:
                     errors.append(diagnostic(index, "index_relation.anchor_field", "type", "index_relation.anchor_field must be a positive integer"))
-                if entry.get("index_path") is not None and relation_path is not None and entry["index_path"] != relation_path:
+                if "path" in relation and "index_path" in entry and entry["index_path"] != relation_path:
                     errors.append(diagnostic(index, "index_relation.path", "mismatch", "index_relation.path must match index_path"))
     return errors
 
@@ -157,6 +175,8 @@ def glob_matches(pattern: str, value: str) -> bool:
         if pattern_index == len(pattern_parts):
             return value_index == len(value_parts)
         if pattern_parts[pattern_index] == "**":
+            if pattern_index == len(pattern_parts) - 1:
+                return value_index < len(value_parts)
             return match(pattern_index + 1, value_index) or (
                 value_index < len(value_parts) and match(pattern_index, value_index + 1)
             )

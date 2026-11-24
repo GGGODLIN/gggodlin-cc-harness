@@ -187,6 +187,8 @@ node "$CONFIG_ROOT/scripts/agent-contract-validator.mjs" --global-root "$CONFIG_
 
 完成判準：validator exit 0 且 output status=pass；否則 closeout 未完成。
 
+如果本次實際改動會改 harness 或改到 3 個以上檔案，就在 validator 與 smoke／測試都完成後、交回報前讀 `~/.claude/references/advisor-checkpoint.md` 的「4. 改檔入口」段判斷是否同時命中未覆蓋新風險；只有命中並發問時才在使用者回覆前暫停交結案，未命中時不問、直接交回報。
+
 ## 踩過的坑（撞新 case 就往下補）
 
 - **deep-research-paced Fetch was nondeterministic → resume re-ran 94/100 agents (2026-06-07).** Original search→fetch was a no-barrier `pipeline()` whose dedup stage mutated a shared `fetchSlots` counter + `seen` Map in completion order → the fetch-URL set/order varied per run → every fetch (and downstream verify) prompt differed → cache diverged right after Scope+Search. Fix = barrier-collect search, then select URLs in fixed `angleIndex → in-angle relevance` order. After the fix, a real pause→resume replayed ~90 agents and re-spent **0.96M tokens vs 5.5M before (↓83%)**. This is the canonical example of §2.

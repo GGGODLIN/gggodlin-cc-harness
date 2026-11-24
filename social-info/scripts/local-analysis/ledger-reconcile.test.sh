@@ -186,10 +186,13 @@ EOF
 cat > "$TMP/beads-channel.json" <<'EOF'
 [{"title":"beads-item","match":null,"channel":"beads-aging"}]
 EOF
+cat > "$TMP/publish-channel.json" <<'EOF'
+[{"title":"publish-item","match":null,"channel":"publish-candidate"}]
+EOF
 cat > "$TMP/near-channel.json" <<'EOF'
 [{"title":"near-channel-item","match":null,"channel":"skill-changes-extra"}]
 EOF
-for case_name in missing-channel unknown-channel beads-channel near-channel; do
+for case_name in missing-channel unknown-channel beads-channel publish-channel near-channel; do
   cp "$TMP/gates.jsonl" "$TMP/$case_name.jsonl"
   cp "$TMP/$case_name.jsonl" "$TMP/$case_name.before"
   python3 "$SCRIPT" --date 2026-07-30 --ledger "$TMP/$case_name.jsonl" --findings "$TMP/$case_name.json" --apply --no-health >/dev/null 2>&1
@@ -222,6 +225,16 @@ cp "$TMP/gates.jsonl" "$TMP/session-audit-consume-channel.jsonl"
 python3 "$SCRIPT" --date 2026-07-30 --ledger "$TMP/session-audit-consume-channel.jsonl" --findings "$TMP/session-audit-consume-channel.json" --apply --no-health >/dev/null 2>&1
 check "session-audit-consume -> 白名單接受" 0 "$?"
 check "session-audit-consume -> 新 entry 寫入" 1 "$(grep -c 'session-audit-consume-item' "$TMP/session-audit-consume-channel.jsonl")"
+
+cat > "$TMP/new-channels.json" <<'EOF'
+[{"title":"mc-item","match":null,"channel":"memory-conflict"},
+ {"title":"mo-item","match":null,"channel":"memory-origin"},
+ {"title":"hr-item","match":null,"channel":"hash-reflow"}]
+EOF
+cp "$TMP/gates.jsonl" "$TMP/new-channels.jsonl"
+python3 "$SCRIPT" --date 2026-07-30 --ledger "$TMP/new-channels.jsonl" --findings "$TMP/new-channels.json" --apply --no-health >/dev/null 2>&1
+check "memory-conflict/origin/hash-reflow -> 白名單接受" 0 "$?"
+check "新白名單 3 筆全數寫入" 3 "$(grep -cE '"(mc|mo|hr)-item"' "$TMP/new-channels.jsonl")"
 
 echo "== 壞輸入要明確失敗、不得靜默 =="
 printf '{"title":"ok","status":"pending","count":1,"first_seen":"2026-07-01","last_seen":"2026-07-01","note":""}\nNOT JSON\n' > "$TMP/broken.jsonl"
@@ -256,6 +269,11 @@ printf '## 判讀\n本週抽驗 3 個 session，0 FAIL。\n' > "$TMP/2026-07-29-
 printf '%s\n' '{"title":"seed","first_seen":"2026-07-01","last_seen":"2026-07-01","count":1,"status":"pending","note":""}' > "$TMP/late.jsonl"
 python3 "$SCRIPT" --date 2026-07-30 --ledger "$TMP/late.jsonl" --no-health --json > "$TMP/late-out.json" 2>/dev/null
 check "報告無警告 -> 不列漏收" 0 "$(late_count "$TMP/late-out.json")"
+
+printf '⚠️ 最早可表示日期上的週報\n' > "$TMP/0001-01-01-evidence-level.md"
+python3 "$SCRIPT" --date 0001-01-02 --ledger "$TMP/late.jsonl" --no-health --json > "$TMP/early-out.json"
+check "週報回看不超出最小曆日" 0 "$?"
+check "保留最小曆日上的週報" 1 "$(late_count "$TMP/early-out.json")"
 
 echo "== ledger-lifecycle 報告到 pending-actions 端到端接線 =="
 LIFE_ROOT="$TMP/lifecycle-home"
@@ -316,7 +334,7 @@ import os
 import time
 
 _original_open = builtins.open
-_target = os.path.abspath(os.environ["LEDGER_RECONCILE_BARRIER_LEDGER"])
+_target = os.path.realpath(os.environ["LEDGER_RECONCILE_BARRIER_LEDGER"])
 _barrier = os.environ["LEDGER_RECONCILE_BARRIER_DIR"]
 _role = os.environ["LEDGER_RECONCILE_BARRIER_ROLE"]
 
@@ -352,7 +370,7 @@ class BarrierReader:
 
 def open_with_barrier(file, mode="r", *args, **kwargs):
     handle = _original_open(file, mode, *args, **kwargs)
-    if os.path.abspath(os.fspath(file)) == _target and "r" in mode:
+    if os.path.realpath(os.fspath(file)) == _target and "r" in mode:
         return BarrierReader(handle)
     return handle
 
@@ -424,6 +442,70 @@ fi
 check "並行 process 1 rc=0" 0 "$RC1"
 check "並行 process 2 rc=0" 0 "$RC2"
 check "並行 finding 不遺失" 3 "$(grep -c '"title"' "$CONC_LEDGER")"
+
+echo "== symlink 帳本保護與同鎖 =="
+SYM_REAL_DIR="$TMP/sym-real"
+SYM_LINK_DIR="$TMP/sym-link"
+mkdir -p "$SYM_REAL_DIR" "$SYM_LINK_DIR"
+printf '%s\n' '{"title":"sym-seed","first_seen":"2026-07-01","last_seen":"2026-07-01","count":1,"status":"pending","note":""}' > "$SYM_REAL_DIR/pending.jsonl"
+ln -s "$SYM_REAL_DIR/pending.jsonl" "$SYM_LINK_DIR/pending.jsonl"
+printf '%s\n' '[{"title":"sym-added","match":null,"channel":"memory"}]' > "$TMP/sym-f.json"
+python3 "$SCRIPT" --date 2026-07-30 --ledger "$SYM_LINK_DIR/pending.jsonl" --findings "$TMP/sym-f.json" --apply --no-health >/dev/null 2>&1
+check "symlink 帳本寫入後保持 symlink" 1 "$([ -L "$SYM_LINK_DIR/pending.jsonl" ] && printf 1 || printf 0)"
+check "symlink 帳本寫入更新實體檔" 1 "$(grep -c 'sym-added' "$SYM_REAL_DIR/pending.jsonl")"
+check "symlink 帳本鎖檔落於實體目錄" 1 "$([ -f "$SYM_REAL_DIR/pending.jsonl.lock" ] && [ ! -e "$SYM_LINK_DIR/pending.jsonl.lock" ] && printf 1 || printf 0)"
+
+echo "== count / escalate_at / status / 日期單調與型別 fail-closed =="
+cp "$TMP/dec.jsonl" "$TMP/bool-esc.jsonl"
+python3 "$SCRIPT" --date 2026-07-30 --ledger "$TMP/bool-esc.jsonl" --decide <(echo '[{"match":"to-done","verdict":"kept","escalate_at":true}]') --apply --no-health >/dev/null 2>&1
+check "--decide escalate_at=true -> 非 0 退出" 1 "$?"
+python3 "$SCRIPT" --date 2026-07-30 --ledger "$TMP/bool-esc.jsonl" --decide <(echo '[{"match":"to-done","verdict":"kept","escalate_at":null}]') --apply --no-health >/dev/null 2>&1
+check "--decide escalate_at=null -> 非 0 退出" 1 "$?"
+python3 "$SCRIPT" --date 2026-07-30 --ledger "$TMP/bool-esc.jsonl" --decide <(echo '[{"match":"to-done","verdict":"kept","escalate_at":0}]') --apply --no-health >/dev/null 2>&1
+check "--decide escalate_at=0 -> 非 0 退出" 1 "$?"
+printf '%s\n' '{"title":"bad-count","first_seen":"2026-07-01","last_seen":"2026-07-01","count":true,"status":"pending","note":""}' > "$TMP/bad-count.jsonl"
+python3 "$SCRIPT" --date 2026-07-30 --ledger "$TMP/bad-count.jsonl" --no-health >/dev/null 2>&1
+check "ledger count=true -> 非 0 退出" 1 "$?"
+printf '%s\n' '{"title":"bad-status","first_seen":"2026-07-01","last_seen":"2026-07-01","count":1,"status":"resolved","note":""}' > "$TMP/bad-status.jsonl"
+python3 "$SCRIPT" --date 2026-07-30 --ledger "$TMP/bad-status.jsonl" --no-health >/dev/null 2>&1
+check "ledger 無效 status -> 非 0 退出" 1 "$?"
+printf '%s\n' '{"title":"bad-first-seen","first_seen":"2026-02-31","last_seen":"2026-07-01","count":1,"status":"pending","note":""}' > "$TMP/bad-fs.jsonl"
+python3 "$SCRIPT" --date 2026-07-30 --ledger "$TMP/bad-fs.jsonl" --no-health >/dev/null 2>&1
+check "ledger 壞 first_seen -> 非 0 退出" 1 "$?"
+printf '%s\n' '{"title":"mono","first_seen":"2026-07-01","last_seen":"2026-07-30","count":1,"status":"pending","note":""}' > "$TMP/mono.jsonl"
+python3 "$SCRIPT" --date 2026-07-29 --ledger "$TMP/mono.jsonl" --findings <(echo '[{"title":"x","match":"mono","channel":"memory"}]') --apply --no-health >/dev/null 2>&1
+check "--date 早於 last_seen -> 非 0 退出" 1 "$?"
+
+echo "== 重複 title、非 dict 行、空白標題與壞編碼週報 =="
+printf '%s\n%s\n' \
+  '{"title":"dup-title","first_seen":"2026-07-01","last_seen":"2026-07-01","count":1,"status":"pending","note":""}' \
+  '{"title":"dup-title","first_seen":"2026-07-02","last_seen":"2026-07-02","count":1,"status":"pending","note":""}' > "$TMP/dup-title.jsonl"
+python3 "$SCRIPT" --date 2026-07-30 --ledger "$TMP/dup-title.jsonl" --no-health >/dev/null 2>&1
+check "ledger 重複 title -> 非 0 退出" 1 "$?"
+
+printf '123\n' > "$TMP/nondict.jsonl"
+python3 "$SCRIPT" --date 2026-07-30 --ledger "$TMP/nondict.jsonl" --no-health >/dev/null 2>"$TMP/nondict.err"
+NONDICT_RC=$?
+check "ledger 非 dict 行乾淨非 0 退出無 traceback" "1:0" "$NONDICT_RC:$(grep -c Traceback "$TMP/nondict.err")"
+
+cp "$TMP/gates.jsonl" "$TMP/blank-title.jsonl"
+python3 "$SCRIPT" --date 2026-07-30 --ledger "$TMP/blank-title.jsonl" --findings <(echo '[{"title":"   ","match":null,"channel":"memory"}]') --apply --no-health >/dev/null 2>&1
+check "finding 全空白 title -> 非 0 退出" 1 "$?"
+
+python3 "$SCRIPT" --date 2026-07-30 --ledger "$TMP/gates.jsonl" --findings <(echo '[{"title":null,"match":"no-such","channel":"memory"}]') --no-health >/dev/null 2>"$TMP/null-title.err"
+NULL_TITLE_RC=$?
+check "finding title=null 不炸 Traceback" "1:0" "$NULL_TITLE_RC:$(grep -c Traceback "$TMP/null-title.err")"
+
+python3 "$SCRIPT" --date 2026-07-30 --ledger "$TMP/dec.jsonl" --decide <(echo '[{"match":"to-done","verdict":"done","note":123}]') --apply --no-health >/dev/null 2>"$TMP/bad-note.err"
+BAD_NOTE_RC=$?
+check "--decide note 非字串乾淨非 0 退出無 traceback" "1:0" "$BAD_NOTE_RC:$(grep -c Traceback "$TMP/bad-note.err")"
+
+BAD_UTF8_DIR="$TMP/bad-utf8-reports"
+mkdir -p "$BAD_UTF8_DIR"
+printf '%s\n' '{"title":"seed","first_seen":"2026-07-01","last_seen":"2026-07-01","count":1,"status":"pending","note":""}' > "$BAD_UTF8_DIR/late.jsonl"
+python3 -c 'import pathlib,sys; pathlib.Path(sys.argv[1]).write_bytes(b"\xff\xfe\xfd\n\xf0\x9f\x9a\xa8 alert\n")' "$BAD_UTF8_DIR/2026-07-29-rba-verify.md"
+python3 "$SCRIPT" --date 2026-07-30 --ledger "$BAD_UTF8_DIR/late.jsonl" --no-health --json > "$TMP/bad-utf8-out.json" 2>"$TMP/bad-utf8.err"
+check "非 UTF-8 週報不崩潰且仍偵測警告" "0:1" "$?:$(late_count "$TMP/bad-utf8-out.json")"
 
 echo
 echo "pass=$PASS fail=$FAIL"

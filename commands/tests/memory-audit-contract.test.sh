@@ -224,6 +224,8 @@ check_eq "L 無效 memory dir fail closed" "2" "$l_invalid_rc"
 check_file_text "L 無效 memory dir 有錯誤證據" "$TMP/l-invalid.err" "memory dir not found"
 check_eq "L 不把跨目錄 target 當 local missing" "0" "$(grep -c 'shared.md' "$l_output" || true)"
 check_eq "L 不把 anchor wikilink 當 local missing" "0" "$(grep -c 'wiki-owner' "$l_output" || true)"
+check_text "M-1 共用詞界 BM25 排序" "詞界 BM25 規則取回"
+check_text "M-1 長尾交接 deep-check" "--siblings --with-scores"
 
 printf '\n%s PASS / %s FAIL\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

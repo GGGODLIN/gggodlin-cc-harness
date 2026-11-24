@@ -27,15 +27,33 @@ const parseArguments = (args) => {
   };
 };
 
+const DEFAULT_MAX_STDIN_BYTES = 16 * 1024 * 1024;
+
+const resolveMaxStdinBytes = () => {
+  const parsed = Number(process.env.COMPACT_GUARD_MAX_STDIN_BYTES);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : DEFAULT_MAX_STDIN_BYTES;
+};
+
 const readInput = async () => {
-  let raw = "";
-  process.stdin.setEncoding("utf8");
-  for await (const chunk of process.stdin) {
-    raw += chunk;
+  const maxBytes = resolveMaxStdinBytes();
+  const chunks = [];
+  let totalBytes = 0;
+  try {
+    for await (const chunk of process.stdin) {
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      totalBytes += buffer.length;
+      if (totalBytes > maxBytes) {
+        process.stdin.destroy();
+        return null;
+      }
+      chunks.push(buffer);
+    }
+  } catch {
+    return null;
   }
   let input;
   try {
-    input = JSON.parse(raw);
+    input = JSON.parse(Buffer.concat(chunks, totalBytes).toString("utf8"));
   } catch {
     return null;
   }
@@ -59,7 +77,12 @@ if (!args || !VALID_VENDORS.has(args.vendor)) {
   if (!marker || marker[1] !== args.vendor) {
     fixedFailure("compact_guard_managed_id_mismatch");
   } else {
-    const input = await readInput();
+    let input = null;
+    try {
+      input = await readInput();
+    } catch {
+      input = null;
+    }
     if (!input) {
       fixedFailure("compact_guard_invalid_input");
     } else if (input.hook_event_name !== EVENT_NAMES[marker[2]]) {

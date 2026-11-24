@@ -7,8 +7,8 @@
   3. 死庫存候選：安裝 > min-age 天且 90 天窗內零 invoke（每輪限量列出、其餘計數）
 
 分類 registry：reports/local-analysis/.skill-trigger-registry.json
-  {name: {"mode": "auto-only|manual-by-design|dual", "decided": bool}}
-  decided=true 為使用者拍板、腳本永不覆寫；decided=false 每輪按 frontmatter 重新自動猜。
+  {name: {"mode": "auto-only|manual-by-design|dual", "decided": bool, "decided_by": "user|agent"}}
+  decided=true 鎖定分類不覆寫（預設為使用者逐項拍板；授權下自決須標 decided_by="agent" 保持來源可辨）；decided=false 每輪按 frontmatter 重新自動猜。
 
 範圍宣告（no silent caps）：只掃自有 ~/.claude/skills + ~/.claude/commands；
 plugin 前綴（含冒號）的 Skill invoke 不對映；死庫存軸是 90 天窗、非真 lifetime。
@@ -22,33 +22,55 @@ registry mode 為 hook-driven 的同樣排除（2026-09-22 拍板）：這類 co
 （resume/fork 會複製訊息，原始命中數灌水 3-13 倍，前案見 memory adhd extract 洞察 2）。
 """
 import argparse
+import datetime
 import json
 import glob
+import math
 import os
 import re
 import subprocess
+import sys
+import tempfile
 import time
 
 CMD_RE = re.compile(r"<command-name>/([A-Za-z0-9_-]+)</command-name>")
 DUAL_RE = re.compile(r"invokable (manually|via)|手動|slash command|also invokable", re.IGNORECASE)
+BARE_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 def read_frontmatter(path):
   desc, disable = "", False
   try:
-    with open(path, errors="replace") as fh:
-      lines = fh.read().split("\n")
+    with open(path, encoding="utf-8-sig", errors="replace") as fh:
+      lines = fh.read().splitlines()
   except OSError:
     return desc, disable
   if not lines or lines[0].strip() != "---":
     return desc, disable
-  for line in lines[1:60]:
+  desc_parts = []
+  in_desc_block = False
+  for line in lines[1:]:
     if line.strip() == "---":
       break
+    if in_desc_block:
+      if line.startswith((" ", "\t")) or not line.strip():
+        part = line.strip()
+        if part:
+          desc_parts.append(part)
+        continue
+      in_desc_block = False
     if line.startswith("description:"):
-      desc = line[len("description:"):].strip()
-    if line.startswith("disable-model-invocation:") and "true" in line:
-      disable = True
+      val = line[len("description:"):].strip()
+      if val in ("|", ">", "|-", ">-", "|+", ">+", ""):
+        in_desc_block = True
+        desc_parts = []
+      else:
+        desc_parts = [val]
+    elif line.startswith("disable-model-invocation:"):
+      val = line[len("disable-model-invocation:"):].split("#", 1)[0].strip().lower()
+      disable = val == "true"
+  if desc_parts:
+    desc = " ".join(desc_parts)
   return desc, disable
 
 
@@ -76,35 +98,91 @@ def build_inventory(skills_dir, commands_dir):
   return inv
 
 
-def load_registry(path, inventory):
+def _atomic_write_text(path, text):
+  parent = os.path.dirname(os.path.abspath(path))
+  os.makedirs(parent, exist_ok=True)
+  tmp_path = None
+  try:
+    with tempfile.NamedTemporaryFile(
+      mode="w",
+      encoding="utf-8",
+      dir=parent,
+      prefix=os.path.basename(path) + ".",
+      suffix=".tmp",
+      delete=False,
+    ) as fh:
+      tmp_path = fh.name
+      fh.write(text)
+    os.replace(tmp_path, path)
+    tmp_path = None
+  finally:
+    if tmp_path is not None:
+      try:
+        os.unlink(tmp_path)
+      except OSError:
+        pass
+
+
+def _load_registry_checked(path, inventory):
   registry = {}
+  load_ok = True
   if os.path.exists(path):
     try:
-      registry = json.load(open(path))
-    except (OSError, json.JSONDecodeError):
-      registry = {}
+      with open(path, encoding="utf-8") as fh:
+        loaded = json.load(fh)
+      if isinstance(loaded, dict):
+        registry = loaded
+      else:
+        print(
+          f"WARNING: registry {path} is not a JSON object; preserving file on disk and using defaults",
+          file=sys.stderr,
+        )
+        load_ok = False
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+      print(
+        f"WARNING: failed to read registry {path} ({exc}); preserving file on disk and using defaults",
+        file=sys.stderr,
+      )
+      load_ok = False
   new_names = {name for name in inventory if name not in registry}
   for name, meta in inventory.items():
-    entry = registry.get(name)
-    if entry and entry.get("decided"):
+    raw_entry = registry.get(name)
+    entry = raw_entry if isinstance(raw_entry, dict) else {}
+    if entry.get("decided") is True:
+      registry[name] = entry
       continue
-    preserved = {k: v for k, v in (entry or {}).items() if k not in ("mode", "decided")}
+    preserved = {k: v for k, v in entry.items() if k not in ("mode", "decided", "decided_by")}
     registry[name] = {**preserved, "mode": meta["guess"], "decided": False}
+  return registry, new_names, load_ok
+
+
+def load_registry(path, inventory):
+  registry, new_names, _ = _load_registry_checked(path, inventory)
   return registry, new_names
 
 
 def save_registry(path, registry):
-  tmp = path + ".tmp"
-  json.dump(dict(sorted(registry.items())), open(tmp, "w"), ensure_ascii=False, indent=1)
-  os.replace(tmp, path)
+  text = json.dumps(dict(sorted(registry.items())), ensure_ascii=False, indent=1)
+  _atomic_write_text(path, text)
 
 
 def parse_ts(rec, fallback):
   ts = rec.get("timestamp")
+  if isinstance(ts, bool):
+    return fallback
+  if isinstance(ts, (int, float)):
+    val = float(ts)
+    if math.isfinite(val) and val > 0:
+      return val / 1000.0 if val >= 1e11 else val
+    return fallback
   if isinstance(ts, str):
+    s = ts.strip()
+    if s.endswith(("Z", "z")):
+      s = s[:-1] + "+00:00"
     try:
-      import datetime
-      return datetime.datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp()
+      val = datetime.datetime.fromisoformat(s).timestamp()
+      if math.isfinite(val) and val > 0:
+        return val
     except ValueError:
       pass
   return fallback
@@ -114,8 +192,10 @@ def parse_iso_date(val):
   if not isinstance(val, str) or not val.strip():
     return 0.0
   try:
-    import datetime
-    dt = datetime.datetime.fromisoformat(val.strip().replace("Z", "+00:00"))
+    s = val.strip()
+    if s.endswith(("Z", "z")):
+      s = s[:-1] + "+00:00"
+    dt = datetime.datetime.fromisoformat(s)
     if dt.tzinfo is None:
       dt = dt.replace(tzinfo=datetime.timezone.utc)
     return dt.timestamp()
@@ -123,27 +203,38 @@ def parse_iso_date(val):
     return 0.0
 
 
-def scan(projects_dir, names, alert_days, dead_days, now):
+def _record_event(store, name, key, ts):
+  bucket = store.setdefault(name, {})
+  if key in bucket:
+    if ts < bucket[key]:
+      bucket[key] = ts
+  else:
+    bucket[key] = ts
+
+
+def scan(projects_dir, names, alert_days, dead_days, now, max_remind_days=0):
   alert_cut = now - alert_days * 86400
   dead_cut = now - dead_days * 86400
+  remind_cut = now - max(0, max_remind_days) * 86400
+  scan_cut = min(alert_cut, dead_cut, remind_cut)
   auto_ids, manual_uuids = {}, {}
   files = 0
-  for path in glob.glob(os.path.join(projects_dir, "*", "*.jsonl")):
+  for path in sorted(glob.glob(os.path.join(projects_dir, "*", "*.jsonl"))):
     if "-private-var-folders-" in os.path.basename(os.path.dirname(path)):
       continue
     try:
       mtime = os.path.getmtime(path)
     except OSError:
       continue
-    if mtime < dead_cut:
+    if mtime < scan_cut:
       continue
     files += 1
     try:
-      fh = open(path, errors="replace")
+      fh = open(path, encoding="utf-8", errors="replace")
     except OSError:
       continue
     with fh:
-      for line in fh:
+      for line_no, line in enumerate(fh, 1):
         has_cmd = "<command-name>/" in line
         has_skill = '"Skill"' in line and '"skill"' in line
         has_wf = '"Workflow"' in line and '"tool_use"' in line
@@ -153,37 +244,48 @@ def scan(projects_dir, names, alert_days, dead_days, now):
           rec = json.loads(line)
         except json.JSONDecodeError:
           continue
-        msg = rec.get("message") or {}
+        if not isinstance(rec, dict):
+          continue
+        raw_msg = rec.get("message")
+        msg = raw_msg if isinstance(raw_msg, dict) else {}
         ts = parse_ts(rec, mtime)
+        if ts > now:
+          continue
         role = msg.get("role")
         content = msg.get("content")
         if (has_skill or has_wf) and role == "assistant" and isinstance(content, list):
-          for block in content:
+          for block_idx, block in enumerate(content):
             if not isinstance(block, dict) or block.get("type") != "tool_use":
               continue
             bname = block.get("name")
-            inp = block.get("input") or {}
+            raw_inp = block.get("input")
+            inp = raw_inp if isinstance(raw_inp, dict) else {}
+            raw_bid = block.get("id")
+            ev_key = raw_bid if isinstance(raw_bid, str) and raw_bid else f"{path}:{line_no}:{block_idx}"
             if bname == "Skill":
-              skill = inp.get("skill", "")
-              if skill in names:
-                auto_ids.setdefault(skill, {})[block.get("id") or f"{path}:{ts}"] = ts
+              skill = inp.get("skill")
+              if isinstance(skill, str) and skill in names:
+                _record_event(auto_ids, skill, ev_key, ts)
             elif bname == "Workflow":
-              wf = inp.get("name") or ""
-              if not wf and inp.get("scriptPath"):
-                wf = os.path.splitext(os.path.basename(str(inp.get("scriptPath"))))[0]
+              raw_wf = inp.get("name")
+              wf = raw_wf if isinstance(raw_wf, str) else ""
+              if not wf and isinstance(inp.get("scriptPath"), str) and inp["scriptPath"]:
+                wf = os.path.splitext(os.path.basename(inp["scriptPath"]))[0]
               if wf in names:
-                auto_ids.setdefault(wf, {})[block.get("id") or f"{path}:{ts}"] = ts
+                _record_event(auto_ids, wf, ev_key, ts)
         if has_cmd and role == "user":
           blob = content if isinstance(content, str) else json.dumps(content, ensure_ascii=False)
+          raw_uuid = rec.get("uuid")
+          ev_key = raw_uuid if isinstance(raw_uuid, str) and raw_uuid else f"{path}:{line_no}"
           for hit in CMD_RE.findall(blob):
             if hit in names:
-              manual_uuids.setdefault(hit, {})[rec.get("uuid") or f"{path}:{hash(line)}"] = ts
+              _record_event(manual_uuids, hit, ev_key, ts)
   def bucket(store):
     out = {}
     for name, events in store.items():
       out[name] = {
         "recent": sum(1 for t in events.values() if t >= alert_cut),
-        "window": len(events),
+        "window": sum(1 for t in events.values() if t >= dead_cut),
         "last_ts": max(events.values()) if events else 0.0,
       }
     return out
@@ -212,11 +314,11 @@ def norm_repo_path(val):
 
 def read_matching_ledger(cand_path, real_repo):
   try:
-    with open(cand_path) as f:
+    with open(cand_path, encoding="utf-8") as f:
       data = json.load(f)
     if isinstance(data, dict) and norm_repo_path(data.get("repo_path")) == real_repo:
       return data
-  except (OSError, json.JSONDecodeError):
+  except (OSError, UnicodeDecodeError, json.JSONDecodeError):
     pass
   return None
 
@@ -260,6 +362,8 @@ def count_uninspected_commits(real_repo, ledger, since_30d):
     if cnt is not None:
       return cnt
   since = str(ledger.get("checked_at") or since_30d).strip()
+  if BARE_DATE_RE.match(since):
+    since = f"{since}T00:00:00Z"
   return git_rev_list_count(real_repo, f"--since={since}", "HEAD") or 0
 
 
@@ -292,8 +396,7 @@ def evaluate_repo_candidate(entry, real_repo, state_dir, now, remind_days, since
 
 
 def nominate_deep_check_repos(state_dir, repo_roots, now, remind_days, min_commits=20):
-  import datetime
-  since_30d = datetime.datetime.fromtimestamp(now - 30 * 86400, datetime.timezone.utc).strftime("%Y-%m-%d")
+  since_30d = datetime.datetime.fromtimestamp(now - 30 * 86400, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
   candidates = [
     cand for entry, real_repo in iter_candidate_repos(repo_roots)
     if (cand := evaluate_repo_candidate(entry, real_repo, state_dir, now, remind_days, since_30d, min_commits))
@@ -319,21 +422,53 @@ def main():
   ap.add_argument("--dead-cap", type=int, default=3)
   args = ap.parse_args()
 
+  if args.alert_window_days < 1 or args.dead_window_days < 1:
+    print("Error: --alert-window-days and --dead-window-days must be >= 1", file=sys.stderr)
+    sys.exit(2)
+  if args.dead_min_age_days < 0 or args.dead_cap < 0:
+    print("Error: --dead-min-age-days and --dead-cap must be >= 0", file=sys.stderr)
+    sys.exit(2)
+  for label, dpath in (
+    ("--projects-dir", args.projects_dir),
+    ("--skills-dir", args.skills_dir),
+    ("--commands-dir", args.commands_dir),
+  ):
+    if not dpath or not os.path.isdir(dpath):
+      print(f"Error: {label} directory does not exist: {dpath}", file=sys.stderr)
+      sys.exit(2)
+
   now = time.time()
   inventory = build_inventory(args.skills_dir, args.commands_dir)
-  registry, new_names = load_registry(args.registry, inventory)
-  save_registry(args.registry, registry)
+  registry, new_names, registry_load_ok = _load_registry_checked(args.registry, inventory)
+  if registry_load_ok:
+    save_registry(args.registry, registry)
+  max_remind_days = 0
+  for entry in registry.values():
+    if isinstance(entry, dict):
+      rd = entry.get("remind_after_days")
+      if isinstance(rd, int) and not isinstance(rd, bool) and rd > max_remind_days:
+        max_remind_days = rd
   auto, manual, files = scan(
-    args.projects_dir, set(inventory), args.alert_window_days, args.dead_window_days, now
+    args.projects_dir,
+    set(inventory),
+    args.alert_window_days,
+    args.dead_window_days,
+    now,
+    max_remind_days=max_remind_days,
   )
 
   name_only = set()
   for sp in (os.path.expanduser("~/.claude/settings.json"), os.path.expanduser("~/.claude-team/settings.json")):
     try:
-      with open(sp) as fh:
-        ov = json.load(fh).get("skillOverrides", {})
+      with open(sp, encoding="utf-8") as fh:
+        cfg = json.load(fh)
+      if not isinstance(cfg, dict):
+        continue
+      ov = cfg.get("skillOverrides")
+      if not isinstance(ov, dict):
+        continue
       name_only.update(k for k, v in ov.items() if v == "name-only")
-    except (OSError, json.JSONDecodeError):
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
       continue
 
   alerts, rows, dead, reminders, undecided, new_undecided = [], [], [], [], [], []
@@ -343,9 +478,10 @@ def main():
   dead_remind_excluded = 0
   repo_roots = [r for r in args.repo_roots.split(",") if r.strip()]
   for name, meta in sorted(inventory.items()):
-    reg_entry = registry.get(name, {})
-    mode = reg_entry.get("mode", meta["guess"])
-    decided = reg_entry.get("decided", False)
+    raw_reg = registry.get(name)
+    reg_entry = raw_reg if isinstance(raw_reg, dict) else {}
+    mode = reg_entry.get("mode") or meta["guess"]
+    decided = reg_entry.get("decided") is True
     remind_days = reg_entry.get("remind_after_days")
     has_remind = isinstance(remind_days, int) and not isinstance(remind_days, bool) and remind_days > 0
     a = auto.get(name, {"recent": 0, "window": 0, "last_ts": 0.0})
@@ -375,7 +511,8 @@ def main():
         f"- ⚠️ `{name}`（auto-only）{args.alert_window_days} 天內被手動 slash **{m['recent']} 次**（同窗 auto {a['recent']} 次）——該自動觸發卻要人手打"
       )
     if a["recent"] or m["recent"]:
-      rows.append(f"| `{name}` | {mode}{'' if decided else ' (未拍板)'} | {a['recent']} | {m['recent']} | {a['window'] + m['window']} |")
+      status_tag = " (未拍板)" if not decided else (" (agent自決)" if reg_entry.get("decided_by") == "agent" else "")
+      rows.append(f"| `{name}` | {mode}{status_tag} | {a['recent']} | {m['recent']} | {a['window'] + m['window']} |")
     if a["window"] + m["window"] == 0:
       if has_remind:
         dead_remind_excluded += 1
@@ -419,14 +556,11 @@ def main():
     lines.append(f"本輪新增 {len(new_undecided)} 項：")
     lines += [f"- {u}" for u in new_undecided]
     lines.append("")
-    lines.append(f"拍板方式：改 {args.registry} 對應 entry 的 mode 並設 decided=true（main session 代改、使用者只拍板）。")
+    lines.append(f"拍板方式：改 {args.registry} 對應 entry 的 mode 並設 decided=true（使用者逐項拍板省略 decided_by；授權下由 agent 自決則補 decided_by=\"agent\" 保持來源可辨）。")
   else:
     lines.append("本輪無新增；既有未拍板項留在 registry、遇事件才逐項拍。")
 
-  tmp = args.out + ".tmp"
-  with open(tmp, "w") as fh:
-    fh.write("\n".join(lines) + "\n")
-  os.replace(tmp, args.out)
+  _atomic_write_text(args.out, "\n".join(lines) + "\n")
   print(f"skill-trigger-health: alerts={len(alerts)} active={len(rows)} dead={len(dead)} undecided={len(undecided)}")
 
 

@@ -106,6 +106,11 @@ Severity follows demonstrated impact. Normative words such as MUST or SHALL do n
 
 Return exactly one JSON object. Copy `dispatch_id` from `C4_PACKET_JSON` into the top-level field shown below. The first character must be `{` and the last character must be `}`. Do not add Markdown fences or prose. The deterministic reducer tolerates one exact `json` fence only as a transport fallback; it rejects any other wrapper.
 
+In `summary`, all three count invariants are strictly validated by the reducer and any mismatch fails the entire batch (`C4_SUMMARY_MISMATCH`):
+- `summary.candidates` MUST equal `len(contract_accounting)` (the total number of supplied clauses accounted for, NOT the number of findings).
+- `summary.findings` MUST equal `len(findings)`.
+- Each classification count key (`full_match`, `partial_match`, `mismatch`, `missing_in_code`, `code_stronger_than_spec`, `code_weaker_than_spec`, `undocumented_behavior`, `AMBIGUOUS`) MUST equal the number of `contract_accounting` rows carrying that exact `classification`.
+
 ```json
 {
   "reviewer": "spec-compliance-reviewer",

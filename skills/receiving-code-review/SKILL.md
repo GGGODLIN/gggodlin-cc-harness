@@ -114,6 +114,16 @@ FOR multi-item feedback:
      - Complex fixes (refactoring, logic)
   3. Test each fix individually
   4. Verify no regressions
+  5. Batch delegation branch (implement Subagent-Driven closeout):
+     IF in implement with execution_mode=Subagent-Driven (not acme main, not user-directed inline)
+     AND accepted substantive fixes >= 3 spanning >= 2 production files
+     (a single production file plus its paired test file does NOT count):
+       Complete triage (fix / defer / reject) in main first, then dispatch ONE
+       batched routed-impl subagent to apply and test them in order; do not chain
+       repeated <3-line main-session edits.
+     ELSE (Inline mode, user-directed edit, single production file + paired test,
+           <3 substantive fixes, or acme main):
+       Implement directly in main one item at a time.
 ```
 
 ## When To Push Back

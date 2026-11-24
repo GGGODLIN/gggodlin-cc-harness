@@ -7,6 +7,8 @@
 set -uo pipefail
 
 STATE_FILE="docs/owner/STATE.md"
+# Fast-path: skip Python startup when cwd has no docs/owner/STATE.md.
+[ -e "$STATE_FILE" ] || [ -L "$STATE_FILE" ] || exit 0
 
 python3 - "$STATE_FILE" <<'PY' 2>/dev/null || exit 0
 import os

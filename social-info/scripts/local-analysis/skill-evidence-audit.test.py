@@ -90,5 +90,110 @@ with tempfile.TemporaryDirectory() as td:
     check("名稱正確", "has-skill", rows[0]["skill"])
     check("四訊號全中 → strong", "strong", rows[0]["evidence"])
 
+print("\n=== Markdown 表格邊界與多表格狀態機 ===")
+with tempfile.TemporaryDirectory() as td:
+    sd = Path(td)
+    (sd / "INVENTORY.md").write_text(
+        "\n".join(
+            [
+                "| Skill | Origin |",
+                "| ----- | ------ |",
+                "|nospace-self|self-written|",
+                "  | indented-self | self-written |",
+                "| [linked-skill](linked-skill/SKILL.md) | self-written |",
+                "| **bold-annotated** (patched) | self-written |",
+                r"| pipe-name \| alias | self-written |",
+                "| blank-origin |   |",
+                "| missing-col |",
+                "",
+                "Skill | Origin",
+                "--- | ---",
+                "outerless-self | self-written",
+                "",
+                "```markdown",
+                "| Skill | Origin |",
+                "| --- | --- |",
+                "| fenced-fake | self-written |",
+                "```",
+                "",
+                "## 無 Origin 欄的其他表格（不得污染或覆寫）",
+                "| Skill | 結論 | 證據 |",
+                "| --- | --- | --- |",
+                "| nospace-self | 保留 | 實測 |",
+                "| unrelated-row | 略 | x |",
+                "",
+                "| 情境 | 動作 |",
+                "| --- | --- |",
+                "| 新工具 | 紀錄 |",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    o = sea.origins(sd)
+    check("無空白前導 pipe → self", "self", o.get("nospace-self"))
+    check("縮排表格列 → self", "self", o.get("indented-self"))
+    check("無外層 pipe 表格 → self", "self", o.get("outerless-self"))
+    check("Markdown 連結展開 → self", "self", o.get("linked-skill"))
+    check("粗體附註記去星號 → self", "self", o.get("bold-annotated"))
+    check("跳脫 pipe 不錯欄 → self", "self", o.get("pipe-name"))
+    check("空 Origin 欄不誤判 cloned", None, o.get("blank-origin"))
+    check("缺 Origin 欄不誤判 cloned", None, o.get("missing-col"))
+    check("code fence 內表格忽略", None, o.get("fenced-fake"))
+    check("非 Origin 表格不污染鍵名", None, o.get("unrelated-row"))
+    check("中文說明表不污染鍵名", None, o.get("情境"))
+
+print("\n=== 異常檔案系統與 UTF-8 bytes ===")
+with tempfile.TemporaryDirectory() as td:
+    sd = Path(td)
+    (sd / "INVENTORY.md").mkdir()
+    check("INVENTORY.md 為目錄不崩潰", {}, sea.origins(sd))
+    missing = sd / "does-not-exist"
+    check("不存在 skills-dir collect 回空陣列", [], sea.collect(missing))
+    (sd / "utf8-skill").mkdir()
+    (sd / "utf8-skill" / "SKILL.md").write_text("中文測試", encoding="utf-8")
+    utf8_rows = sea.collect(sd)
+    check("bytes 回報真實 UTF-8 位元組數 12", 12, utf8_rows[0]["bytes"])
+
+print("\n=== 訊號精準度邊界 ===")
+check("斜線日期 2026/08/01 不誤報量化數字", False, sea.doc_signals("2026/08/01 更新紀錄")["num"])
+check("大寫 Fixture 命中 test", True, sea.doc_signals("## Fixture 說明")["test"])
+check("大寫 Probe 命中 test", True, sea.doc_signals("Probe verified")["test"])
+check("長編號 12026-99-999 不誤報日期", False, sea.doc_signals("編號 12026-99-999")["date"])
+check("無效日曆日期 2026-02-31 不誤報日期", False, sea.doc_signals("日期 2026-02-31")["date"])
+
+print("\n=== JSONL / settings.json 畸形節點容錯 ===")
+import io
+import contextlib
+import subprocess
+with tempfile.TemporaryDirectory() as td:
+    fake_home = Path(td)
+    proj = fake_home / ".claude" / "projects" / "p1"
+    proj.mkdir(parents=True)
+    (proj / "bad.jsonl").write_text(
+        '["Skill"]\n'
+        '{"type":"assistant","message":null,"extra":"Skill"}\n'
+        '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Skill","input":"not-a-dict"}]}}\n'
+        '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Skill","input":{"skill":"ok-skill"}}]}}\n',
+        encoding="utf-8",
+    )
+    (fake_home / ".claude" / "settings.json").write_text('{"skillOverrides": null}\n', encoding="utf-8")
+    skills_dir = fake_home / ".claude" / "skills"
+    (skills_dir / "ok-skill").mkdir(parents=True)
+    (skills_dir / "ok-skill" / "SKILL.md").write_text("純文字", encoding="utf-8")
+    res = subprocess.run(
+        [sys.executable, "-B", str(Path(__file__).parent / "skill-evidence-audit.py"), "--skills-dir", str(skills_dir)],
+        env={"HOME": str(fake_home), "PATH": "/usr/bin:/bin"},
+        capture_output=True,
+        text=True,
+    )
+    check("畸形 JSONL 與 null skillOverrides 正常完成", 0, res.returncode)
+    res_missing = subprocess.run(
+        [sys.executable, "-B", str(Path(__file__).parent / "skill-evidence-audit.py"), "--skills-dir", str(fake_home / "no-such-dir")],
+        env={"HOME": str(fake_home), "PATH": "/usr/bin:/bin"},
+        capture_output=True,
+        text=True,
+    )
+    check("CLI --skills-dir 不存在乾淨非 0 退出無 traceback", (True, False), (res_missing.returncode != 0, "Traceback" in res_missing.stderr))
+
 print(f"\n---- {PASS} passed, {FAIL} failed ----")
 sys.exit(1 if FAIL else 0)

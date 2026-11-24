@@ -11,9 +11,17 @@ set -uo pipefail
 # See [[feedback_hook_vendor_session_bypass_design]].
 [ -n "${CC_VENDOR:-}" ] && exit 0
 
+[ -n "${HOME:-}" ] || exit 0
 THRESHOLD=${SESSION_NUDGE_THRESHOLD:-95}
 DEBOUNCE_SECONDS=${SESSION_NUDGE_DEBOUNCE:-600}
 MARKER="$HOME/.claude/cache/session-limit-nudge.last"
+
+# Debounce check BEFORE sourcing resolve-account.sh and spawning jq (runs on every PostToolUse).
+if [ -f "$MARKER" ]; then
+  now=$(date +%s)
+  m=$(stat -f %m "$MARKER" 2>/dev/null || echo 0)
+  (( now - m < DEBOUNCE_SECONDS )) && exit 0
+fi
 
 # 帳號解析走 lib（兩段式：CLAUDE_CONFIG_DIR 優先、$HOME 退回）——只讀 $HOME 會在
 # lock session（cc -max / cc -team）讀錯帳號，該提醒則會在錯的時間跳。詳見 lib 檔頭。
@@ -22,16 +30,12 @@ email=$(cc_resolve_account_email) || exit 0
 f=$(cc_resolve_quota_file) || exit 0
 [ -f "$f" ] || exit 0
 u=$(jq -r '.data.five_hour.utilization // empty' "$f" 2>/dev/null)
-[[ "$u" =~ ^[0-9]+$ ]] || exit 0
-(( u >= THRESHOLD )) || exit 0
+[[ "$u" =~ ^[0-9]+(\.[0-9]+)?$ ]] || exit 0
+u_int="${u%%.*}"
+(( u_int >= THRESHOLD )) || exit 0
 
 pgrep -f session-limit-watch.sh >/dev/null 2>&1 && exit 0
 
-if [ -f "$MARKER" ]; then
-  now=$(date +%s)
-  m=$(stat -f %m "$MARKER" 2>/dev/null || echo 0)
-  (( now - m < DEBOUNCE_SECONDS )) && exit 0
-fi
 touch "$MARKER"
 
 resets=$(jq -r '.data.five_hour.resets_at // "n/a"' "$f" 2>/dev/null)

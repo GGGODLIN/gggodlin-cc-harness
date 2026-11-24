@@ -486,6 +486,11 @@ grep -F '...channelAgentOptions(c),' "$WORKFLOW" >/dev/null
 grep -F "c.channel === 'rba-verify'" "$WORKFLOW" >/dev/null
 grep -F 'channels 裡 needs_read=true 的，Read 它的 report_path 再濃縮成 3-5 行' "$HOOK" >/dev/null
 grep -F '任何含 ⚠️ 或 🚨 的行**原文保留**，不得濃縮或省略' "$HOOK" >/dev/null
-node --check "$WORKFLOW"
+node --input-type=module - "$WORKFLOW" <<'NODE'
+import fs from 'node:fs'
+const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor
+const src = fs.readFileSync(process.argv[2], 'utf8').replace('export const meta =', 'const meta =')
+new AsyncFunction(src)
+NODE
 
 printf 'RBA regression suite passed\n'

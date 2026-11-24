@@ -10,7 +10,7 @@ ok() { echo "PASS $1"; pass=$((pass+1)); }
 ng() { echo "FAIL $1"; fail=$((fail+1)); }
 
 A="$TMP/repoA"; B="$TMP/repoB"
-mkdir -p "$A/hooks" "$A/node_modules/x" "$A/.scratch" "$B/scripts"
+mkdir -p "$A/hooks" "$A/node_modules/x" "$A/.scratch" "$A/retired/old-skill" "$B/scripts"
 BASE="$TMP/baseline.tsv"
 run() {
   HASH_REFLOW_REPOS="A=$A;B=$B" HASH_REFLOW_BASELINE="$BASE" HASH_REFLOW_OUT="$TMP/out.md" \
@@ -25,13 +25,14 @@ printf 'digest = summarize(hash_table)\n' > "$A/hooks/plain.py"
 printf '#!/bin/sh\necho shasum -a 256 x\n' > "$B/scripts/runner"; chmod +x "$B/scripts/runner"
 printf 'const h = createHash("sha256")\n' > "$A/node_modules/x/dep.js"
 printf 'import hashlib\n' > "$A/.scratch/probe.py"
+printf 'import hashlib\n' > "$A/retired/old-skill/legacy.py"
 
 # 1. 先寫 baseline
 run --write-baseline >/dev/null
 grep -q $'^A\thooks/keep.py\t2$' "$BASE" && ok "baseline：keep.py 記 2 行命中" || ng "baseline：keep.py 計數錯（$(cat "$BASE" 2>/dev/null)）"
 grep -q $'^B\tscripts/runner\t1$' "$BASE" && ok "baseline：無副檔名可執行檔也納入" || ng "baseline：漏掉無副檔名可執行檔"
 grep -q 'plain.py' "$BASE" && ng "baseline：裸 digest／hash 字樣被誤抓" || ok "baseline：裸 digest／hash 不抓"
-grep -qE 'node_modules|\.scratch' "$BASE" && ng "baseline：排除目錄未生效" || ok "baseline：排除 node_modules／.scratch"
+grep -qE 'node_modules|\.scratch|retired' "$BASE" && ng "baseline：排除目錄未生效" || ok "baseline：排除 node_modules／.scratch／retired"
 
 # 2. 無變化 → __SILENT__
 out=$(run)

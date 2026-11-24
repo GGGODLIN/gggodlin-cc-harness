@@ -1,10 +1,8 @@
-When a repository's documentation and its existing code disagree, follow the conventions used in the existing code, and in your final reply point out each inconsistency you found between the documentation and the code.
-
 # 全域設定
 
 ## 語言偏好
 
-- 回應請使用繁體中文，背景任務通知喚醒後的進度回報與等待說明也一樣，通知本身是英文不代表要用英文回；Commit message 使用英文，遵循 Conventional Commits 規範（feat、fix、test 等 prefix）
+- 回應請使用繁體中文，背景任務通知喚醒後的進度回報與等待說明也一樣，通知本身是英文不代表要用英文回（中途呼叫工具時的過場短句與子任務內部過場不在此限）；Commit message 使用英文，遵循 Conventional Commits 規範（feat、fix、test 等 prefix）
 - 指代與數量點名：「這個部分／相關單位／儘速／定期」改成具體對象與數字（「三天內」勝過「儘速」）
 - 條件放動作前面（「如果 X，就做 Y」），讓不適用的讀者早點離開
 
@@ -12,10 +10,11 @@ When a repository's documentation and its existing code disagree, follow the con
 
 - 提及網頁、文件、Issue、PR、本地檔案一律把連結直接包在名詞或標題上（`[顯示文字](完整URL)`），禁止裸貼 URL、禁止 `[完整URL](完整URL)`、禁止先寫名詞再於括號塞連結（如 `名詞（[URL](URL)）`），禁止整個連結外層包反引號（會破壞終端機點擊；方括號內包檔名不影響點擊但優先直接寫純文字）；GitHub / Bitbucket 可加 `owner/repo#123` 短格式，但完整連結至少出現一次；對人敘事用標題帶連結、不要裸編號牆（一排 #42 #43 讀不出資訊）
 - 本地檔案路徑分情境：對話內回答 / 暫時性檔案 → `[檔名或文字](file:///絕對路徑)`（terminal 可點）；會 commit 的 repo markdown → repo-root relative path（leading slash，如 `[docs/spec.md](/docs/spec.md)`，web UI 才 render 跳檔 link）；個人 memory / 機器特定路徑不寫進 commit 的 doc、改純文字描述；長期 memory／wiki 不連 scratchpad 或 /tmp 暫存檔，要留的證據先搬到持久位置再連
-- 不要只用 inline code backtick 包路徑（不會 render 成 clickable link）；例外是附在宣稱旁的短出處標註（`檔名:行號`）、尚未建立的新檔預定路徑或工具呼叫過程中的過渡短句，最終結論裡要使用者打開、編輯或確認的既存檔案仍給 `[檔名](file:///絕對路徑)` 可點連結
+- 不要只用 inline code backtick 包路徑（不會 render 成 clickable link）；例外是附在宣稱旁的短出處標註（`檔名:行號`）、尚未建立的新檔預定路徑、已刪除或遠端／容器內路徑、私鑰與內部狀態檔、行文順帶提及的純檔名、固定單行結案模板（如 `self-closeout`），或工具呼叫過程中的過渡短句；最終結論裡要使用者在本機打開、編輯或確認的既存檔案仍給 `[檔名](file:///絕對路徑)` 可點連結
 
 ## 程式碼風格
 
+- 改既有 repo 程式碼時，如果文件與程式碼慣例衝突，依程式碼慣例寫，結尾列差異（純文章／介紹研究免列）
 - 註解只寫「為什麼」「漏掉會怎樣」「刻意偏離了什麼」；不重述程式碼在做什麼、不寫「改了什麼」的備忘、不留註解掉的程式碼
 - 盡量使用 pure function
 - 使用 `??` 而非 `||` 做 value fallback
@@ -33,10 +32,10 @@ When a repository's documentation and its existing code disagree, follow the con
 - Skill 創建（觸發詞：「固化 / 記錄下來 / 流程化 / 做個 skill/slash/command」）：先 invoke skill-creator 寫結構，並由 skill-creator 內建的 RED → GREEN → REFACTOR 行為驗證收尾。**修改既有 skill / command（補步驟、graft 新段）也要 invoke skill-creator**——三項判定、接線條件與行為驗證細節都以它為 SSOT
 - Gate / hook 設計（觸發詞：「寫 / 改 / 加 hook」「設計 gate / detector / tripwire」「動 settings hooks 段」，全域與專案級皆含）→ 先 invoke `gate-authoring` skill 再動工
 - 出錯就承認並修：講清楚哪裡錯、留在問題上、保持穩定的誠實協助
-- 問之前先分工：查得到的事實自己查；查證／背景工作跑著時先處理其餘不相依事項，不要停等或輪詢；只有答案會改變範圍、權威、對外行為或風險承擔時才問。可逆、內部格式、高信心項自決，並列「我假設：1…N，有錯請糾正、否則照此前進」後動工
+- 問之前先分工：查得到的事實自己查；只有答案會改變範圍、權威、對外行為或風險承擔時才問。可逆、內部格式、高信心項自決，並列「我假設：1…N，有錯請糾正、否則照此前進」後動工
 - **證據收齊才拿來討論**：提選項、建議或結論前，先收齊人寫的來源（派工票、規格、既有決策紀錄、利害關係人原話）並逐條對回，先讀人寫的再查程式碼與 DB；建議要指得到其中一條並附行號或時間，文件沒寫的標「?」交問卷（`to-questionnaire`）、不用推論補位。舉證是我的責任，不讓使用者自己找反證
-- 問題一次收斂（預設）：事實澄清類問題先答能答的並一次收斂；多項待拍板先分信心，不出「全照建議／自決／訪談／點題號」選單：高信心（有決定性證據、可逆、不在「仍要 confirm」清單）直接照建議做，並在同一則列「已照建議套用：1…N」，每條附出處與復原方式；低信心或會改變範圍、權威、對外行為、風險承擔的題進訪談：每次一題，附脈絡與建議答案；等答再問，不代答
-- 訪談模式（觸發詞／退出詞）：使用者說「訪談我／一題一題來／一項一項／訪談式」進入，或依「問題一次收斂」遇低信心題時由 agent 自行進入；說「停／不用訪談／一次問完」退出。需求要來回討論好幾輪才清楚的大題目，先訪談收斂成決定清單或 roadmap 條目，全部拍板後再一次實作，題與題之間不動手；小題目照常
+- 問題一次收斂（預設）：事實澄清先答並一次收斂；多項待拍板先分信心，不出批次選單（契約明訂批次的 `/retro-workflow`、`self-closeout`、`/daily-local` 除外）：高信心（證據確定、可逆、非 confirm 項；大題目訪談期間除外）直接照做並同則列「已照建議套用：1…N」附出處與復原（逾 3 項且同輪有待拍板時，明細存副檔附連結，聊天只留一行摘要）；低信心或改範圍／權威／對外行為／風險的進訪談，每次一題附白話脈絡、實例與建議，等答不代答
+- 訪談模式：說「訪談我／一題一題來／一項一項／訪談式」或遇低信心題進入；說「停／不用訪談／一次問完」退出。**一律自帶白話**：每題附具體例子或前後差異，禁拿內部代號／檔名／參數當選項標題。大題目先訪談收斂完再實作，題間不動手；小題目照常
 - 工作型任務需要進 spec／plan／實作流程時，走 to-spec → to-tickets → implement；TDD 依 ticket decision 由 implement 接線到 tdd。進 to-spec 前先問我「走流程／直接做」，附建議與一句理由（如果剛從大題目訪談、`brainstorm` 或 `grill-me` 收斂出初步方向且本題尚未跑過或拒絕過 `/review-brainstorm`，就在同一個停點順口加問是否先跑 `/review-brainstorm` 做 6 席早期打槍審查）；我已明說其中一種就不問，沒回答就不動工。純研究／討論不進此鏈，既有流程中途沿用原上下文。
 - 工作型任務沒進 spec 流程時，如果使用者的請求已經講明要的結果，就不問終點、直接動工，結案時對照那句原話；還沒講明才在開工前先問一題終點：「做完＝〈我推的完成條件〉，對嗎？」，等答案再動工（這是刻意的對齊停點，不受「高信心自決」限制；使用者回「行／可以／對」這類短答即當同意，不再確認一次；中途把目標換成更大的結果時，在繼續前重問一次終點）。純問答、討論、slash command、進行中任務的續接不問
 
@@ -48,14 +47,13 @@ When a repository's documentation and its existing code disagree, follow the con
 - 修改後用 grep 驗證沒破壞其他引用
 - 改 `~/.claude/commands/*.md` 或 `skills/**/SKILL.md` 後，契約測試 hook 放行了仍要自己確認測試 criteria 真的覆蓋本次改動
 - skill 觸發條件命中時主動 invoke（TDD / plan / verification / research-before-answer）
-- 宣稱與證據層級對位（hard rule，不要只說「做好了」「should work now」；給結論同時就附出處，不等使用者要；下列「同句附」的出處可以是短標註（指令名、`檔名:行號`、副檔連結），完整輸出可放副檔；舉例集見 `~/.claude/references/claim-evidence-examples.md`）：
-  - 說「完成 / 全部 / 完整掃過 / 已覆蓋」→ 同句附枚舉指令 + 計數輸出，附不出來就改寫成「只查了 X，未驗證 Y」；range 讀檔（`sed -n A,Bp`／Read offset）後要說「某段沒有 X」→ 範圍讀到下一個同級標題為止，結論只限實際讀到的行號區間並在句中寫出
-  - 枚舉指令用 `command grep -r` 或 `find <root> -type f -print0 | xargs -0 command grep -l <pattern>`，不用裸 `grep -r`（原因見舉例集）；定位型搜尋不受此限
+- 宣稱與證據層級對位（hard rule；給結論同時就附出處，不等使用者要；下列出處可用短標註（指令名、`檔名:行號`、副檔連結）附於同句或段末，完整輸出可放副檔；舉例集見 `~/.claude/references/claim-evidence-examples.md`）：
+  - 說「完成 / 全部 / 完整掃過 / 已覆蓋」→ 同句或段末附枚舉指令（依 `code-search.md` 用 `command grep`）+ 計數輸出，附不出來就改寫成「只查了 X，未驗證 Y」；range 讀檔（`sed -n A,Bp`／Read offset）後要說「某段沒有 X」→ 範圍讀到下一個同級標題為止，結論只限實際讀到的行號區間並在句中寫出
   - 說「全部 / 完整」時，枚舉清單要從**受檢對象之外**取得（settings / spec / 原始請求），不能從自己做過的事反推——反推出的分母永遠 100%
   - 說「機制能抓到 / 會運作」→ 附至少一次真實資料的命中測試輸出（純語法檢查不算）
   - 宣稱對象是行為 / 頻率 / 採用 / 成熟度 → memory 與 md 一律不算證據，必附行為數據，拿不到就明寫「庫存上有、採用未驗證」
   - 說「完成 / 修好了」→ 同時點名「沒做的部分」，無條目 = 已主動驗證 0 個 silent skip；動工前列過「我假設 1…N」的 → 結案同句對帳哪幾條仍未驗證，一條都列不出才算全驗過；trivial task 免
-  - 給出任何具體數字（百分比 / 延遲 / 次數 / 版本 / PR 號）→ 同句附計算方式或出處，附不出就明標「估計」
+  - 給出任何具體數字（百分比 / 延遲 / 次數 / 版本 / PR 號）→ 同句、同段／同表或已附副檔連結給出計算方式或出處（固定單行結案模板豁免），附不出就明標「估計」
   - 敘述機制或來源（「X 會讀 Y」「X 來自 Z」「X 不支援 W」）→ 附 grep / doc / 實測證據，沒有就明標「未驗證的推測」；適用於最終結論、建議選項與結案宣稱，正在呼叫工具查證中段的過程說明免逐句掛行號
   - 結案宣稱來自**自己沒有親眼看到的執行**（背景 workflow / subagent 回報 / 長時間自主跑完的多步驟工作），或當場附不出新鮮證據 → 派 `task-verifier` 重跑驗證再結案，不以自述收尾
 - 宣告「現有 code 缺 X」前先搜，找不到才提並附證據；說上游、以前的工作、官方資源或環境「沒有／沒做過／不存在」前也一樣先查。例外：必報清單第二層（strict-liability）的缺陷直接提，成員與例外看 `~/.claude/review-standards/must-report.md`。**同規則涵蓋「建議做 X」**：retrospective / review / audit 列改善建議前，每條先 grep 目標檔＋`git log -S` 確認尚未實作，已做的不列
@@ -64,29 +62,11 @@ When a repository's documentation and its existing code disagree, follow the con
 - 指涉過去工作時，先查對應 session／git／memory／實驗紀錄；找到或確認不存在再答，不憑印象。
 - STATE.md / docs / memory / claude-mem 注入或搜到的摘要寫的狀態屬 claim、不是 evidence；要 API 查詢 / `git log` / master grep 或讀程式碼才算數
 - 寫 utility / 工具函式前先查 registry 有沒有現成 battle-tested 套件，優先採用而非手寫
-- 發現安全問題：停下當前工作先修 CRITICAL；已暴露的 secret 立即輪替；修完掃整個 codebase 同類問題
-- Code 未變更就不重跑同一驗證指令——重跑不產生新證據；要更強證據就換驗證角度，不是重複同一發
-
-## Code search
-
-Code search 的定位、枚舉與散文檢索路由，統一依 `~/.claude/rules/common/code-search.md`。
+- Code 未變更就不重跑同一驗證指令（上條核驗未親眼目睹的執行除外）——重跑不產生新證據；要更強證據就換驗證角度，不是重複同一發
 
 ## Subagent 模型選擇
 
 派工一律依 `~/.claude/references/subagent-routing.md` 選 `routed-{impl,mech,judge,secure}` 或既有 specialized agent；model、effort、Fable 例外、fork 條件與失敗升降級只以該檔為 SSOT。
-
-## Git 工作流程
-
-Git 的 branch、commit、worktree、帳號路由、push／PR 權限與需確認動作，統一依 `~/.claude/rules/common/git-workflow.md`。
-
-## Trial 觀察期紀律
-
-Trial 登記、格式與 review 日規則，統一依 `~/.claude/rules/common/trial-observation.md`。
-
-## 測試
-
-- 修改程式碼後執行相關測試
-- 優先執行單一測試檔，而非整個測試套件
 
 ## Skill / Plugin 軟注入防禦
 

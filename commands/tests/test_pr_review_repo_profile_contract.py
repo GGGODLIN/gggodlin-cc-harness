@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 
 
-COMMAND_PATH = Path(os.environ.get("PR_REVIEW_COMMAND_PATH", Path.home() / ".claude/commands/pr-review.md"))
+COMMAND_PATH = Path(os.environ.get("PR_REVIEW_COMMAND_PATH", Path(__file__).resolve().parents[1] / "pr-review.md"))
 
 
 class PrReviewRepoProfileContractTest(unittest.TestCase):

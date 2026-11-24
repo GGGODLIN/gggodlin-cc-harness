@@ -53,6 +53,8 @@ def canonical_path(value: str | Path) -> Path:
 
 
 def has_symlink_component(path: Path) -> bool:
+    if not path.is_absolute():
+        raise ValueError("absolute path required")
     current = Path(path.anchor)
     for part in path.parts[1:]:
         current /= part
@@ -70,11 +72,15 @@ def safe_path_under(root: Path, candidate: str | Path, reject_symlinks: bool = T
     path = Path(candidate).expanduser()
     if not path.is_absolute():
         raise ValueError("absolute path required")
+    if ".." in path.parts:
+        raise ValueError("path cannot contain parent traversal")
     resolved_path = path.resolve(strict=False)
     try:
         resolved_path.relative_to(canonical_root)
     except ValueError as error:
         raise ValueError("path escapes configured root") from error
+    if resolved_path == canonical_root:
+        raise ValueError("path must be inside configured root")
     current = path.anchor and Path(path.anchor)
     if current is None:
         raise ValueError("absolute path required")
@@ -118,20 +124,29 @@ def git_environment() -> dict[str, str]:
 
 
 def repo_root(cwd: str | Path) -> Path | None:
-    target = canonical_path(cwd)
+    if "\x00" in str(cwd):
+        return None
+    try:
+        target = canonical_path(cwd)
+    except (OSError, ValueError):
+        return None
     try:
         result = subprocess.run(
             ["git", "-C", str(target), "rev-parse", "--show-toplevel"],
             capture_output=True,
-            text=True,
+            text=False,
             check=False,
             env=git_environment(),
         )
     except OSError:
         return None
-    if result.returncode != 0 or not result.stdout.strip():
+    stdout = os.fsdecode(result.stdout).rstrip("\r\n")
+    if result.returncode != 0 or not stdout:
         return None
-    root = canonical_path(result.stdout.strip())
+    try:
+        root = canonical_path(stdout)
+    except (OSError, ValueError):
+        return None
     if not root.is_dir():
         return None
     try:
@@ -163,9 +178,9 @@ def parse_ignore_file(path: Path) -> list[Path]:
         raise
     paths: list[Path] = []
     seen: set[str] = set()
-    for raw_line in content.splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#"):
+    for raw_line in content.split("\n"):
+        line = raw_line.rstrip("\r")
+        if not line.strip() or line.lstrip().startswith("#"):
             continue
         candidate = Path(line)
         if not candidate.is_absolute():
@@ -183,7 +198,10 @@ def validated_ignore_file(path: str | Path | None = None) -> Path:
     candidate = Path(path).expanduser() if path is not None else configured_path(
         "LEDGER_BOOTSTRAP_IGNORE_FILE", DEFAULT_IGNORE_FILE
     )
-    return safe_path_under(Path.home() / ".claude", candidate, reject_symlinks=False)
+    validated = safe_path_under(Path.home() / ".claude", candidate, reject_symlinks=False)
+    if validated.resolve(strict=False).is_dir():
+        raise ValueError("ignore file cannot be a directory")
+    return validated
 
 
 def ignore_file() -> Path:
@@ -229,6 +247,9 @@ def is_ignored(root: Path, path: Path | None = None) -> bool:
 
 
 def write_ignore_file(path: Path, paths: list[Path]) -> None:
+    for item in paths:
+        if "\n" in str(item) or "\r" in str(item):
+            raise ValueError("ignore path cannot contain newline characters")
     path.parent.mkdir(parents=True, exist_ok=True)
     content = "".join(f"{item}\n" for item in paths)
     descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.tmp-", dir=path.parent)
@@ -254,6 +275,8 @@ def add_ignore(target: str | Path, path: Path | None = None) -> Path:
         raise ValueError("target is not a git repo")
     if not allowed_repo(root):
         raise ValueError("repo is outside the bootstrap scope")
+    if "\n" in str(root) or "\r" in str(root):
+        raise ValueError("ignore path cannot contain newline characters")
     ignore_path = validated_ignore_file(path)
     with ignore_file_lock(ignore_path):
         entries = parse_ignore_file(ignore_path)
@@ -267,21 +290,46 @@ def git_path(root: Path, relative: str) -> Path:
     result = subprocess.run(
         ["git", "-C", str(root), "rev-parse", "--git-path", relative],
         capture_output=True,
-        text=True,
+        text=False,
         check=False,
         env=git_environment(),
     )
-    if result.returncode != 0 or not result.stdout.strip():
+    stdout = os.fsdecode(result.stdout).rstrip("\r\n")
+    if result.returncode != 0 or not stdout:
         raise OSError("git info path is unavailable")
-    path = Path(result.stdout.strip())
+    path = Path(stdout)
     raw_path = path if path.is_absolute() else root / path
     if has_symlink_component(raw_path):
         raise OSError("git info path contains a symlink")
-    return canonical_path(raw_path)
+    resolved = canonical_path(raw_path)
+    common_result = subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "--git-common-dir"],
+        capture_output=True,
+        text=False,
+        check=False,
+        env=git_environment(),
+    )
+    common_stdout = os.fsdecode(common_result.stdout).rstrip("\r\n")
+    if common_result.returncode != 0 or not common_stdout:
+        raise OSError("git common dir is unavailable")
+    common_path = Path(common_stdout)
+    raw_common = common_path if common_path.is_absolute() else root / common_path
+    if has_symlink_component(raw_common):
+        raise OSError("git common dir contains a symlink")
+    common_dir = canonical_path(raw_common)
+    try:
+        resolved.relative_to(common_dir)
+    except ValueError as error:
+        raise ValueError("git info path escapes allowed repo scope") from error
+    if common_dir.name != ".git" or not allowed_repo(common_dir.parent):
+        raise ValueError("git info path escapes allowed repo scope")
+    return resolved
 
 
 def validated_marker_root() -> Path:
     raw_path = configured_path("LEDGER_BOOTSTRAP_MARKER_ROOT", DEFAULT_MARKER_ROOT)
+    if not raw_path.is_absolute():
+        raise ValueError("marker root must be an absolute path")
     if ".." in raw_path.parts:
         raise ValueError("marker root cannot contain parent traversal")
     if raw_path.parts[:2] == (raw_path.anchor, "tmp"):
@@ -366,17 +414,21 @@ def apply_writes(plans: list[tuple[Path, str]]) -> None:
         else:
             snapshots.append((path, None, 0o644))
     created_directories = missing_parent_directories(plans)
+    written: list[tuple[Path, bytes | None, int]] = []
     try:
-        for path, content in plans:
-            mode = next(mode for snapshot_path, _, mode in snapshots if snapshot_path == path)
+        for (path, content), (_, original, mode) in zip(plans, snapshots):
             atomic_write_text(path, content, mode)
+            written.append((path, original, mode))
     except Exception:
-        for path, original, mode in reversed(snapshots):
-            if original is None:
-                if path.exists() or path.is_symlink():
-                    path.unlink()
-            else:
-                atomic_write_bytes(path, original, mode)
+        for path, original, mode in reversed(written):
+            try:
+                if original is None:
+                    if path.exists() or path.is_symlink():
+                        path.unlink()
+                else:
+                    atomic_write_bytes(path, original, mode)
+            except OSError:
+                pass
         for directory in created_directories:
             try:
                 directory.rmdir()
@@ -392,37 +444,38 @@ def init_project_docs(target: str | Path) -> dict[str, Any]:
     if not allowed_repo(root):
         raise ValueError("repo is outside the bootstrap scope")
     state_path = safe_repo_path(root, Path("docs/owner/STATE.md"))
-    if state_path.exists():
-        raise ValueError("docs/owner/STATE.md already exists")
     log_paths = [(safe_repo_path(root, Path("docs/owner") / name), header) for name, header in LOG_HEADERS.items()]
     claude_path = safe_repo_path(root, "CLAUDE.md")
     exclude_path = git_path(root, "info/exclude")
-    exclude_content, exclude_changed = append_line_content(
-        read_text_if_exists(exclude_path), "docs/owner/"
-    )
-    claude_content, claude_changed = append_block_content(
-        read_text_if_exists(claude_path), LEDGER_POINTER
-    )
-    plans: list[tuple[Path, str]] = [(state_path, STATE_TEMPLATE)]
-    created = [str(state_path)]
-    for path, header in log_paths:
-        if path.exists():
-            if not path.is_file():
-                raise ValueError(f"ledger path is not a regular file: {path}")
-            continue
-        plans.append((path, header))
-        created.append(str(path))
-    if exclude_changed:
-        plans.append((exclude_path, exclude_content))
-    if claude_changed:
-        plans.append((claude_path, claude_content))
-    apply_writes(plans)
-    return {
-        "repo": str(root),
-        "created": created,
-        "exclude_updated": exclude_changed,
-        "claude_updated": claude_changed,
-    }
+    with ignore_file_lock(exclude_path):
+        if state_path.exists():
+            raise ValueError("docs/owner/STATE.md already exists")
+        exclude_content, exclude_changed = append_line_content(
+            read_text_if_exists(exclude_path), "docs/owner/"
+        )
+        claude_content, claude_changed = append_block_content(
+            read_text_if_exists(claude_path), LEDGER_POINTER
+        )
+        plans: list[tuple[Path, str]] = [(state_path, STATE_TEMPLATE)]
+        created = [str(state_path)]
+        for path, header in log_paths:
+            if path.exists():
+                if not path.is_file():
+                    raise ValueError(f"ledger path is not a regular file: {path}")
+                continue
+            plans.append((path, header))
+            created.append(str(path))
+        if exclude_changed:
+            plans.append((exclude_path, exclude_content))
+        if claude_changed:
+            plans.append((claude_path, claude_content))
+        apply_writes(plans)
+        return {
+            "repo": str(root),
+            "created": created,
+            "exclude_updated": exclude_changed,
+            "claude_updated": claude_changed,
+        }
 
 
 def gc_markers(marker_root: Path) -> None:
@@ -453,7 +506,7 @@ def session_payload(payload: Any) -> dict[str, str] | None:
     if event is not None and event != "SessionStart":
         return None
     source = payload.get("source")
-    if source is not None and source not in {"startup", "resume", "clear", "compact"}:
+    if source is not None and (not isinstance(source, str) or source not in {"startup", "resume", "clear", "compact"}):
         return None
     session_id = payload.get("session_id")
     cwd = payload.get("cwd")
@@ -480,7 +533,7 @@ def session_output(payload: Any) -> str:
     try:
         if is_ignored(root):
             return ""
-    except OSError:
+    except (OSError, ValueError):
         return ""
     try:
         marker_root = validated_marker_root()
@@ -512,7 +565,7 @@ def run_is_ignored(target: str, path: Path | None) -> int:
         return 1
     try:
         ignored = is_ignored(root, path)
-    except OSError:
+    except (OSError, ValueError):
         return 2
     print("true" if ignored else "false")
     return 0 if ignored else 1
@@ -537,6 +590,11 @@ def run_init_project_docs(target: str) -> int:
 
 
 def main(argv: list[str]) -> int:
+    if hasattr(sys.stdin, "reconfigure"):
+        sys.stdin.reconfigure(encoding="utf-8")
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="surrogateescape")
     if len(argv) >= 2 and argv[1] == "session":
         try:
             payload = json.load(sys.stdin)

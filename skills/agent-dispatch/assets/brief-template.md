@@ -19,6 +19,7 @@
 - 不跑 review-implement，main 會對這個 worktree 跑。
 - 測試帶 `--maxWorkers=3`，不同時跑多個 build。
 - 手動截圖與 curl 收據放 `{{receipts_dir}}`，不放會被測試清掉的目錄。
+- 票改到網頁 UI 時，交付前在專案根目錄對自己起的 dev 或 preview server 跑 `node ~/.claude/scripts/ui-check/check_ui.mjs <url> --out {{receipts_dir}}/ui-check`，回報附 `report.json` 路徑與裡面列出的問題。exit 2 代表找不到 Playwright：寫明沒跑，不要為此加依賴。
 - 改到測試檔就照全域 mutation-testing skill 出收據；等價 mutant 的處理照這個 repo 的慣例。
 
 ## 脈絡

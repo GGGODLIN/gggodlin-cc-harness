@@ -1,4 +1,5 @@
 import { buildAnchorBlock } from "./anchor.mjs";
+import { buildMicroAnchor } from "./micro-anchor.mjs";
 import { renderRecoveryPacket, selectEvidence } from "./text.mjs";
 import {
   extractMessages,
@@ -7,9 +8,9 @@ import {
 } from "./transcript.mjs";
 import {
   appendAudit,
+  claimCheckpointInjection,
   hashSessionId,
   isDisabled,
-  markCheckpointInjected,
   readCheckpoint,
   writeCheckpoint
 } from "./storage.mjs";
@@ -256,13 +257,15 @@ const handleSessionStart = async ({ vendor, input, env }, options, state) => {
     return jsonResult({ systemMessage: MISSING_CHECKPOINT });
   }
   try {
-    const checkpoint = await readCheckpoint({
+    const claim = await claimCheckpointInjection({
       vendor,
-      sessionId: input.session_id
+      sessionId: input.session_id,
+      injectedAt: timestamp
     }, state);
+    const checkpoint = claim.checkpoint;
     const transcriptPath = checkpoint?.transcriptPath ?? input.transcript_path;
     const surface = await resolveSurface(vendor, transcriptPath, env);
-    if (!checkpoint) {
+    if (claim.status === "missing") {
       await tryAudit({
         ...auditBase({
           event: "injection",
@@ -277,7 +280,7 @@ const handleSessionStart = async ({ vendor, input, env }, options, state) => {
       }, state);
       return jsonResult({ systemMessage: MISSING_CHECKPOINT });
     }
-    if (typeof checkpoint.injectedAt === "string") {
+    if (claim.status === "already_injected") {
       await tryAudit({
         ...auditBase({
           event: "injection",
@@ -295,20 +298,27 @@ const handleSessionStart = async ({ vendor, input, env }, options, state) => {
       ...checkpoint,
       evidence: checkpoint.entries
     });
+    let microAnchor = null;
+    if (vendor === "claude") {
+      try {
+        microAnchor = await (options?.buildMicroAnchor ?? buildMicroAnchor)({
+          checkpoint,
+          recoveryPacket
+        });
+      } catch {}
+    }
     let anchor = null;
     if (vendor === "claude") {
       try {
-        anchor = await (options?.buildAnchorBlock ?? buildAnchorBlock)({ checkpoint, env, home: options?.home });
+        const home = options?.home ?? (
+          typeof env?.HOME === "string" && env.HOME.length > 0 ? env.HOME : undefined
+        );
+        anchor = await (options?.buildAnchorBlock ?? buildAnchorBlock)({ checkpoint, env, home });
       } catch {}
     }
-    const additionalContext = anchor ? `${recoveryPacket}\n\n${anchor.text}` : recoveryPacket;
-    try {
-      await markCheckpointInjected({
-        vendor,
-        sessionId: input.session_id,
-        injectedAt: timestamp
-      }, state);
-    } catch {}
+    const additionalContext = [recoveryPacket, microAnchor, anchor?.text]
+      .filter(Boolean)
+      .join("\n\n");
     await tryAudit({
       ...auditBase({
         event: "injection",

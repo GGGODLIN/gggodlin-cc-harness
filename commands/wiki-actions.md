@@ -1,12 +1,14 @@
 ---
-description: 讀今日 wiki-* report（lint / cross-link / graduation / stale 4 個 action 類合併 + candidates 候選 FYI）、user 拍板後執行 one-liner / 寫 frontmatter
+description: 讀今日 wiki-* report（lint / cross-link / graduation / stale 4 個 action 類合併 + candidates 候選 FYI）；/daily-local 自動入口僅直接派 wiki-refresher 刷新內容並留其餘清單待決，手動入口等 user 拍板後執行 one-liner / 寫 frontmatter
 ---
 
 # Wiki Actions
 
-讀今日 5 個 wiki-* report：lint / cross-link / graduation / stale 四個 action 類 report 合併「🎯 今日推薦 actions」段、按 priority + entity group 排序；candidates report 沒有該 heading、獨立處理成報告末尾的「候選 FYI」段（Step 4）。user 拍板後執行批准 action 並寫 frontmatter 標記。
+讀今日 5 個 wiki-* report：lint / cross-link / graduation / stale 四個 action 類 report 合併「今日推薦 actions」段（相容有無 `🎯` 前綴）、按 priority + entity group 排序；candidates report 沒有該 heading、獨立處理成報告末尾的「候選 FYI」段（Step 4）。
 
-**唯一寫入端**（4 sibling + wiki-candidates 全 read-only）。入口兩條：`/daily-local` digest 產完自動接跑（2026-08-25 拍板全自動、不需使用者認知），或使用者手動 `/wiki-actions`。
+**唯一寫入端**（4 sibling + wiki-candidates 全 read-only）。入口分兩條且授權邊界不同：
+- **`/daily-local` 自動接跑入口**（無人值守）：僅自動派 `wiki-refresher` 執行 `stale／memory delta 刷新型` 並直接 commit；其餘帶 `one-liner` 或需寫 frontmatter 的項目**一律不自動改檔**，合併成待辦清單附於報告末尾留待使用者後續拍板。
+- **手動 `/wiki-actions` 入口**：呈現合併清單後等 user 拍板，再經 Guard 1–4 與 show diff 確認後執行批准的 one-liner 與 frontmatter 標記。
 
 ## 1. 讀今日 5 個 report
 
@@ -18,13 +20,13 @@ for aspect in candidates lint cross-link graduation stale; do
 done
 ```
 
-如果某個 report missing → 跟 user 確認是 sibling 短路 (< 500 bytes) 還是當日跑失敗、要不要重跑該 sibling。
+如果某個 report missing：手動入口跟 user 確認是 sibling 短路 (< 500 bytes) 還是當日跑失敗、要不要重跑該 sibling；`/daily-local` 自動入口不阻塞等待，在摘要標記 missing 並繼續處理其餘已存在的報告。
 
 candidates report 讀進來後**不進 Step 2-3 的機械合併**、只走 Step 4 的候選 FYI 處理。
 
-## 2. 抽四個 action 類 report 「🎯 今日推薦 actions」段
+## 2. 抽四個 action 類 report 「今日推薦 actions」段
 
-**只對 lint / cross-link / graduation / stale 四個 action 類 report** 抽出 `## 🎯 今日推薦 actions` 之後到 next `##` 之前的內容。candidates report 從來沒有這個 heading（它的段落是 掃描範圍 / 升級候選 / 不確定待決 等）、不在本步驟範圍。
+**只對 lint / cross-link / graduation / stale 四個 action 類 report** 抽出 `## 🎯 今日推薦 actions` 或無圖示的 `## 今日推薦 actions`（正則 `^## (?:🎯\s*)?今日推薦 actions\b`）之後到 next `##` 之前的內容。candidates report 從來沒有這個 heading（它的段落是 掃描範圍 / 升級候選 / 不確定待決 等）、不在本步驟範圍。
 
 Parse 成 actions list，每個 action 含：
 - `sibling` (lint / cross-link / graduation / stale)
@@ -92,9 +94,10 @@ candidates report 不進 Step 2-3 的機械 one-liner 合併，照以下步驟�
 3. 候選 FYI 只提示、不執行：不進 Step 5 拍板 queue、不進 Step 6 執行流程（呼應 wiki-candidates-daily.sh 自身「絕不執行 /wiki-promote」的設計意圖）
 4. candidates report missing 或「升級候選」為空 → 候選 FYI 段整段省略、不出聲
 
-## 5. 等 user 拍板
+## 5. 依入口分流（自動接跑 vs 等 user 拍板）
 
-報告完 surface 後等 user 自然語言回應，按以下 pattern 彈性匹配自然語言，不限下列措辭：
+- **若目前由 `/daily-local` 自動接跑進入（無人值守）**：**不等待 user 回應**，僅將合併清單中屬於 `stale／memory delta 刷新型`（無 one-liner、由 `wiki-refresher` 吸收記憶結論）的項目視為已預先授權，直接進入 Step 6.2 派 `wiki-refresher` 執行並 commit；其餘所有 `one-liner` 修改與 frontmatter 標記項目**一律禁止自動執行**，原樣保留於合併清單作為待決提醒後直接跳至 Step 8 輸出 summary。
+- **若目前由使用者手動輸入 `/wiki-actions` 進入**：報告完 surface 後等 user 自然語言回應，按以下 pattern 彈性匹配自然語言，不限下列措辭：
 
 - **Approve all**: 「全部做」/「all」/「都做」/「approve all」
 - **Approve specific entity**: 「做 entity-X」/「entity-X, entity-Y」/「除了 X 都做」
@@ -187,8 +190,7 @@ wiki_lint:
   broken_link_xxx: declined
 
 # hold 例：
-wiki_graduation:
-  hold-until-cluster-stable
+wiki_graduation: hold-until-cluster-stable
 
 # override 例：
 wiki_stale:
@@ -211,6 +213,6 @@ wiki_stale:
 ## 紀律
 
 - **不放 hook、不放 cron**；自動入口只有 `/daily-local` 收尾那一條（見檔頭）
-- **dry-run 預設**（Guard 3 是核心紅線）
-- **寫入前 show diff**（不論 wiki entity 或 frontmatter）
+- **dry-run 預設**（手動入口執行 one-liner 時 Guard 3 是核心紅線；自動入口完全不執行 one-liner）
+- **寫入邊界明確**：手動入口寫入 one-liner 或 frontmatter 前必 show diff 等 user 確認；`/daily-local` 自動入口僅授權 `wiki-refresher` 在核對授權路徑無越界後直接 commit，其餘改動一律只列清單等使用者拍板
 - 4 sibling + wiki-candidates 全 read-only，本 command 是唯一寫入端

@@ -11,7 +11,7 @@ expected="$(printf '%s\n' "$TMP/alpha.md" "$TMP/beta.md")"
 test "$actual" = "$expected"
 
 prompt="$(bash "$DIR/wiki-graduation-daily.sh")"
-grep -F "$DIR/wiki-entity-paths.sh" <<< "$prompt" >/dev/null
+grep -F '~/code/social-info/scripts/local-analysis/wiki-entity-paths.sh' <<< "$prompt" >/dev/null
 grep -F '所有 entity 計數、分桶與候選掃描只能使用這份輸出' <<< "$prompt" >/dev/null
 grep -F 'C1/C2 匯總數字每日必重算' <<< "$prompt" >/dev/null
 grep -F '禁止沿用前日報告字面數字' <<< "$prompt" >/dev/null

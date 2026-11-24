@@ -588,16 +588,30 @@ def quote_location(text, quote):
 
 def requirement_blocks(text):
   lines = text.splitlines(keepends=True)
+  in_fence = None
+  fence_flags = [False] * len(lines)
+  for index, line in enumerate(lines):
+    stripped = line.rstrip("\r\n")
+    if in_fence is None:
+      opened = re.match(r"^ {0,3}(`{3,}|~{3,})", stripped)
+      if opened and not (opened.group(1)[0] == "`" and "`" in stripped[opened.end():]):
+        in_fence = (opened.group(1)[0], len(opened.group(1)))
+        fence_flags[index] = True
+    else:
+      fence_flags[index] = True
+      fence_char, fence_len = in_fence
+      if re.fullmatch(rf" {{0,3}}{re.escape(fence_char)}{{{fence_len},}}\s*", stripped):
+        in_fence = None
   starts = [
     index
     for index, line in enumerate(lines)
-    if re.match(r"^###\s+Requirement:\s*", line)
+    if not fence_flags[index] and re.match(r"^###\s+Requirement:\s*", line)
   ]
   blocks = []
   for start in starts:
     end = len(lines)
     for index in range(start + 1, len(lines)):
-      if re.match(r"^#{1,3}\s+", lines[index]):
+      if not fence_flags[index] and re.match(r"^#{1,3}\s+", lines[index]):
         end = index
         break
     blocks.append({
@@ -782,10 +796,10 @@ def resolve_authority(root, candidate, authored_diff_base=None, review_head=None
       if not source_path.is_relative_to(archive_root):
         return skipped("C4_SPEC_PATH_OUTSIDE_ARCHIVE_ROOT")
     text = read_utf8_exact(source_path)
-  except ValueError as error:
-    return skipped(str(error))
   except (OSError, UnicodeDecodeError):
     return skipped("C4_SPEC_CONTENT_INVALID")
+  except ValueError as error:
+    return skipped(str(error))
   location = quote_location(text, candidate["exact_quote"])
   if location is None:
     return skipped("C4_CANONICAL_QUOTE_NOT_UNIQUE")
@@ -951,6 +965,10 @@ def path_has_symlink(root, relative_path):
   return False
 
 
+def target_path_key(item):
+  return item.get("target_identity", ""), item["path"]
+
+
 def packet_valid(packet):
   if not schema_valid(PACKET_VALIDATOR, packet) or not utf8_valid(packet):
     return False
@@ -967,12 +985,12 @@ def packet_valid(packet):
   if unique_index(packet["evidence_bindings"], "binding_id") is None:
     return False
   spec_paths = [item["path"] for item in packet["spec_files"]]
-  changed_paths = [item["path"] for item in packet["changed_files"]]
-  if len(spec_paths) != len(set(spec_paths)) or len(changed_paths) != len(set(changed_paths)):
+  changed_keys = [target_path_key(item) for item in packet["changed_files"]]
+  if len(spec_paths) != len(set(spec_paths)) or len(changed_keys) != len(set(changed_keys)):
     return False
   all_paths = [
     *spec_paths,
-    *changed_paths,
+    *(path for _, path in changed_keys),
     *(item["path"] for item in packet["evidence_bindings"]),
     *(
       item["old_path"]
@@ -1025,7 +1043,7 @@ def packet_valid(packet):
       if target_for_item(item) not in declared:
         return False
   authored_paths = {
-    item["path"]
+    target_path_key(item)
     for item in packet["changed_files"]
     if item["provenance"] == "authored"
   }
@@ -1036,7 +1054,7 @@ def packet_valid(packet):
     return False
   if set(authored_ids).intersection(guard_ids):
     return False
-  if any(binding_index[identifier]["path"] not in authored_paths for identifier in authored_ids):
+  if any(target_path_key(binding_index[identifier]) not in authored_paths for identifier in authored_ids):
     return False
   clause_trace_index = unique_index(context["clause_traces"], "clause_id")
   if clause_trace_index is None or set(clause_trace_index) != {
@@ -1386,9 +1404,15 @@ def authoritative_hunk_ranges(binding_context, packet):
       binding["path"],
       binding["side"],
     )
-    root_verified = verified.get(item_context["review_root"])
+    resolved_root = Path(item_context["review_root"]).expanduser().resolve()
+    verify_key = (
+      str(resolved_root),
+      item_context["authored_diff_base"],
+      item_context["review_head"],
+    )
+    root_verified = verified.get(verify_key)
     if root_verified is None:
-      review_root = Path(item_context["review_root"]).expanduser().resolve()
+      review_root = resolved_root
       top_level = git_output(review_root, ["rev-parse", "--show-toplevel"])
       head = git_output(review_root, ["rev-parse", "HEAD"])
       base_tree = git_output(
@@ -1410,7 +1434,7 @@ def authoritative_hunk_ranges(binding_context, packet):
         and base_tree is not None
         and head_tree is not None
       )
-      verified[item_context["review_root"]] = root_verified
+      verified[verify_key] = root_verified
     if not root_verified:
       return None
     path = binding["path"] if binding["side"] == "head" else binding["old_path"]
@@ -1456,6 +1480,10 @@ def target_context(binding_context, packet):
     return None
   identities = packet_targets(packet)
   if not identities or not identities.issubset(targets):
+    return None
+  spec_file_targets = {(target_for_item(item), item["path"]) for item in packet["spec_files"]}
+  clause_spec_targets = {(target_for_item(item), item["spec_path"]) for item in packet["clauses"]}
+  if spec_file_targets != clause_spec_targets:
     return None
   return {**context, "targets": targets}
 
@@ -1801,9 +1829,9 @@ def inspect_runtime(
         candidate = parse_reviewer_output(block["text"])
         if candidate is not None and candidate.get("reviewer") == "spec-compliance-reviewer":
           reviewer_outputs.append(candidate)
-  model_values = sorted(set(models)) if all(isinstance(value, str) for value in models) else []
-  effort_values = sorted(set(efforts)) if all(isinstance(value, str) for value in efforts) else []
-  agent_id_values = sorted(set(agent_ids)) if all(isinstance(value, str) for value in agent_ids) else []
+  model_values = sorted(set(models)) if all(isinstance(value, str) and value.strip() for value in models) else []
+  effort_values = sorted(set(efforts)) if all(isinstance(value, str) and value.strip() for value in efforts) else []
+  agent_id_values = sorted(set(agent_ids)) if all(isinstance(value, str) and value.strip() for value in agent_ids) else []
   observed_model = model_values[0] if len(model_values) == 1 else "UNAVAILABLE"
   effort = effort_values[0] if len(effort_values) == 1 else "UNAVAILABLE"
   observed_agent_id = agent_id_values[0] if len(agent_id_values) == 1 else "UNAVAILABLE"
@@ -1900,7 +1928,11 @@ def permit_runtime_dir():
 
 
 def safe_session_id(value):
-  return isinstance(value, str) and re.fullmatch(r"[A-Za-z0-9._-]+", value) is not None
+  return (
+    isinstance(value, str)
+    and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", value) is not None
+    and ".." not in value
+  )
 
 
 def permit_path(root, session_id):
@@ -1961,6 +1993,8 @@ def issue_dispatch_permit(session_id, envelope):
   root = permit_runtime_dir()
   path = permit_path(root, session_id)
   current = datetime.now(timezone.utc)
+  if path.is_symlink():
+    raise OSError("untrusted existing permit")
   if path.exists():
     try:
       previous = json.loads(path.read_text())

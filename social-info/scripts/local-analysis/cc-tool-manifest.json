@@ -93,7 +93,7 @@
     "name": "skillevaluator",
     "manager": "uv-git",
     "source": "NVIDIA/SkillEvaluator",
-    "acknowledged_latest": "c3b298c2",
+    "acknowledged_latest": "d717f22c",
     "hold_reason": "釘定既有相容 commit，不隨上游 HEAD 變動自動升級"
   },
   {
@@ -212,7 +212,7 @@
     "manager": "git-fork",
     "path": "~/Desktop/projects/claude-mem-example-owner",
     "source": "thedotmack/claude-mem",
-    "acknowledged_latest": "v15.13.0",
+    "acknowledged_latest": "v15.18.3",
     "hold_reason": "上游新版主體為雲端功能與遙測，本地精簡 fork 維持 v13.35.0"
   },
   {
@@ -235,7 +235,12 @@
     "manager": "git-fork",
     "path": "~/Desktop/projects/VoiceInk",
     "source": "Beingpax/VoiceInk",
-    "acknowledged_latest": "v2.26",
+    "acknowledged_latest": "v2.27",
     "hold_reason": "新版僅為外部串流服務與更新檢查修補，維持本地 v2.25 build"
+  },
+  {
+    "name": "@boxes-dev/cli",
+    "manager": "npm-g",
+    "source": "@boxes-dev/cli"
   }
 ]

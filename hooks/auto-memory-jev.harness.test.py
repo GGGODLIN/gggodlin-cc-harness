@@ -5,14 +5,39 @@ import json
 import os
 from pathlib import Path
 import queue
+import shutil
 import subprocess
 import tempfile
 import threading
 import time
 
 HERE = Path(__file__).resolve().parent
-CLAUDE = (Path.home() / '.local/bin/claude').resolve()
-RULE = (HERE.parent / 'memory/feedback_memory_cluster_maintenance.md').read_text()
+SYNTHETIC_RULE = (
+  '# Synthetic memory cluster maintenance fixture\n\n'
+  '## Tier 1: Write-before-read rules\n\n'
+  '- Check existing cluster indexes before adding standalone entries.\n\n'
+  '## Tier 3: Reference details\n\n'
+  '- Insert new entries before the Maintenance heading.\n'
+)
+
+
+def resolve_claude_bin():
+  candidate = Path.home() / '.local/bin/claude'
+  if candidate.exists():
+    return candidate.resolve()
+  found = shutil.which('claude')
+  return Path(found).resolve() if found else candidate
+
+
+def load_fixture_rule():
+  private_rule = HERE.parent / 'memory/feedback_memory_cluster_maintenance.md'
+  if private_rule.is_file():
+    return private_rule.read_text(encoding='utf-8')
+  return SYNTHETIC_RULE
+
+
+CLAUDE = resolve_claude_bin()
+RULE = load_fixture_rule()
 MODEL = 'type-safe/jev-latest:free'
 REPLY = 'Understood. I will use concise Traditional Chinese answers in future sessions.'
 
@@ -59,7 +84,8 @@ def main():
       elif '/v1/messages' in self.path:
         # Inspect delivery in the actual main request, not the hook's own stdout.
         encoded = json.dumps(body, ensure_ascii=False)
-        requests.append({'memory_context': '[auto-memory:jev:' in encoded,
+        requests.append({'memory_context': '[auto-memory:jev:short]' in encoded,
+                         'tier1_pointer': 'feedback_memory_cluster_maintenance.md 的 Tier 1' in encoded,
                          'full_rules': '## Tier 1:' in encoded})
         mid = 'msg_fixture_' + str(len(requests))
         message = {'id': mid, 'type': 'message', 'role': 'assistant', 'model': 'claude-sonnet-4-5-20250929',
@@ -169,11 +195,10 @@ def main():
       send('Continue the original task.')
       second = results.get(timeout=20)
       assert not second.get('is_error'), 'second_main_result_error'
-      assert len(requests) >= 2 and requests[1]['memory_context'] and requests[1]['full_rules'], 'context_not_in_main_request'
-      wait_for(lambda: bool(list((home / '.claude/hooks/state').glob('long_injected_*'))))
-      marker = next((home / '.claude/hooks/state').glob('long_injected_*'))
-      assert int(marker.read_text()) >= 1
-      assert rule.read_text() == RULE, 'fixture_memory_changed'
+      assert (len(requests) >= 2 and requests[1]['memory_context']
+              and requests[1]['tier1_pointer'] and not requests[1]['full_rules']), 'context_not_in_main_request'
+      assert not list((home / '.claude/hooks/state').glob('long_injected_*'))
+      assert rule.read_text(encoding='utf-8') == RULE, 'fixture_memory_changed'
       assert not list((home / '.claude/hooks/state').glob('trigger_*'))
       assert not list((home / '.claude/hooks/state').glob('checkpoint_*'))
       process.stdin.close()
@@ -182,8 +207,10 @@ def main():
       process.stdout.close()
       process.stderr.close()
       print(json.dumps({'main_requests': len(requests), 'first_request_memory_context': requests[0]['memory_context'],
-                        'second_request_memory_context': requests[1]['memory_context'], 'second_request_full_rules': requests[1]['full_rules'],
-                        'shared_marker_written': True, 'memory_unchanged': True, 'manual_sentinels_untouched': True,
+                        'second_request_memory_context': requests[1]['memory_context'],
+                        'second_request_tier1_pointer': requests[1]['tier1_pointer'],
+                        'second_request_full_rules': requests[1]['full_rules'],
+                        'shared_marker_untouched': True, 'memory_unchanged': True, 'manual_sentinels_untouched': True,
                         'provider_calls_are_local_fixtures': True}))
       print('AUTO_MEMORY_JEV_HARNESS_OK')
   finally:

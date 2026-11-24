@@ -56,13 +56,16 @@ HEALTH = os.path.join(DIR, "rule-family-health.py")
 HOME = os.path.expanduser("~")
 
 TERMINAL = ("done", "killed")
+VERDICTS = ("done", "killed", "kept", "observing", "pending")
+# 刻意不含 beads-aging、publish-candidate、session-audit（規則明訂不進 pending-actions.jsonl）
 ALLOWED_FINDING_CHANNELS = frozenset({
-    "memory", "wiki-candidates", "wiki-cross-link", "wiki-graduation", "wiki-lint",
+    "memory", "memory-conflict", "memory-origin", "wiki-candidates", "wiki-cross-link", "wiki-graduation", "wiki-lint",
     "wiki-stale", "deep-research-pending", "skill-desc-quality", "recap", "codemap",
     "distill", "recurring-errors", "rba-verify", "bumblebee", "symlink", "skill-upstream",
-    "skill-doctor", "tool-updates", "codex-violation", "rules-size", "ledger-lifecycle", "skill-collision",
+    "skill-doctor", "tool-updates", "tool-reliability", "tool-latency", "skill-evidence", "skillevaluator",
+    "codex-violation", "rules-size", "ledger-lifecycle", "skill-collision",
     "agnix", "skill-trigger", "skill-changes", "evidence-level", "ccp-free-watch", "path-rot", "free-pool", "codex-cdp",
-    "session-audit-consume",
+    "session-audit-consume", "failure-mode", "hash-reflow", "habits",
 })
 PATH_RE = re.compile(r"(?<![\w./@-])(~?/[\w./@-]+\.\w{1,6}|[\w-]+\.(?:md|sh|py|js|mjs|json|jsonl|txt|toml))")
 WIKILINK_RE = re.compile(r"\[\[([^\]]+)\]\]")
@@ -86,17 +89,53 @@ def parse_calendar_date(value, label):
     return parsed
 
 
+def parse_positive_int(value, label):
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        sys.exit(f"{label} must be a positive integer")
+    return value
+
+
 def load_ledger(path):
     rows = []
-    with open(path) as f:
+    seen_titles = set()
+    seen_source_keys = set()
+    with open(path, encoding="utf-8") as f:
         for i, line in enumerate(f, 1):
             line = line.strip()
             if not line:
                 continue
             try:
-                rows.append(json.loads(line))
+                row = json.loads(line)
             except ValueError as e:
                 sys.exit(f"ledger line {i} is not valid JSON: {e}")
+            if not isinstance(row, dict):
+                sys.exit(f"ledger line {i} must be a JSON object")
+            title = row.get("title")
+            if not isinstance(title, str) or not title.strip():
+                sys.exit(f"ledger line {i} must include a non-empty string title")
+            if title in seen_titles:
+                sys.exit(f"ledger has duplicate title {title!r}")
+            seen_titles.add(title)
+            status = row.get("status")
+            if status not in VERDICTS:
+                sys.exit(f"ledger line {i} status {status!r} not in {VERDICTS}")
+            parse_positive_int(row.get("count"), f"ledger line {i} count")
+            parse_calendar_date(row.get("first_seen"), f"ledger line {i} first_seen")
+            parse_calendar_date(row.get("last_seen"), f"ledger line {i} last_seen")
+            if "escalate_at" in row and row["escalate_at"] is not None:
+                parse_positive_int(row["escalate_at"], f"ledger line {i} escalate_at")
+            if "next_due" in row and row["next_due"] is not None:
+                parse_calendar_date(row["next_due"], f"ledger line {i} next_due")
+            if "note" in row and row["note"] is not None and not isinstance(row["note"], str):
+                sys.exit(f"ledger line {i} note must be a string")
+            source_key = row.get("source_key")
+            if source_key is not None:
+                if not isinstance(source_key, str) or not SOURCE_KEY_RE.fullmatch(source_key):
+                    sys.exit(f"ledger has invalid source_key {source_key!r}")
+                if source_key in seen_source_keys:
+                    sys.exit(f"ledger has duplicate source_key {source_key!r}")
+                seen_source_keys.add(source_key)
+            rows.append(row)
     return rows
 
 
@@ -202,6 +241,14 @@ def validate_findings(findings):
             sys.exit(f"finding {index} must include a non-empty channel")
         if channel not in ALLOWED_FINDING_CHANNELS:
             sys.exit(f"finding {index} channel {channel!r} is not allowed to write the ledger")
+        title = finding.get("title")
+        if not isinstance(title, str) or not title.strip():
+            sys.exit(f"finding {index} must include a non-empty string title")
+        match = finding.get("match")
+        if match is not None and (not isinstance(match, str) or not match.strip()):
+            sys.exit(f"finding {index} match must be null or a non-empty string")
+        if "note" in finding and finding["note"] is not None and not isinstance(finding["note"], str):
+            sys.exit(f"finding {index} note must be a string")
         source_key = finding.get("source_key")
         if source_key is not None and (not isinstance(source_key, str) or not SOURCE_KEY_RE.fullmatch(source_key)):
             sys.exit(f"finding {index} has invalid source_key {source_key!r}")
@@ -233,6 +280,9 @@ def apply_findings(rows, findings, date):
                 continue
             if row.get("status") in TERMINAL:
                 continue
+            last_seen_date = parse_calendar_date(row.get("last_seen"), f"last_seen {row.get('last_seen')!r}")
+            if run_date < last_seen_date:
+                sys.exit(f"--date {date} is earlier than ledger row {row['title']!r} last_seen {row.get('last_seen')}")
             existing_source_key = row.get("source_key")
             if source_key is not None and existing_source_key not in (None, source_key):
                 sys.exit(f"finding source_key {source_key!r} conflicts with ledger row {m!r}")
@@ -245,18 +295,18 @@ def apply_findings(rows, findings, date):
             due_date = parse_calendar_date(due, f"next_due {due!r}") if due is not None else None
             muted = due_date is not None and run_date < due_date
             if row.get("last_seen") != date and not muted:
-                row["count"] = int(row.get("count", 0)) + 1
+                row["count"] = parse_positive_int(row.get("count"), "count") + 1
             row["last_seen"] = date
             touched.add(row["title"])
         else:
             title = f.get("title")
-            if not title or title in by_title:
+            if not isinstance(title, str) or not title.strip() or title in by_title:
                 unmatched.append(f)
                 continue
             if source_key is not None and source_key in by_source_key:
                 sys.exit(f"finding source_key {source_key!r} already exists; match must name its ledger title")
             row = {"title": title, "first_seen": date, "last_seen": date,
-                   "count": 1, "status": "pending", "note": f.get("note", "")}
+                   "count": 1, "status": "pending", "note": f.get("note") or ""}
             if source_key is not None:
                 row["source_key"] = source_key
             rows.append(row)
@@ -268,26 +318,33 @@ def apply_findings(rows, findings, date):
     return touched, added, unmatched
 
 
-VERDICTS = ("done", "killed", "kept", "observing", "pending")
-
-
 def apply_decisions(rows, decisions, date):
+    run_date = parse_calendar_date(date, "date")
     by_title = {r.get("title"): r for r in rows}
     applied = []
-    for d in decisions:
+    for index, d in enumerate(decisions):
+        if not isinstance(d, dict):
+            sys.exit(f"--decide item {index} must be a JSON object")
         m = d.get("match")
+        if not isinstance(m, str) or not m.strip():
+            sys.exit(f"--decide item {index} match must be a non-empty string")
         v = d.get("verdict")
         if v not in VERDICTS:
             sys.exit(f"verdict {v!r} not in {VERDICTS} (match={m!r})")
+        if "note" in d and not isinstance(d["note"], str):
+            sys.exit(f"--decide item {index} note must be a string (match={m!r})")
         row = by_title.get(m)
         if row is None:
             sys.exit(f"--decide match {m!r} does not exist in the ledger; no partial write performed")
+        last_seen_date = parse_calendar_date(row.get("last_seen"), f"last_seen {row.get('last_seen')!r}")
+        if run_date < last_seen_date:
+            sys.exit(f"--date {date} is earlier than ledger row {m!r} last_seen {row.get('last_seen')}")
         row["status"] = v
         row["last_seen"] = date
         if d.get("note"):
             row["note"] = (row.get("note", "") + " ｜ " if row.get("note") else "") + d["note"]
-        if d.get("escalate_at") is not None:
-            row["escalate_at"] = int(d["escalate_at"])
+        if "escalate_at" in d:
+            row["escalate_at"] = parse_positive_int(d["escalate_at"], f"escalate_at {d['escalate_at']!r}")
         if "next_due" in d:
             parse_calendar_date(d["next_due"], f"next_due {d['next_due']!r}")
             row["next_due"] = d["next_due"]
@@ -297,8 +354,10 @@ def apply_decisions(rows, decisions, date):
 
 def gate(entry, date, has_signal_today):
     status = entry.get("status")
-    count = int(entry.get("count", 0))
+    count = parse_positive_int(entry.get("count"), "count")
     esc = entry.get("escalate_at")
+    if esc is not None:
+        esc = parse_positive_int(esc, f"escalate_at {esc!r}")
     due = entry.get("next_due")
     run_date = parse_calendar_date(date, "date")
     due_date = parse_calendar_date(due, f"next_due {due!r}") if due is not None else None
@@ -310,11 +369,11 @@ def gate(entry, date, has_signal_today):
     if status in ("observing", "kept"):
         if esc is None:
             return {"bucket": "silent", "reason": f"status={status} 無 escalate_at → 完全靜默"}
-        if count < int(esc):
+        if count < esc:
             return {"bucket": "silent", "reason": f"status={status} count {count} < escalate_at {esc}"}
         return {"bucket": "forced_high", "reason": f"status={status} count {count} >= escalate_at {esc}"}
     if esc is not None:
-        if count < int(esc):
+        if count < esc:
             return {"bucket": "bottom_only", "reason": f"count {count} < escalate_at {esc} → 只列沉底行"}
         return {"bucket": "forced_high", "reason": f"count {count} >= escalate_at {esc}"}
     if status == "pending" and count >= 3:
@@ -346,13 +405,13 @@ def late_unconsumed(rows, date, report_dir):
     run_date = parse_calendar_date(date, "date")
     items = []
     for channel in LATE_REPORT_CHANNELS:
-        for delta in range(1, 8):
+        for delta in range(1, min(8, run_date.toordinal())):
             d = (run_date - timedelta(days=delta)).isoformat()
             path = os.path.join(report_dir, f"{d}-{channel}.md")
-            if not os.path.exists(path):
+            if not os.path.isfile(path):
                 continue
             try:
-                with open(path, encoding="utf-8") as handle:
+                with open(path, encoding="utf-8", errors="replace") as handle:
                     content = handle.read()
             except OSError:
                 break
@@ -424,7 +483,7 @@ def render(packet):
     if packet["unmatched_findings"]:
         A(f"⚠️ 無法併入的 finding {len(packet['unmatched_findings'])}（match 指向不存在的 title 或標題重複）")
         for f in packet["unmatched_findings"]:
-            A(f"    - {f.get('title', '')[:70]}  match={f.get('match')!r}")
+            A(f"    - {(f.get('title') or '')[:70]}  match={f.get('match')!r}")
     if packet.get("late_unconsumed_reports"):
         A(f"🚨 漏收週報 {len(packet['late_unconsumed_reports'])}（產出晚於當日 digest、至今無消費收據）")
         for it in packet["late_unconsumed_reports"]:
@@ -479,10 +538,13 @@ def main():
 
     parse_calendar_date(a.date, "--date")
 
-    ledger = os.path.abspath(a.ledger)
+    ledger = os.path.realpath(a.ledger)
     if a.findings:
-        with open(a.findings) as handle:
-            findings = json.load(handle)
+        try:
+            with open(a.findings, encoding="utf-8") as handle:
+                findings = json.load(handle)
+        except (OSError, ValueError) as e:
+            sys.exit(f"failed to load findings JSON: {e}")
     else:
         findings = []
     if not isinstance(findings, list):
@@ -490,8 +552,11 @@ def main():
     validate_findings(findings)
 
     if a.decide:
-        with open(a.decide) as handle:
-            decisions = json.load(handle)
+        try:
+            with open(a.decide, encoding="utf-8") as handle:
+                decisions = json.load(handle)
+        except (OSError, ValueError) as e:
+            sys.exit(f"failed to load decide JSON: {e}")
     else:
         decisions = []
     if not isinstance(decisions, list):

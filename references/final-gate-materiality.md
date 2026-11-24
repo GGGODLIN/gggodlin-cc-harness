@@ -48,3 +48,4 @@ main 把審查或顧問意見交給使用者、或據以動手修改之前，用
 - 變更完整性的不報條件：`review-standards/change-integrity.md`
 - 嚴重度校準的降級與反向護欄：`references/severity-calibration.md`
 - 顧問建議回來後的修改與停輪邊界（優先減法、新回歸先比較撤回、停輪與授權分離）：`commands/advisor.md`
+- harness／規則／hook／skill／workflow 機制迭代的姊妹標準（H1–H4、N1–N4，互留索引不合併）：`references/mechanism-iteration-materiality.md`

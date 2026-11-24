@@ -1,7 +1,8 @@
 ---
 name: strategic-compact
-description: Suggests manual context compaction at logical intervals to preserve context through task phases rather than arbitrary auto-compaction.
-origin: ECC
+description: Use when transitioning between major task phases (research → plan → implement → test) or evaluating when to run manual /compact to preserve key context before context pressure degrades coherence. Do not use mid-implementation or for short single-phase tasks.
+metadata:
+  origin: ECC
 ---
 
 # Strategic Compact Skill

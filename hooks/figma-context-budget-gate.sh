@@ -7,8 +7,9 @@
 set -u
 
 INPUT=$(cat)
-STATE_DIR=${FIGMA_GATE_STATE_DIR:-$HOME/.claude/hooks/state}
-DISABLED=${FIGMA_GATE_DISABLED_SENTINEL:-$STATE_DIR/figma-gate.disabled}
+HOME_DIR="${HOME:-}"
+STATE_DIR=${FIGMA_GATE_STATE_DIR:-${HOME_DIR:+$HOME_DIR/.claude/hooks/state}}
+DISABLED=${FIGMA_GATE_DISABLED_SENTINEL:-${STATE_DIR:+$STATE_DIR/figma-gate.disabled}}
 PYTHON=${FIGMA_GATE_PYTHON:-$(command -v python3 2>/dev/null || true)}
 
 json_output() {
@@ -80,7 +81,8 @@ try:
   value=json.loads(sys.stdin.read())
   if not isinstance(value,dict): raise ValueError()
   tool_input=value.get("tool_input",{})
-  skill=tool_input.get("skill","") if isinstance(tool_input,dict) else ""
+  raw_skill=tool_input.get("skill","") if isinstance(tool_input,dict) else ""
+  skill="" if raw_skill is None else raw_skill
   fields=[value.get("hook_event_name",""),value.get("tool_name",""),skill,value.get("session_id","")]
   if not all(isinstance(field,str) for field in fields): raise ValueError()
   if any("\x1f" in field for field in fields): raise ValueError()
@@ -149,7 +151,7 @@ PY
 }
 
 FIELDS=$(printf '%s' "$INPUT" | json_fields 2>/dev/null) || {
-  if [ -e "$DISABLED" ] || [ -L "$DISABLED" ]; then
+  if [ -n "$DISABLED" ] && { [ -e "$DISABLED" ] || [ -L "$DISABLED" ]; }; then
     printf '%s\n' "[figma-context-budget-gate] disabled by $DISABLED" >&2
     exit 0
   fi
@@ -157,7 +159,7 @@ FIELDS=$(printf '%s' "$INPUT" | json_fields 2>/dev/null) || {
 }
 IFS=$'\x1f' read -r EVENT TOOL SKILL SESSION <<< "$FIELDS"
 
-if [ -e "$DISABLED" ] || [ -L "$DISABLED" ]; then
+if [ -n "$DISABLED" ] && { [ -e "$DISABLED" ] || [ -L "$DISABLED" ]; }; then
   printf '%s\n' "[figma-context-budget-gate] disabled by $DISABLED" >&2
   if [ "$EVENT" = "PreToolUse" ]; then
     pretool_allow "gate disabled by $DISABLED"

@@ -3,7 +3,11 @@
 # 用法：bash ~/.claude/hooks/skill-install-scan.test.sh
 # 改 skill-install-scan.sh 後必重跑。
 set -u
-HOOK="$HOME/.claude/hooks/skill-install-scan.sh"
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+HOOK="$SCRIPT_DIR/skill-install-scan.sh"
+FIXTURE=$(mktemp -d) || exit 1
+trap 'rm -rf "$FIXTURE"' EXIT
+export HOME="$FIXTURE/home"
 USER_EMAIL="you@example.com"
 pass=0; fail=0
 
@@ -12,19 +16,16 @@ run_hook() {
 }
 
 # 1. known-good：tracked + 自家 author → 靜默 skip
-GOOD_FILE=""
-while IFS= read -r rel; do
-  author=$(git -C "$HOME/.claude" log -1 --format=%ae -- "$rel" 2>/dev/null || echo "")
-  if [[ "$author" == "$USER_EMAIL" ]]; then GOOD_FILE="$HOME/.claude/$rel"; break; fi
-done < <(git -C "$HOME/.claude" ls-files 'skills/*' 'commands/*' | head -20)
+GOOD_FILE="$HOME/.claude/skills/fixture/SKILL.md"
+mkdir -p "$(dirname "$GOOD_FILE")" || exit 1
+printf '# Fixture\n' > "$GOOD_FILE" || exit 1
+git -C "$HOME/.claude" init -q || exit 1
+git -C "$HOME/.claude" add -- "$GOOD_FILE" || exit 1
+git -C "$HOME/.claude" -c user.name=Fixture -c user.email="$USER_EMAIL" commit -qm fixture || exit 1
 
-if [[ -n "$GOOD_FILE" ]]; then
-  out=$(run_hook "$GOOD_FILE")
-  if [[ -z "$out" ]]; then echo "PASS known-good ($GOOD_FILE → silent)"; ((pass++))
-  else echo "FAIL known-good：自家 tracked 檔誤觸發"; ((fail++)); fi
-else
-  echo "SKIP known-good：找不到自家 author 的 tracked 檔"
-fi
+out=$(run_hook "$GOOD_FILE")
+if [[ -z "$out" ]]; then echo "PASS known-good ($GOOD_FILE → silent)"; ((pass++))
+else echo "FAIL known-good：自家 tracked 檔誤觸發"; ((fail++)); fi
 
 # 2. known-bad：untracked skills/ 路徑 → 觸發且含第 (4) 類導流特徵
 out=$(run_hook "$HOME/.claude/skills/zzz-fixture-nonexistent/SKILL.md")

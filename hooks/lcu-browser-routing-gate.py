@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # 防漂移型 PreToolUse gate（lcu-browser-routing-gate）：
 # Threat model：
-# - 對誰有效：防誠實但手滑的模型在呼叫 `mcp__lcu__js` 時：(1) 寫出 LCU Tab 不存在的 Playwright 方法
-#   （`.playwright.evaluate(`、`.evaluate(`、`tab.waitForEvent(`、`.page(`、`.waitForLoadState(`、`.setInputFiles(`；保留官方支援的
-#   `tab.playwright.waitForEvent("filechooser")` 與 `tab.playwright.locator(...).click()` 上傳入口）；或 (2) 在同一次 `mcp__lcu__js` 呼叫內對數字索引連續執行
+# - 對誰有效：防誠實但手滑的模型在呼叫 `mcp__lcu__js` 時：(1) 呼叫本機政策禁用的 `.playwright.evaluate(`／`evaluate(` 與 `cua.getState(`（防傾印全機無關分頁），
+#   或寫出 LCU 不提供的方法（`cua.listTabs(`、`tab.getState(`、`tab.waitForEvent(`、`.page(`、`.waitForLoadState(`、`.setInputFiles(`、`.allInnerTexts(`；保留官方支援的
+#   `cua.createBrowserTab(browserName, url, ...)`、`cua.getTab({ url })`、`tab.playwright.waitForEvent("filechooser")` 與 `tab.playwright.locator(...).click()` 上傳入口）；或 (2) 在同一次 `mcp__lcu__js` 呼叫內對數字索引連續執行
 #   2 次以上點擊（`.click(56)` 緊接 `.click(65)`），未先結束本次呼叫讀回新鮮 AX 狀態再選下一個索引。
 # - 明文不保證：
 #   1. 字串比對型 gate 不承諾完整 JS AST 語意解析，只認常見方法呼叫形狀；認不出來或單純連續 `.setValue(`／`.paste(` 填表則放行。
@@ -40,11 +40,14 @@ UNSUPPORTED_PLAYWRIGHT_RE = re.compile(
   r'|\.\s*scrollIntoViewIfNeeded\s*\('
   r'|(?<!playwright)\.\s*waitForEvent\s*\('
   r'|\.\s*inputValue\s*\('
-  r'|\b(?!cua\b)[A-Za-z_$][A-Za-z0-9_$]*\s*\.\s*getState\s*\('
+  r'|\.\s*allInnerTexts\s*\('
+  r'|(?:[A-Za-z_$][A-Za-z0-9_$]*\s*)?\.\s*getState\s*\('
+  r'|(?:[A-Za-z_$][A-Za-z0-9_$]*\s*)?\.\s*listTabs\s*\('
   r'|\b(?!cua\b)[A-Za-z_$][A-Za-z0-9_$]*\s*\.\s*snapshot\s*\('
   r'|\b(?!cua\b|Promise\b)[A-Za-z_$][A-Za-z0-9_$]*\s*\.\s*wait\s*\()'
 )
 NUMERIC_CLICK_RE = re.compile(r'\.\s*(?:click|doubleClick|rightClick)\s*\(\s*(\d+)\b')
+BARE_NUMERIC_GET_TAB_RE = re.compile(r'\bcua\s*\.\s*getTab\s*\(\s*\d+\s*[),]')
 
 
 def strip_comments(code):
@@ -98,12 +101,26 @@ def inspect_lcu_code(code):
       'unsupported-playwright-api',
       token,
       (
-        '偵測到 `mcp__lcu__js` 呼叫了 LCU Tab 不支援的 Playwright 方法（`'
+        '偵測到 `mcp__lcu__js` 呼叫了本機禁用或不支援的方法（`'
         + token
-        + '`）。依 `browser-routing.md`，LCU Tab 不提供 `.playwright.evaluate`、`tab.evaluate`、`.page()`、'
-        '`waitForLoadState` 或 `setInputFiles`；請改用 LCU 原生方法（如 `await tab.getAXState()`、'
-        '`await tab.click(uid)`、`await tab.setValue(uid, text)`；僅無 AX input 的檔案上傳例外可用 '
-        '`tab.playwright.locator(...).click()`）。'
+        + '`）。依 `browser-routing.md`，本機政策禁止呼叫 `.playwright.evaluate`／`evaluate` 與 `cua.getState()`'
+        '（查單一已知分頁請用 `cua.getTab({ url })`，開新分頁請用 `cua.createBrowserTab("chrome", url, { sessionName })`），'
+        '且 LCU 不提供 `cua.listTabs()`、`.page()`、`waitForLoadState`、`setInputFiles` 或 `.allInnerTexts()`；'
+        '請改用 LCU 原生方法（如 `await tab.getAXState()`、`await tab.click(uid)`、`await tab.setValue(uid, text)`；'
+        '僅無 AX input 的檔案上傳例外可用 `tab.playwright.locator(...).click()`）。'
+      ),
+    )
+  bare_tab = BARE_NUMERIC_GET_TAB_RE.search(cleaned)
+  if bare_tab:
+    token = bare_tab.group(0).strip()
+    return (
+      'bare-numeric-get-tab',
+      token,
+      (
+        '偵測到 `cua.getTab(...)` 傳入了裸數字 ID（`'
+        + token
+        + '`）。`cua.getTab` 只接受物件參數（例如 `await cua.getTab({ url: "https://..." })`），'
+        '傳純數字會觸發 runtime TypeError（Cannot use \'in\' operator）；請改傳 `{ url }` 查詢物件。'
       ),
     )
   clicks = [m.group(0).strip() for m in NUMERIC_CLICK_RE.finditer(cleaned)]

@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 
 
-COMMAND_PATH = Path(os.environ.get("PR_REVIEW_COMMAND_PATH", Path.home() / ".claude/commands/pr-review.md"))
+COMMAND_PATH = Path(os.environ.get("PR_REVIEW_COMMAND_PATH", Path(__file__).resolve().parents[1] / "pr-review.md"))
 
 
 class PrReviewReportProjectionContractTest(unittest.TestCase):
@@ -126,7 +126,7 @@ class PrReviewReportProjectionContractTest(unittest.TestCase):
     self.assertIn("不得把「外部額度席沒選」寫成外部成本為零", step)
     for unchanged in (
       "codex-companion.mjs",
-      "--model gpt-6.1-sol --effort xhigh",
+      "--model gpt-6.2-sol --effort xhigh",
       "**Batch 是唯一選項**",
       "every non-strict-liability finding from a selected CC source cell",
     ):

@@ -1,48 +1,50 @@
 #!/bin/bash
 umask 077
-# memory-ripple.sh — PostToolUse(Write|Edit) hook（v3 Gemini-sync，2026-08-23）
-# 寫入 ~/.claude/memory/ 時：機械 regex 命中＋同主題兄弟檔 → 機械提醒；每個事件同步問一次 Gemini
-# （fallback 由 model-routing.env 的 GEMINI_FLASH_MODEL 指定、12s 單次）：機械命中且 Gemini 判 false → 取消提醒；機械未命中且 Gemini 判 true
-# → 也算命中。命中只輸出一行「已記錄」提示，triage 交隔天 memory channel。提示型 gate：Gemini 任何失敗一律 fail-open（機械命中照出、未命中靜默）。
-# Kill switch：MEMORY_RIPPLE_DISABLE_GEMINI=1（純機械）。v2 legacy pipeline 已拆除。
+# memory-ripple.sh — PostToolUse(Write|Edit) hook（v3 同步判官，主判官為 Groq，Gemini Flash 為備援）
+# 寫入 ~/.claude/memory/ 時：機械 regex 命中＋同主題兄弟檔 → 機械提醒；每個事件同步問一次外部判官
+# （主判官預設 groq-qwen-3.8-27b，備援為 Gemini Flash／Jev、12s 單次；MEMORY_RIPPLE_FALLBACK_MODEL 僅在 MEMORY_RIPPLE_TEST_MODE=1 測試模式覆寫）：機械命中且判官判 false → 取消提醒；機械未命中且判官判 true
+# → 也算命中。命中只輸出一行「已記錄」提示，triage 交隔天 memory channel。提示型 gate：判官任何失敗一律 fail-open（機械命中照出、未命中靜默）。
+# Kill switch：MEMORY_RIPPLE_DISABLE_GEMINI=1（歷史遺留變數名，設為 1 即停用全部外部判官改純機械）；MEMORY_RIPPLE_DISABLE_JEV=1（僅停用第三層 Jev 備援判官）。v2 legacy pipeline 已拆除。
 # Trial entry: ~/Desktop/projects/.claude/trials/active.md「memory-ripple hook」；
 # audit log 全量記錄每次 memory 寫入（fire 與否都記），review 時對照 stale 發現算 recall。
 
 TEST_MODE=false
 [ "${MEMORY_RIPPLE_TEST_MODE:-0}" = "1" ] && TEST_MODE=true
 
-STOPWORDS='^(user|feedback|reference|project|trial|eval|setup|config|deployed|pending|progress|review|daily|weekly|index|memory|hook|skill|claude|model|profile|ended|closed|completed|subscription|20[0-9]{2}|[0-9]+)$'
-# 兄弟檔規則只有這一份：hook 寫 audit 時用，隔天 memory channel（M-1）用 `--siblings <file>` 重算。
-# audit log 只記 siblings 計數不記清單，所以 channel 必須能用同一套規則取回同一份名單。
-ripple_tokens() {
-  basename "$1" .md \
-    | sed -E 's/^(user|feedback|reference|project)_//; s/_20[0-9]{2}([_-][0-9]{2})*$//' \
-    | tr '_' '\n' | grep -E '.{3,}' | grep -viE "$STOPWORDS" | head -3
-}
-ripple_siblings() {
-  local file="$1" dir="$2" toks tok
-  toks=$(ripple_tokens "$file")
-  [ -n "$toks" ] || return 0
-  for tok in $toks; do
-    grep -ril --include='*.md' -- "$tok" "$dir" 2>/dev/null
-  done | sort -u | grep -vF "$file" | grep -vE '/(MEMORY|_orphan_registry)\.md$'
-}
-if [ "${1:-}" = "--siblings" ]; then
-  [ -n "${2:-}" ] || { echo "usage: memory-ripple.sh --siblings <memory file>" >&2; exit 2; }
-  SIB_DIR="$HOME/.claude/memory"
-  [ "$TEST_MODE" = true ] && [ -n "${MEMORY_RIPPLE_DIR:-}" ] && SIB_DIR="$MEMORY_RIPPLE_DIR"
-  SIB_DIR=$(/usr/bin/python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$SIB_DIR")
-  SIB_FILE=$(/usr/bin/python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$2")
-  ripple_siblings "$SIB_FILE" "$SIB_DIR"
-  exit 0
-fi
-
-INPUT=$(cat)
 RUNTIME="$(dirname "$0")/memory-ripple-runtime.py"
 if [ "$TEST_MODE" = true ] && [ -n "${MEMORY_RIPPLE_RUNTIME:-}" ]; then
   RUNTIME="$MEMORY_RIPPLE_RUNTIME"
 fi
-FILE=$(echo "$INPUT" | jq -r '.tool_input.file_path // empty' 2>/dev/null)
+
+# 兄弟檔檢索與詞界 BM25 排序統一收斂於 memory-ripple-runtime.py（siblings 子命令）：
+# PostToolUse 計數、Gemini 補漏與隔天 memory channel（M-1）`--siblings`／`/deep-check` `--with-scores` 共用同一份規則。
+if [ "${1:-}" = "--siblings" ]; then
+  shift
+  SIB_FMT="paths"
+  if [ "${1:-}" = "--with-scores" ]; then
+    SIB_FMT="scores"
+    shift
+  fi
+  [ -n "${1:-}" ] && [ "$#" -eq 1 ] || { echo "usage: memory-ripple.sh --siblings [--with-scores] <memory file>" >&2; exit 2; }
+  SIB_DIR="$HOME/.claude/memory"
+  [ "$TEST_MODE" = true ] && [ -n "${MEMORY_RIPPLE_DIR:-}" ] && SIB_DIR="$MEMORY_RIPPLE_DIR"
+  jq -cn --arg file "$1" --arg dir "$SIB_DIR" --arg fmt "$SIB_FMT" '{file:$file,dir:$dir,format:$fmt}' | "$RUNTIME" siblings
+  exit $?
+fi
+
+INPUT=$(cat)
+FILE=$(printf '%s' "$INPUT" | jq -r 'if type == "object" and (.tool_input | type) == "object" and (.tool_input.file_path | type) == "string" then .tool_input.file_path else "" end' 2>/dev/null)
+[ -n "$FILE" ] || exit 0
+
+# Fast-path: in normal mode, non-symlink files outside any memory/.claude path cannot resolve inside ~/.claude/memory.
+if [ "$TEST_MODE" = false ]; then
+  case "$FILE" in
+    */memory/*|*/.claude*/*) ;;
+    *)
+      [ ! -L "$FILE" ] && exit 0
+      ;;
+  esac
+fi
 
 MEM_DIR="$HOME/.claude/memory"
 if [ "$TEST_MODE" = true ] && [ -n "${MEMORY_RIPPLE_DIR:-}" ]; then
@@ -158,25 +160,26 @@ if [ -z "$HITS" ]; then
   fi
 fi
 
-TOKENS=$(ripple_tokens "$FILE")
-TOKEN_LABEL=$(printf '%s\n' "$TOKENS" | paste -sd' ' -)
-
-SIBLINGS=""
 SIB_COUNT=0
 DISPLAY_COUNT=0
 LEAF_DISPLAY_COUNT=0
 INDEX_DISPLAY_COUNT=0
-if [ -n "$HITS" ] && [ -n "$TOKENS" ]; then
-  ALL_SIBLINGS=$(ripple_siblings "$FILE" "$MEM_DIR")
-  if [ -n "$ALL_SIBLINGS" ]; then
-    SIB_COUNT=$(printf '%s\n' "$ALL_SIBLINGS" | wc -l | tr -d ' ')
-    LEAF_SIBLINGS=$(printf '%s\n' "$ALL_SIBLINGS" | grep -vE '/(_index_[^/]*|_INDEX)\.md$' | head -6)
-    INDEX_SIBLINGS=$(printf '%s\n' "$ALL_SIBLINGS" | grep -E '/(_index_[^/]*|_INDEX)\.md$' | head -2)
-    [ -n "$LEAF_SIBLINGS" ] && LEAF_DISPLAY_COUNT=$(printf '%s\n' "$LEAF_SIBLINGS" | wc -l | tr -d ' ')
-    [ -n "$INDEX_SIBLINGS" ] && INDEX_DISPLAY_COUNT=$(printf '%s\n' "$INDEX_SIBLINGS" | wc -l | tr -d ' ')
-    SIBLINGS=$(printf '%s\n%s\n' "$LEAF_SIBLINGS" "$INDEX_SIBLINGS" | sed '/^$/d')
-    DISPLAY_COUNT=$((LEAF_DISPLAY_COUNT + INDEX_DISPLAY_COUNT))
+SIB_COMPUTED=false
+load_sib_summary() {
+  [ "$SIB_COMPUTED" = true ] && return 0
+  SIB_COMPUTED=true
+  [ -x "$RUNTIME" ] || return 0
+  local sib_summary
+  sib_summary=$(jq -cn --arg file "$FILE" --arg dir "$MEM_DIR" '{file:$file,dir:$dir,format:"summary"}' | "$RUNTIME" siblings 2>/dev/null || true)
+  if [ -n "$sib_summary" ]; then
+    SIB_COUNT=$(printf '%s' "$sib_summary" | jq -r '.siblings // 0' 2>/dev/null || echo 0)
+    DISPLAY_COUNT=$(printf '%s' "$sib_summary" | jq -r '.displayed // 0' 2>/dev/null || echo 0)
+    LEAF_DISPLAY_COUNT=$(printf '%s' "$sib_summary" | jq -r '.leaf_displayed // 0' 2>/dev/null || echo 0)
+    INDEX_DISPLAY_COUNT=$(printf '%s' "$sib_summary" | jq -r '.index_displayed // 0' 2>/dev/null || echo 0)
   fi
+}
+if [ -n "$HITS" ]; then
+  load_sib_summary
 fi
 
 MATCHED="$([ -n "$HITS" ] && echo true || echo false)"
@@ -220,6 +223,7 @@ if [ "$MECHANICAL_FIRED" = true ]; then
   fi
 elif [ "$GEMINI_SHOULD_FIRE" = true ] && [ -n "$GEMINI_MESSAGE" ]; then
   FIRED=true
+  load_sib_summary
 fi
 
 AUDIT_RECORD=$(jq -cn --arg ts "$(date '+%Y-%m-%dT%H:%M:%S%z')" --arg file "$BASE" \

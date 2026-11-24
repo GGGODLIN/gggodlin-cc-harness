@@ -159,6 +159,27 @@ class DownstreamDifferencesSurvive(unittest.TestCase):
     self.assertIn("未貼出落點原文", text)
     self.assertIn("未貼出測試 diff 原文", text)
 
+  def test_mutation_testing_template_spells_out_file_snapshot_fields(self):
+    """範本只提模式名、沒列欄位時，worker 會列多個檔，稽查員一行都不讀。"""
+    text = read(CALLERS["mutation-testing"])
+    self.assertIn("AUDIT_INPUT_MODE: FILE_SNAPSHOT\nSNAPSHOT_PATH:", text)
+    self.assertIn("SNAPSHOT_TOTAL_LINES:", text)
+    self.assertRegex(text, r"合成(單一|一份)")
+
+  def test_mutation_testing_unread_audit_is_skipped_and_handed_up(self):
+    """沒讀到交付物的稽查判不出對錯，標 FAILED 會把已做好的分類一起作廢。"""
+    text = read(CALLERS["mutation-testing"])
+    self.assertIn("SKIPPED (稽查員沒讀到交付物)", text)
+    self.assertIn("READ_RANGE: 未讀", text)
+    self.assertIn("同一回合不重派", text)
+    self.assertRegex(text, r"上一層.{0,40}下一回合|下一回合.{0,40}上一層")
+
+  def test_mutation_testing_auditor_model_matches_definition(self):
+    agent = read("agents/skill-verify-auditor.md")
+    model = re.search(r"^model:\s*(\S+)", agent, re.M).group(1)
+    effort = re.search(r"^effort:\s*(\S+)", agent, re.M).group(1)
+    self.assertIn(f"{model}+{effort}", read(CALLERS["mutation-testing"]))
+
   def test_check_my_stack_requires_real_auditor_completion_before_presenting(self):
     text = read(CALLERS["check-my-stack"])
     self.assertIn("必須先取得該 `skill-verify-auditor` 的真實完成結果", text)

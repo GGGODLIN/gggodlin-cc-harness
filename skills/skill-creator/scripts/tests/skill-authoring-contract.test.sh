@@ -2,7 +2,8 @@
 # Modified from the original work at https://github.com/anthropics/skills/tree/main/skills/skill-creator (Apache-2.0, copyright Anthropic, PBC). See THIRD_PARTY_NOTICES.md.
 set -euo pipefail
 
-SKILL="${HOME}/.claude/skills/skill-creator/SKILL.md"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SKILL="${SCRIPT_DIR}/../../SKILL.md"
 PASS=0
 FAIL=0
 
@@ -47,6 +48,7 @@ assert_grep "agent final is not behavior proof" 'agent final.*不算.*證據'
 assert_grep "excerpt runners declare their evidence boundary" '節錄式 runner.*節錄邊界.*out-of-scope'
 assert_grep "unreachable worker stops invalid reruns" 'worker 不可實例化.*行為驗證不可得.*caller.*產物'
 assert_grep "behavior tests cannot bypass self-verify quota" '行為驗證.*Self-Verify.*一次 auditor.*不得.*例外'
+assert_grep "session-start snapshot targets use independent Herdr seat or user-named claude -p on active load path" 'CLAUDE\.md.*rules/.*RED、GREEN 與 REFACTOR.*Herdr 唯讀席位.*點名.*claude -p.*常駐載入路徑'
 # Item 15 (manual Collie palette sync through commands.toml) was retired 2026-10-14: the fork's
 # bridge reads the skill and command files itself (Collie ADR 9009). It must not come back.
 assert_absent "retired Collie palette sync stays out of closeout" '接第 15 項 Collie 面板清單'
@@ -83,6 +85,9 @@ assert_absent "retired Codex entry sync is not an authoring step" 'Codex 端入�
 assert_absent "frontmatter does not ban classified optional fields" 'Do not include any other fields in YAML frontmatter'
 assert_absent "no-op does not escalate vague adjectives" 'weak leading word.*relentless'
 assert_grep "no-op rewrites vague adjectives as observable criteria" '模糊形容詞.*可觀察結果.*驗證條件.*不要只換成更強的形容詞'
+assert_grep "overfitting and always-on bloat check in step 1" '單一對話偶發錯誤過擬合.*不塞入 always-on'
+assert_grep "inventory uses thin table plus cluster detail files" '薄主表＋詳檔雙層結構.*≤180 字元.*skills/inventory/'
+assert_grep "inventory requires partial read via grep and offset" '局部讀取紀律.*grep -n.*offset.*禁止整檔讀入'
 assert_absent "superpowers writing dependency removed" 'superpowers:writing-skills'
 
 printf 'PASS=%s FAIL=%s\n' "$PASS" "$FAIL"
